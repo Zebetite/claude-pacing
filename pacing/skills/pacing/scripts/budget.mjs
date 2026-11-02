@@ -68,7 +68,7 @@ if (argv[0] === 'log') {
   process.exit(0);
 }
 
-const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'now', 'dry'];
+const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry'];
 const opt = {};
 const unknown = [];
 for (let i = 0; i < argv.length; i++) {
@@ -81,7 +81,8 @@ for (let i = 0; i < argv.length; i++) {
   }
 }
 const usage = () => {
-  console.log('usage: node budget.mjs --all <pct> --reset <ISO> [--premium <pct>] [--five <pct>] [--five-reset <ISO>] [--session <model>] [--context <pct>] [--now <ISO>] [--dry]');
+  console.log('usage: node budget.mjs --all <pct> --reset <ISO> [--premium <pct>] [--five <pct>] [--five-reset <ISO>] [--session <model>] [--context <pct>]');
+  console.log('                      [--extra-spent <amount> --extra-limit <amount> [--extra-currency <code>]] [--now <ISO>] [--dry]');
   console.log('       node budget.mjs log [n]');
   console.log('       a meter the plan does not have: pass - for its percent');
   process.exit(1);
@@ -95,6 +96,11 @@ const used = Number(opt.all);
 const prem = premium ? num(opt.premium !== undefined ? opt.premium : opt.fable) : null;
 const five = num(opt.five);
 const context = num(opt.context);
+// extra usage: past 100 % the work goes on and is charged, when the plan allows it
+const extraSpent = num(opt['extra-spent']);
+const extraLimit = num(opt['extra-limit']);
+const extraCurrency = opt['extra-currency'] || '';
+const extraOn = extraSpent !== null && extraLimit !== null && extraLimit > 0;
 const reset = new Date(opt.reset);
 const fiveReset = opt['five-reset'] ? new Date(opt['five-reset']) : null;
 const now = opt.now ? new Date(opt.now) : new Date();
@@ -210,8 +216,41 @@ if (trend) {
 }
 if (five !== null) {
   const resetsIn = fiveReset ? Math.max(0, Math.round((fiveReset - now) / 60000)) : null;
+  // the pace inside the window: the oldest reading of this window, at least
+  // 20 min old, whose value is not above the current one (a drop means the
+  // window reset in between)
+  let fiveTrend = null;
+  if (fiveReset) {
+    const windowStart = fiveReset.getTime() - 5 * HOUR;
+    const prevFive = readLog().filter(e => e.five != null && new Date(e.t) >= windowStart && now - new Date(e.t) >= 20 * 60000 && e.five <= five);
+    if (prevFive.length) {
+      const e = prevFive[0];
+      const h = (now - new Date(e.t)) / HOUR;
+      const rate = (five - e.five) / h;
+      const hoursLeft = Math.max(0, (fiveReset - now) / HOUR);
+      const projected = five + rate * hoursLeft;
+      const reach = rate > 0 && projected > 100 ? new Date(now.getTime() + ((100 - five) / rate) * HOUR) : null;
+      fiveTrend = { rate, projected, reach };
+    }
+  }
   console.log('5-hour window ' + r1(five) + ' %' + (resetsIn !== null ? ', resets in ' + resetsIn + ' min (' + when(fiveReset) + ')' : '')
+    + (fiveTrend ? ', pace ' + (fiveTrend.rate >= 0 ? '+' : '') + r1(fiveTrend.rate) + ' %/h'
+      + (fiveTrend.reach ? ', full at ' + when(fiveTrend.reach).slice(11) + ' at this pace, before the reset -> delegate bulky work or pause heavy runs' : ', about ' + r1(fiveTrend.projected) + ' % at the reset at this pace') : '')
     + (five >= 85 ? ' -> HOLD heavy work until it resets; delegation does not help this meter' : ''));
+}
+// what the headroom buys: the spend per hour that lands at 100 % exactly at
+// the reset, and how much of today's line is still free
+const hoursToReset = Math.max(0, (reset - now) / HOUR);
+if (hoursToReset > 0 && used < 100) {
+  const todayLeft = budget - used;
+  console.log('spend rate: up to ' + r1((100 - used) / hoursToReset) + ' %/h until the reset lands at 100 %'
+    + (todayLeft > 0 ? '; today\'s line leaves ' + r1(todayLeft) + ' % headroom' : '; today\'s line is ' + r1(-todayLeft) + ' % behind'));
+}
+if (extraSpent !== null && extraLimit !== null) {
+  console.log(extraOn
+    ? 'extra usage: on, ' + extraSpent.toFixed(2) + ' of ' + extraLimit.toFixed(2) + ' ' + extraCurrency + ' spent this month; past 100 % the work goes on and is charged'
+      + (extraSpent / extraLimit >= 0.8 ? ' -> the monthly cap is nearly reached' : '')
+    : 'extra usage: monthly limit 0, nothing can be charged; 100 % is a hard stop');
 }
 // the session's own context is re-sent on every turn: past a point, the
 // transcript costs more than any model choice saves
@@ -240,7 +279,7 @@ if (!ladder.length) {
     'on pace': 'the default split',
     'over': 'medium tasks leave the session model too',
     'throttle': 'no manual change now: the session dispatches everything to ' + name(t2) + ' subagents and does itself only what they would get wrong. For the NEXT session SWITCH to ' + name(t2) + ' (model menu: ' + t2.label + ', effort ' + t2.effort + ')',
-    'stop': 'wrap up, the week is nearly used',
+    'stop': extraOn ? 'the week is nearly used; from 100 % the work is charged to extra usage, so go on only with the user\'s word' : 'wrap up, the week is nearly used',
   };
   const switchNow = premOut ? premLabel + ' is out until the reset: SWITCH the session to ' + name(pick(1)) + ' now (model menu: ' + pick(1).label + ', effort ' + pick(1).effort + '). ' : '';
   console.log('do: ' + switchNow + notes[level]);
@@ -254,7 +293,7 @@ if (!ladder.length) {
 
 // ---- side effects: log, state, the default model for new sessions ----
 if (!opt.dry) {
-  const entry = { t: now.toISOString(), all: r1(used), premium: prem === null ? null : r1(prem), premiumModel: premium, premiumOut: premOut, five: five === null ? null : r1(five), line: r1(budget), level, reset: opt.reset };
+  const entry = { t: now.toISOString(), all: r1(used), premium: prem === null ? null : r1(prem), premiumModel: premium, premiumOut: premOut, five: five === null ? null : r1(five), fiveReset: opt['five-reset'] || null, line: r1(budget), level, reset: opt.reset };
   fs.appendFileSync(logFile, JSON.stringify(entry) + '\n');
   fs.writeFileSync(stateFile, JSON.stringify({ ...entry, delta: r1(delta), next: sessionTier, trend: trend && !trend.short ? { rate: r1(trend.rate), projected: r1(trend.projected) } : null }, null, 2) + '\n');
   if (setNextModel && sessionTier) {

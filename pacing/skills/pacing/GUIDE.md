@@ -55,7 +55,12 @@ the cheaper Opus 5.5 medium (`/pacing fallback` changes or removes that).
 |---|---|
 | Weekly · all models | the paced meter: the budget line is drawn against it |
 | Weekly · Fable (the plan's per-model meter; `/pacing premium` names the model, `none` if the plan has no such meter) | not paced; at 100 % every tier of that model leaves the ladder |
-| 5-hour limit | shared by all models; at 85 % the report says to hold heavy work until it resets |
+| 5-hour limit | shared by all models; the report shows the pace inside the window and when it would be full; at 85 % it says to hold heavy work until the reset |
+| extra usage | when the plan allows charges past 100 %, the report shows what is spent of the monthly cap, and "stop" becomes "going on is charged" |
+
+The report also gives a **spend rate**: the percent per hour that lands
+at 100 % exactly at the reset, and how much of today's line is still
+free. That is what "ahead by 36" is worth in practice.
 
 ## The budget line
 

@@ -43,16 +43,19 @@ there. Then continue.
 ToolSearch `select:mcp__ccd_session_mgmt__get_usage`). From
 `plan.windows`: `Weekly · all models` (`percentUsed`, `resetsAt`), the
 per-model window `Weekly · <model>` named by `premium`, `5-hour limit`
-(`percentUsed`, `resetsAt`); from `context`: `percentUsed`. A window the
-plan lacks is `-` (`premium none` once if there is no per-model window).
+(`percentUsed`, `resetsAt`); from `context`: `percentUsed`; from
+`extraUsage`: `spent`, `monthlyLimit`, `currency` (when `enabled`). A
+window the plan lacks is `-` (`premium none` once if there is no
+per-model window).
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" --all <pct> --reset <resetsAt> --premium <pct> --five <pct> --five-reset <resetsAt> --context <pct> --session <this session's model id>
+node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" --all <pct> --reset <resetsAt> --premium <pct> --five <pct> --five-reset <resetsAt> --context <pct> --extra-spent <amount> --extra-limit <amount> --extra-currency <code> --session <this session's model id>
 ```
 
 The script is the rule: it prints the level, the trend, the 5-hour
-window, the context line, which tier takes each class of work, the `do:`
-line and the next session's model. It logs the reading, writes
+window with its pace, the spend rate to the reset, extra usage, the
+context line, which tier takes each class of work, the `do:` line and
+the next session's model. It logs the reading, writes
 `state.json` for the hook, and (unless `next off`) sets the next
 session's tier as the default for new sessions: `~/.claude/settings.json`
 and, on Windows, the desktop app's built-in preset (read at app start; a
@@ -100,8 +103,14 @@ This session's model is the user's to set; the lever is delegation.
 - **Lower-tier session** (`upward:` line): one contained hard task with a
   clear deliverable may go to a tier 1 subagent; an open debugging hunt
   may not.
-- **5-hour window at 85 % or more**: hold heavy work until the printed
-  time; delegation does not help that meter.
+- **5-hour window**: at 85 % or more, hold heavy work until the printed
+  time; when the pace line says the window fills before it resets, move
+  bulky work to subagents or pause heavy runs. Delegation does not help
+  this meter's total, only its timing.
+- **Spend rate**: the `%/h` figure is what the headroom buys until the
+  reset; mention it when the user asks what a task may cost.
+- **Extra usage on**: 100 % is not a wall but a charge; at "stop", go on
+  only with the user's word, and say what has been spent of the cap.
 
 Name models with their effort ("Opus 5.5 high"), never a tier number.
 
@@ -117,6 +126,9 @@ All models 52 % used, budget line 41 %, trend +9 %/day: over by 11, routine and 
 All models 58 % used, budget line 41 %, reaches 100 % Wednesday: throttle. No manual change now: this session dispatches to Opus 5.5 high subagents. New sessions default to Opus 5.5 high; check the model menu shows Opus 5.5, effort high.
 Fable meter at 100 %: switch the session to Opus 5.5 high now (model menu: Opus 5.5, effort high); Fable is out until Thursday's reset.
 5-hour window 91 %, resets 14:20: hold the test suite until then.
+5-hour window 62 %, +14 %/h: full at 15:50, before the 16:40 reset; move the test runs to a Sonnet 5.5 medium subagent.
+Ahead by 36: up to 1.1 %/h until Thursday's reset; today's line leaves 36 %.
+All models 96 %: stop. Extra usage is on (12.40 of 50.00 EUR this month): going on is charged; your call.
 Context 54 %: this session is the expensive part now; start the next task in a new session.
 ```
 
