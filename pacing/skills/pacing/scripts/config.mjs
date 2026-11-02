@@ -60,7 +60,7 @@ const read = () => {
   return c;
 };
 
-const ROLE = ['the session: judgment work', 'subagents: routine work', 'subagents: trivial work'];
+const ROLE = ['the session: judgment work', 'subagents: routine work', 'subagents: bulky output'];
 const show = c => {
   c.tiers.forEach((t, i) => {
     const role = ROLE[Math.min(i, ROLE.length - 1)] + (i >= ROLE.length ? ' (lower)' : '');

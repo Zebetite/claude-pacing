@@ -1,6 +1,6 @@
 ---
 name: pacing
-description: "Pace the Weekly · all models allowance over a ladder of models (default: Fable 5.1 high for the session and judgment work, Opus 5.5 high subagents for routine work, Sonnet 5.5 medium subagents for trivial work): the further the all-models meter runs ahead of its day-by-day budget (the last day before reset keeps 1.5 daily allowances), or the steeper the logged trend, the further down the ladder work goes. The plan's per-model weekly meter (Fable's by default) only matters at 100 %: then that model leaves the ladder. Use at the start of every session, after each big task, and whenever the user asks about usage, which model to use, or throttling; `usage` or no argument gives the report; `help`, `setup`, `set`, `add`, `remove`, `reset`, `log`, `next` and `version` manage the guide, the ladder and the automation."
+description: "Pace the Weekly · all models allowance over a ladder of models (default: Fable 5.1 high for the session and judgment work, Opus 5.5 high subagents for routine work, Sonnet 5.5 medium subagents for bulky output): the further the all-models meter runs ahead of its day-by-day budget (the last day before reset keeps 1.5 daily allowances), or the steeper the logged trend, the further down the ladder work goes. The plan's per-model weekly meter (Fable's by default) only matters at 100 %: then that model leaves the ladder. Use at the start of every session, after each big task, and whenever the user asks about usage, which model to use, or throttling; `usage` or no argument gives the report; `help`, `setup`, `set`, `add`, `remove`, `reset`, `log`, `next` and `version` manage the guide, the ladder and the automation."
 ---
 
 # Model pacing
@@ -112,6 +112,15 @@ Classes of work:
 - **routine**: probe runs, test suites, mechanical edits across files,
   locale fan-out, commits with a given message, log reading
 - **trivial**: greps, file summaries, restoring fixtures, renames
+- **bulky** (a property, not a size): work whose output is large, such as
+  log reading, test-suite runs, a fan-out over many files
+
+Trivial work stays in the session until throttle: a subagent costs tens of
+thousands of tokens before it reads a file, so a grep delegated to a
+cheaper model costs more on the meter than the same grep done here. Bulky
+work goes to the lowest tier at every level, whatever its difficulty:
+what a subagent reads stays out of this session's context, which is
+re-sent on every later turn.
 
 ## 2. Apply
 

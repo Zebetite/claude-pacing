@@ -165,11 +165,17 @@ if (prev.length) {
 // ---- routing ----
 // Which tier takes each class of work at each level. 1 = the top tier (the
 // session model), L = the lowest tier. Clamped to the ladder.
+// Trivial work stays in the session until throttle: a subagent costs tens of
+// thousands of tokens before it reads a file, so a grep delegated to a cheap
+// model costs more on the meter than the same grep done by the session.
+// Bulky output is the exception at every level (the "bulky" line below):
+// what a subagent reads stays out of the session's context, which is re-sent
+// on every later turn.
 const ROUTES = {
-  'ahead': { judgment: 1, medium: 1, routine: 1, trivial: 'L' },
-  'on pace': { judgment: 1, medium: 1, routine: 2, trivial: 'L' },
-  'over': { judgment: 1, medium: 2, routine: 2, trivial: 'L' },
-  'throttle': { judgment: 2, medium: 2, routine: 2, trivial: 'L' },
+  'ahead': { judgment: 1, medium: 1, routine: 1, trivial: 1 },
+  'on pace': { judgment: 1, medium: 1, routine: 2, trivial: 1 },
+  'over': { judgment: 1, medium: 2, routine: 2, trivial: 1 },
+  'throttle': { judgment: 2, medium: 2, routine: 2, trivial: 2 },
   'stop': { judgment: 'L', medium: 'L', routine: 'L', trivial: 'L' },
 };
 const ladder = premOut ? tiers.filter(t => t.model !== premium) : tiers;
@@ -205,6 +211,10 @@ if (!ladder.length) {
     const no = ladder.indexOf(t) + 1;
     const only = level === 'throttle' && cls === 'judgment' ? ', the session itself only for what ' + name(t) + ' would get wrong' : '';
     console.log('  ' + cls.padEnd(9) + '-> tier ' + no + ' ' + name(t) + (no === 1 ? ' (the session)' : ' (subagent)') + only);
+  }
+  if (ladder.length > 1) {
+    const tL = pick('L');
+    console.log('  bulky    -> tier ' + ladder.length + ' ' + name(tL) + ' (subagent) at any level: logs, test runs, many files; the output stays out of the session\'s context');
   }
   const t2 = pick(2);
   const notes = {

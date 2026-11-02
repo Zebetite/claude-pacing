@@ -18,7 +18,7 @@ The default ladder:
 |---|---|---|
 | 1 | Fable 5.1 high | the session: judgment work |
 | 2 | Opus 5.5 high | subagents: routine work |
-| 3 | Sonnet 5.5 medium | subagents: trivial work |
+| 3 | Sonnet 5.5 medium | subagents: bulky output (logs, test runs, many files) |
 
 ## ⚠️ Setup, two steps
 
@@ -66,11 +66,20 @@ onto the tiers:
 
 | level | meaning | judgment | medium | routine | trivial |
 |---|---|---|---|---|---|
-| ahead | more than 5 points under the line | tier 1 | tier 1 | tier 1 | lowest |
-| on pace | within 5 points under the line | tier 1 | tier 1 | tier 2 | lowest |
-| over | up to 5 points over the line | tier 1 | tier 2 | tier 2 | lowest |
-| throttle | more than 5 points over | tier 2, the session itself only for what tier 2 would get wrong | tier 2 | tier 2 | lowest |
+| ahead | more than 5 points under the line | tier 1 | tier 1 | tier 1 | tier 1 |
+| on pace | within 5 points under the line | tier 1 | tier 1 | tier 2 | tier 1 |
+| over | up to 5 points over the line | tier 1 | tier 2 | tier 2 | tier 1 |
+| throttle | more than 5 points over | tier 2, the session itself only for what tier 2 would get wrong | tier 2 | tier 2 | tier 2 |
 | stop | all models at 95 % or more | wrap up | | | |
+
+Trivial work (a grep, a rename, one file summarised) stays in the session
+until throttle: a subagent costs tens of thousands of tokens before it
+reads a file, so delegating a grep to a cheaper model costs more on the
+meter than doing it in the session. The exception at every level is
+**bulky** work, whatever its difficulty: log reading, test-suite runs, a
+fan-out over many files go to the lowest tier, because what a subagent
+reads stays out of the session's context, which is re-sent on every later
+turn.
 | Fable out (or whichever model the per-model meter belongs to) | that meter at 100 %, on top of any level | the model drops out of the ladder; the level above still decides the routing, on the tiers that remain | | | |
 
 ## The trend
