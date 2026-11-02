@@ -116,9 +116,11 @@ Name models with their effort ("Opus 5.5 high"), never a tier number.
 
 ## 3. Report
 
-One line when the level is not "on pace", or whenever asked: the two
-numbers, the trend if any, the context line if it advises, and the `do:`
-line in words:
+When asked (`usage`, `/pacing`, no argument): first the script's bar
+block, the lines up to the first blank line, verbatim inside a fenced code
+block, so the bars keep their alignment. Then one line. At every other
+run, one line when the level is not "on pace": the two numbers, the trend
+if any, the context line if it advises, and the `do:` line in words:
 
 ```
 All models 34 % used, budget line 41 %: ahead, keeping the work on Fable 5.1 high.

@@ -205,6 +205,27 @@ const session = sessionModel ? tiers.find(t => t.model === sessionModel) : null;
 
 // ---- report ----
 const when = d => d.toLocaleString('sv-SE').slice(0, 16);
+const clock = d => when(d).slice(11);
+// the meters as bars, first: 30 cells, the budget line marked on the weekly
+// bar with │; the skill shows this block verbatim when the user asks for usage
+const BAR_W = 30;
+const bar = (pct, marker) => {
+  const filled = Math.round(Math.min(100, Math.max(0, pct)) / 100 * BAR_W);
+  const cells = Array.from({ length: BAR_W }, (_, i) => (i < filled ? '█' : '░'));
+  if (marker !== undefined && marker < 100) cells[Math.min(BAR_W - 1, Math.max(0, Math.round(marker / 100 * BAR_W) - 1))] = '│';
+  return cells.join('');
+};
+const barRow = (label, pct, note, marker) => pct === null ? null
+  : label.padEnd(11) + bar(pct, marker) + String(Math.round(pct) + ' %').padStart(6) + (note ? (note.startsWith('/') ? ' ' : '  ') + note : '');
+// "2d 16h" until the weekly reset
+const resetsIn = ms => { const h = Math.max(0, Math.round(ms / HOUR)); return Math.floor(h / 24) + 'd ' + (h % 24) + 'h'; };
+[
+  barRow('5-hour', five, fiveReset ? 'resets ' + clock(fiveReset) : ''),
+  barRow('All models', used, '/ ' + Math.round(budget) + ' % of calculated pace. Resets in ' + resetsIn(reset - now), budget),
+  prem !== null ? barRow(premLabel, prem, premOut ? 'out until the reset' : 'not paced') : null,
+  barRow('Context', context, context >= 50 ? 'next task in a new session' : context >= 30 ? 'new tasks in a new session' : ''),
+].filter(Boolean).forEach(l => console.log(l));
+console.log('');
 console.log('day ' + dayNo + ' of ' + dayCount + ' (calendar days), ' + r1(elapsed) + ' days elapsed, ' + r1(left) + ' days to reset');
 console.log('allowance today ' + r1(todayAllowance) + ' %, budget line now ' + r1(budget) + ' % (counted to ' + (endOfToday === reset.getTime() ? 'the reset' : 'midnight') + ')');
 console.log('All models used ' + r1(used) + ' %, delta ' + (delta >= 0 ? '+' : '') + r1(delta)
