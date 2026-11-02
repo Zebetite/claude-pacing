@@ -1,6 +1,6 @@
 ---
 name: pacing
-description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.1 high for the session, Opus 5.5 high and Sonnet 5.5 medium subagents): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Use at session start, after each big task, and whenever the user mentions usage, which model to use, or throttling; `usage` or no argument reports; `help`, `setup`, `set`, `add`, `remove`, `reset`, `log`, `next`, `premium`, `version` manage it."
+description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.1 high for the session, Opus 5.5 medium and Sonnet 5.5 medium subagents, Opus 5.5 high at the top while Fable's meter is full): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Use at session start, after each big task, and whenever the user mentions usage, which model to use, or throttling; `usage` or no argument reports; `help`, `setup`, `set`, `add`, `remove`, `reset`, `log`, `next`, `premium`, `fallback`, `version` manage it."
 ---
 
 # Model pacing
@@ -9,7 +9,8 @@ The rule: the top tier for work that needs judgment, lower tiers for easier
 work through subagents, and the **Weekly · all models** meter never runs
 out before the reset. The plan's per-model meter (Fable's by default,
 `premium` in the config) is not paced: at 100 % that model leaves the
-ladder. `${CLAUDE_SKILL_DIR}` is this skill's folder; the user's files are
+ladder and the `fallback` tier (Opus 5.5 high by default) takes the top
+place until the reset. `${CLAUDE_SKILL_DIR}` is this skill's folder; the user's files are
 in `~/.claude/pacing`. As a plugin the skill answers to `/pacing:pacing`;
 `/pacing` below stands for that. GUIDE.md explains the rules; this file is
 the procedure.
@@ -27,7 +28,7 @@ the first big task is done.
 | `/pacing`, `usage`, no argument | sections 1 to 3 |
 | `help`, "usage help" | print GUIDE.md to the user, whole |
 | `setup` | section 4 |
-| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `premium <model>\|none`, `version` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result |
+| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `version` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result |
 | `log` | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" log` |
 
 **First run.** `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" init`.
@@ -128,9 +129,10 @@ app preset:` line, say new sessions now start on that model.
 `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" show`, then
 AskUserQuestion: tiers (2 to 4), each tier's model and effort, optionally
 the last-day weight, the next-session switch, the per-model meter's model
-or none; current values first with "(current)". Models: fable, opus,
+or none, and the fallback tier that takes the top place while that meter
+is full; current values first with "(current)". Models: fable, opus,
 sonnet, haiku; efforts: low, medium, high, xhigh, max. Write with `set`,
-`add`, `remove`, `weight`, `next`, `premium`; show the result; end with
+`add`, `remove`, `weight`, `next`, `premium`, `fallback`; show the result; end with
 the manual step: the model menu must now show tier 1 (name it with its
 effort).
 

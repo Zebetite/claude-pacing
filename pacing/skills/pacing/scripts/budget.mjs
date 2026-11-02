@@ -29,10 +29,15 @@ let tiers = cfg.tiers ? cfg.tiers : cfg.primary ? [cfg.primary, cfg.fallback] : 
 if (!tiers) {
   tiers = [
     { model: 'fable', label: MODELS.fable.label, effort: 'high' },
-    { model: 'opus', label: MODELS.opus.label, effort: 'high' },
+    { model: 'opus', label: MODELS.opus.label, effort: 'medium' },
     { model: 'sonnet', label: MODELS.sonnet.label, effort: 'medium' },
   ];
 }
+// when the premium model's meter is full, this tier takes its place at the
+// top (Opus 5.5 high by default): the session keeps a strong model for
+// judgment while routine work stays on the cheaper tier 2
+const fallback = cfg.fallback === undefined ? { model: 'opus', effort: 'high' } : cfg.fallback;
+const fallbackTier = fallback && MODELS[fallback.model] ? { model: fallback.model, label: MODELS[fallback.model].label, effort: fallback.effort } : null;
 const lastDayWeight = cfg.lastDayWeight || 1.5;
 const setNextModel = cfg.setNextModel !== false;
 // the per-model weekly meter: which ladder model it belongs to (fable unless
@@ -179,7 +184,11 @@ const ROUTES = {
   'throttle': { judgment: 2, medium: 2, routine: 2, trivial: 2 },
   'stop': { judgment: 'L', medium: 'L', routine: 'L', trivial: 'L' },
 };
-const ladder = premOut ? tiers.filter(t => t.model !== premium) : tiers;
+const rest = tiers.filter(t => t.model !== premium);
+const ladder = !premOut ? tiers
+  : fallbackTier && fallbackTier.model !== premium && !rest.some(t => t.model === fallbackTier.model && t.effort === fallbackTier.effort)
+    ? [fallbackTier, ...rest]
+    : rest;
 const route = ROUTES[level];
 const pick = r => { const i = r === 'L' ? ladder.length : Math.min(r, ladder.length); return ladder[i - 1]; };
 // the model a session should run on at this level

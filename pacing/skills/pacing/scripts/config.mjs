@@ -13,6 +13,8 @@
 //   node config.mjs next on|off     let budget.mjs set the default model of new sessions
 //   node config.mjs premium <model>|none   which model the plan's per-model weekly meter
 //                                   belongs to (fable by default); none for a plan without one
+//   node config.mjs fallback <model> <effort>|none   the tier that takes the top place while
+//                                   the premium model's meter is full (opus high by default)
 //   node config.mjs reset           back to the defaults (the ladder and the weight)
 //   node config.mjs json            the config as JSON (for scripts)
 //   node config.mjs version         the plugin's version, from .claude-plugin/plugin.json
@@ -39,13 +41,18 @@ const version = () => {
 
 const tier = (model, effort) => ({ model, label: MODELS[model].label, effort });
 const defaults = () => ({
-  tiers: [tier('fable', 'high'), tier('opus', 'high'), tier('sonnet', 'medium')],
+  tiers: [tier('fable', 'high'), tier('opus', 'medium'), tier('sonnet', 'medium')],
   lastDayWeight: 1.5,
   setNextModel: true,
   premium: 'fable',
+  fallback: { model: 'opus', effort: 'high' },
   installed: new Date().toLocaleDateString('sv-SE'),
 });
 const premiumText = c => (c.premium === undefined ? 'Fable 5.1 (default)' : c.premium === null ? 'none' : MODELS[c.premium] ? MODELS[c.premium].label : c.premium);
+const fallbackText = c => {
+  const f = c.fallback === undefined ? { model: 'opus', effort: 'high' } : c.fallback;
+  return f === null ? 'none (the remaining tiers move up)' : (MODELS[f.model] ? MODELS[f.model].label : f.model) + ' ' + f.effort + ' takes tier 1';
+};
 
 const write = c => { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(file, JSON.stringify(c, null, 2) + '\n'); };
 const read = () => {
@@ -67,7 +74,8 @@ const show = c => {
     console.log('tier ' + (i + 1) + '  ' + (t.label + ' ' + t.effort).padEnd(20) + ' [' + t.model + ']  ' + role);
   });
   console.log('last day weight: ' + c.lastDayWeight + '  (installed ' + c.installed + ', plugin ' + version() + ')');
-  console.log('per-model weekly meter: ' + premiumText(c) + '  next-session model switch: ' + (c.setNextModel === false ? 'off' : 'on'));
+  console.log('per-model weekly meter: ' + premiumText(c) + '; when it is full: ' + fallbackText(c));
+  console.log('next-session model switch: ' + (c.setNextModel === false ? 'off' : 'on'));
   console.log('data folder: ' + dataDir);
 };
 const fail = m => { console.log(m); process.exit(1); };
@@ -165,6 +173,13 @@ switch (cmd || 'show') {
     write(cfg); show(cfg);
     break;
   }
+  case 'fallback': {
+    if (!cfg) cfg = defaults();
+    if (a === 'none') cfg.fallback = null;
+    else { checkModel(a); checkEffort(b); cfg.fallback = { model: a, effort: b }; }
+    write(cfg); show(cfg);
+    break;
+  }
   case 'reset': {
     // the ladder and the weight go back to the defaults; the install date, the
     // per-model meter and the user's choice about the next-session switch stay
@@ -177,5 +192,5 @@ switch (cmd || 'show') {
     break;
   }
   default:
-    fail('commands: show | json | init | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | premium <model>|none | reset | version | where');
+    fail('commands: show | json | init | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | premium <model>|none | fallback <model> <effort>|none | reset | version | where');
 }

@@ -10,8 +10,9 @@ before the reset. That means it uses better models automatically when
 you have more usage left. You can custom set how many tiers you want and
 what model and effort should be on every tier.
 
-The default tiers are Fable 5.1 high for the session, Opus 5.5 high and
-Sonnet 5.5 medium for subagents; the budget line is drawn against the
+The default tiers are Fable 5.1 high for the session, Opus 5.5 medium and
+Sonnet 5.5 medium for subagents; while Fable's own meter is full, Opus
+5.5 high takes the top place. The budget line is drawn against the
 **Weekly · all models** meter. `skills/pacing/GUIDE.md` explains the
 rules; `skills/pacing/SKILL.md` is what Claude follows.
 

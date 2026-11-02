@@ -17,8 +17,12 @@ The default ladder:
 | tier | model | takes |
 |---|---|---|
 | 1 | Fable 5.1 high | the session: judgment work |
-| 2 | Opus 5.5 high | subagents: routine work |
+| 2 | Opus 5.5 medium | subagents: routine work |
 | 3 | Sonnet 5.5 medium | subagents: bulky output (logs, test runs, many files) |
+
+While Fable's own meter is full, **Opus 5.5 high** takes tier 1 in its
+place, so judgment work keeps a strong model and routine work stays on
+the cheaper Opus 5.5 medium (`/pacing fallback` changes or removes that).
 
 ## ⚠️ Setup, two steps
 
@@ -81,7 +85,7 @@ meter than doing it in the session. The exception at every level is
 fan-out over many files go to the lowest tier, because what a subagent
 reads stays out of the session's context, which is re-sent on every later
 turn.
-| Fable out (or whichever model the per-model meter belongs to) | that meter at 100 %, on top of any level | the model drops out of the ladder; the level above still decides the routing, on the tiers that remain | | | |
+| Fable out (or whichever model the per-model meter belongs to) | that meter at 100 %, on top of any level | the model drops out of the ladder and the fallback tier (Opus 5.5 high) takes tier 1; the level above still decides the routing | | | |
 
 ## The trend
 
@@ -141,6 +145,7 @@ in plain words works too.
 | `/pacing log` | the last readings |
 | `/pacing next on`, `/pacing next off` | lets the skill set, or stop setting, the default model of new sessions |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model weekly meter belongs to (Fable by default), or says the plan has none |
+| `/pacing fallback opus high`, `/pacing fallback none` | the tier that takes the top place while that meter is full (Opus 5.5 high by default); none lets the remaining tiers move up |
 | `/pacing version` | the installed plugin version |
 
 Your files live in `~/.claude/pacing`: the configuration in `config.json`,
