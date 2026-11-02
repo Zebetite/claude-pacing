@@ -20,7 +20,7 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 In a Claude Code session:
 
 ```
-/plugin marketplace add <owner>/claude-pacing
+/plugin marketplace add Zebetite/claude-pacing
 /plugin install pacing@claude-pacing
 ```
 

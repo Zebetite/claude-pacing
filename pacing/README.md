@@ -33,7 +33,7 @@ PATH of the shell Claude Code uses.
 From the marketplace this plugin is published in:
 
 ```
-/plugin marketplace add <owner>/claude-pacing
+/plugin marketplace add Zebetite/claude-pacing
 /plugin install pacing@claude-pacing
 ```
 
