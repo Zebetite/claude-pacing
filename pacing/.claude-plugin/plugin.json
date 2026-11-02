@@ -1,0 +1,12 @@
+{
+  "name": "pacing",
+  "version": "0.4.0-beta",
+  "license": "MIT",
+  "homepage": "https://github.com/danielronnelin/claude-pacing",
+  "description": "This skill spends your weekly plan allowance on purpose. It keeps a ladder of models. The top tier is your session model and does the work that needs judgment; the lower tiers do easier work through subagents. A day-by-day budget and the logged trend decide how far down the ladder work goes, so the week never runs out before the reset.",
+  "author": {
+    "name": "Daniel Rönnelin",
+    "email": "daniel.ronnelin@cloudbackend.com"
+  },
+  "keywords": ["usage", "pacing", "models", "budget", "subagents"]
+}

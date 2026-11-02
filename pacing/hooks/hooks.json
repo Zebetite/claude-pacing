@@ -1,0 +1,18 @@
+{
+  "description": "Pacing: show every new session the last usage reading and the recommended model",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/hook.mjs"],
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
