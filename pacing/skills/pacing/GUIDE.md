@@ -2,11 +2,15 @@
 
 `/pacing version` shows the installed version.
 
-This skill spends your weekly plan allowance on purpose. It keeps a ladder
-of models. The top tier is your session model and does the work that needs
-judgment; the lower tiers do easier work through subagents. A day-by-day
-budget and the logged trend decide how far down the ladder work goes, so
-the week never runs out before the reset.
+Use better models and still save weekly usage at the same time by
+delegating easier work to subagents with cheaper models. This skill
+spends your weekly plan allowance on purpose. It uses tiers of models,
+the top tier is used for the most difficult work; the lower tiers do
+easier work through subagents. A day-by-day budget and the logged trend
+decide how far down the tiers work goes, so the week never runs out
+before the reset. That means it uses better models automatically when
+you have more usage left. You can custom set how many tiers you want and
+what model and effort should be on every tier.
 
 The default ladder:
 

@@ -1,13 +1,19 @@
 # pacing — a Claude Code plugin that paces the weekly allowance
 
-This skill spends your weekly plan allowance on purpose. It keeps a ladder
-of models (by default Fable 5.1 high for the session, Opus 5.5 high and
-Sonnet 5.5 medium for subagents). The top tier is your session model and
-does the work that needs judgment; the lower tiers do easier work through
-subagents. A day-by-day budget line against the **Weekly · all models**
-meter and the logged trend decide how far down the ladder work goes, so
-the week never runs out before the reset. `skills/pacing/GUIDE.md`
-explains the rules; `skills/pacing/SKILL.md` is what Claude follows.
+Use better models and still save weekly usage at the same time by
+delegating easier work to subagents with cheaper models. This skill
+spends your weekly plan allowance on purpose. It uses tiers of models,
+the top tier is used for the most difficult work; the lower tiers do
+easier work through subagents. A day-by-day budget and the logged trend
+decide how far down the tiers work goes, so the week never runs out
+before the reset. That means it uses better models automatically when
+you have more usage left. You can custom set how many tiers you want and
+what model and effort should be on every tier.
+
+The default tiers are Fable 5.1 high for the session, Opus 5.5 high and
+Sonnet 5.5 medium for subagents; the budget line is drawn against the
+**Weekly · all models** meter. `skills/pacing/GUIDE.md` explains the
+rules; `skills/pacing/SKILL.md` is what Claude follows.
 
 ## What is in the plugin
 
