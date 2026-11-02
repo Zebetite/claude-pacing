@@ -116,11 +116,14 @@ Name models with their effort ("Opus 5.5 high"), never a tier number.
 
 ## 3. Report
 
-When asked (`usage`, `/pacing`, no argument): first the script's bar
-block, the lines up to the first blank line, verbatim inside a fenced code
-block, so the bars keep their alignment. Then one line. At every other
-run, one line when the level is not "on pace": the two numbers, the trend
-if any, the context line if it advises, and the `do:` line in words:
+When asked (`usage`, `/pacing`, no argument): the script's first two
+blocks, the bars and the tier sheet (every line before the `day N of M`
+line), verbatim inside one fenced code block so the columns keep their
+alignment, and nothing else
+unless the level is "over" or worse, the 5-hour window advises a hold,
+the context line advises, or a switch is the point. At every other run,
+one line when the level is not "on pace": the two numbers, the trend if
+any, the context line if it advises, and the `do:` line in words:
 
 ```
 All models 34 % used, budget line 41 %: ahead, keeping the work on Fable 5.1 high.

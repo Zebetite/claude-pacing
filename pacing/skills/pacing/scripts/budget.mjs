@@ -226,6 +226,58 @@ const resetsIn = ms => { const h = Math.max(0, Math.round(ms / HOUR)); return Ma
   barRow('Context', context, context >= 50 ? 'next task in a new session' : context >= 30 ? 'new tasks in a new session' : ''),
 ].filter(Boolean).forEach(l => console.log(l));
 console.log('');
+// the sheet under the bars, as GUIDE.md's ladder table: each tier and the
+// work it takes right now, at this level
+const sheet = [['tier', 'model', 'takes now · level ' + level]];
+const CLASSES = ['judgment', 'medium', 'routine', 'trivial'];
+ladder.forEach((t, i) => {
+  const work = CLASSES.filter(cls => pick(route[cls]) === t);
+  const bulky = ladder.length > 1 && i === ladder.length - 1 ? 'bulky output (logs, test runs, many files)' : '';
+  const where = i === 0 ? 'the session: ' : 'subagents: ';
+  const takes = level === 'stop' ? (i === 0 ? 'the session: wrap up, the week is nearly used' : 'nothing: wrap up')
+    : work.length ? where + work.join(', ') + ' work' + (bulky ? '; ' + bulky : '')
+      : bulky ? where + bulky
+        : i === 0 && level === 'throttle' ? where + 'only what ' + name(pick(2)) + ' would get wrong'
+          : 'nothing at this level';
+  sheet.push([String(i + 1), name(t), takes]);
+});
+if (premOut) tiers.filter(t => t.model === premium).forEach(t => sheet.push(['-', name(t), 'out until the reset: its own meter is at 100 %']));
+const widths = sheet[0].map((_, c) => Math.max(...sheet.map(r => r[c].length)));
+const sheetRow = r => r.map((v, c) => v.padEnd(widths[c])).join('  ').trimEnd();
+console.log(sheetRow(sheet[0]));
+console.log(widths.map(w => '─'.repeat(w)).join('  '));
+sheet.slice(1).forEach(r => console.log(sheetRow(r)));
+// why this routing: the all-models meter against today's allowed usage
+const pts = Math.abs(Math.round(delta));
+const compare = delta < 0 ? pts + ' points under' : delta > 0 ? pts + ' points over' : 'exactly on';
+const t1 = ladder[0] ? 'tier 1 ' + name(ladder[0]) : 'tier 1';
+const t2s = ladder[1] ? 'tier 2 ' + name(ladder[1]) + ' subagents' : 'tier 2 subagents';
+const because = {
+  'ahead': 'more than 5 points under the line is "ahead", so every class of work stays on ' + t1 + '.',
+  'on pace': 'within 5 points under the line is "on pace", so routine work goes to ' + t2s + '; judgment, medium and trivial work stay on ' + t1 + '.',
+  'over': 'up to 5 points over the line is "over", so medium and routine work go to ' + t2s + '; judgment and trivial work stay on ' + t1 + '.',
+  'throttle': 'more than 5 points over the line is "throttle", so every class of work goes to ' + t2s + ' and the session does only what they would get wrong.',
+  'stop': 'at 95 % or more the week is nearly used: "stop", wrap up.',
+};
+let why = 'All models at ' + Math.round(used) + ' % is ' + compare + ' today\'s allowed ' + Math.round(budget) + ' %'
+  + (trend && trend.bumped ? ', and the trend projects ' + Math.round(trend.projected) + ' % at the reset, which raises the level' : '') + ': '
+  + because[level]
+  + (ladder.length > 1 && level !== 'stop' ? ' Bulky output goes to the lowest tier at every level, so it stays out of the session\'s context.' : '')
+  + (premOut ? ' ' + premLabel + '\'s own meter is at 100 %, so it left the ladder until the reset and ' + name(ladder[0]) + ' takes tier 1.' : '');
+// wrapped to 78 columns
+const wrap = (text, width) => {
+  const lines = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    if (line && line.length + 1 + word.length > width) { lines.push(line); line = word; }
+    else line += (line ? ' ' : '') + word;
+  }
+  lines.push(line);
+  return lines;
+};
+console.log('');
+wrap(why, 78).forEach(l => console.log(l));
+console.log('');
 console.log('day ' + dayNo + ' of ' + dayCount + ' (calendar days), ' + r1(elapsed) + ' days elapsed, ' + r1(left) + ' days to reset');
 console.log('allowance today ' + r1(todayAllowance) + ' %, budget line now ' + r1(budget) + ' % (counted to ' + (endOfToday === reset.getTime() ? 'the reset' : 'midnight') + ')');
 console.log('All models used ' + r1(used) + ' %, delta ' + (delta >= 0 ? '+' : '') + r1(delta)
