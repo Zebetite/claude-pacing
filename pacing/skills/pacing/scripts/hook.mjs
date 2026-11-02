@@ -28,8 +28,8 @@ const visible = stale
   : 'Pacing (' + ageH + ' h ago): ' + facts + '. Recommended session model: ' + next + '. Check the model menu shows ' + menu + '.';
 const context = stale
   ? 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago, STALE: the budget line has moved since): ' + facts + '. Last recommendation: ' + next
-    + '. Do not tell the user to switch models on this reading. FIRST run the `pacing` skill (section 1, Measure) and follow its do: line; read BRIEF.md before delegating.'
+    + '. Do not tell the user to switch models on this reading. Run the `pacing` skill (section 1, Measure) before the first big task and follow its do: line; read BRIEF.md before delegating.'
   : 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago): ' + facts + '. Recommended session model: ' + next
-    + '. FIRST, compare the model and effort you are running on (your system prompt names them) with that recommendation; if they differ, your first reply must start with one line telling the user to switch the model menu to ' + menu
-    + ' (the app\'s model picker overrides settings.json, so only the user can do it). Then run the `pacing` skill (section 1, Measure) before the first big task, and read BRIEF.md before delegating.';
+    + '. If the model and effort you run on (named in your system prompt) differ from that, your first reply starts with one line telling the user to switch the model menu to ' + menu
+    + ' (only the user can). This reading is fresh: use it, do not measure again until the first big task is done. Read BRIEF.md before delegating.';
 console.log(JSON.stringify({ systemMessage: visible, hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }));

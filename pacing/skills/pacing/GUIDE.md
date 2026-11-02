@@ -42,7 +42,8 @@ The default ladder:
 > reply when it runs on something else: then **switch the model menu**
 > before the first big task. A preset of your own (one named per project
 > in the model menu) keeps its own model; the skill only sets the built-in
-> one.
+> one. While that start line is fresh, the session uses it instead of
+> taking a new reading; the next reading comes after the first big task.
 
 ## What it watches
 
@@ -91,6 +92,16 @@ projection past 100 % raises the level to at least "over"; past 115 % to
 projection only counts once the sample spans 20 h or more, so that it
 covers a night: a busy morning alone is shown as a trend but does not
 move the level. `/pacing log` shows the readings.
+
+## The session's own context
+
+Every turn re-sends the whole conversation, so a long session makes each
+later turn expensive whatever model runs it. The report shows the context
+line: under 30 % nothing; from 30 % new tasks should start in a new
+session; from 50 % the skill says so before the next task. Bulky reading
+(logs, test output, many files) goes to a read-only `Explore` subagent
+for the same reason: what the subagent reads never enters the session's
+context.
 
 ## What the skill can and cannot do
 

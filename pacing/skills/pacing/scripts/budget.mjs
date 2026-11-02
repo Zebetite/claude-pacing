@@ -63,7 +63,7 @@ if (argv[0] === 'log') {
   process.exit(0);
 }
 
-const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'now', 'dry'];
+const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'now', 'dry'];
 const opt = {};
 const unknown = [];
 for (let i = 0; i < argv.length; i++) {
@@ -76,7 +76,7 @@ for (let i = 0; i < argv.length; i++) {
   }
 }
 const usage = () => {
-  console.log('usage: node budget.mjs --all <pct> --reset <ISO> [--premium <pct>] [--five <pct>] [--five-reset <ISO>] [--session <model>] [--now <ISO>] [--dry]');
+  console.log('usage: node budget.mjs --all <pct> --reset <ISO> [--premium <pct>] [--five <pct>] [--five-reset <ISO>] [--session <model>] [--context <pct>] [--now <ISO>] [--dry]');
   console.log('       node budget.mjs log [n]');
   console.log('       a meter the plan does not have: pass - for its percent');
   process.exit(1);
@@ -89,10 +89,11 @@ const used = Number(opt.all);
 // the per-model meter is read only when the config names one
 const prem = premium ? num(opt.premium !== undefined ? opt.premium : opt.fable) : null;
 const five = num(opt.five);
+const context = num(opt.context);
 const reset = new Date(opt.reset);
 const fiveReset = opt['five-reset'] ? new Date(opt['five-reset']) : null;
 const now = opt.now ? new Date(opt.now) : new Date();
-const bad = [used, prem, five].some(v => v !== null && Number.isNaN(v))
+const bad = [used, prem, five, context].some(v => v !== null && Number.isNaN(v))
   || Number.isNaN(reset.getTime()) || Number.isNaN(now.getTime()) || (fiveReset && Number.isNaN(fiveReset.getTime()));
 if (bad) { console.log('bad input: percents must be numbers, dates ISO 8601'); process.exit(1); }
 
@@ -202,6 +203,14 @@ if (five !== null) {
   const resetsIn = fiveReset ? Math.max(0, Math.round((fiveReset - now) / 60000)) : null;
   console.log('5-hour window ' + r1(five) + ' %' + (resetsIn !== null ? ', resets in ' + resetsIn + ' min (' + when(fiveReset) + ')' : '')
     + (five >= 85 ? ' -> HOLD heavy work until it resets; delegation does not help this meter' : ''));
+}
+// the session's own context is re-sent on every turn: past a point, the
+// transcript costs more than any model choice saves
+if (context !== null) {
+  console.log('context ' + r1(context) + ' % of the window'
+    + (context >= 50 ? ' -> this session is the expensive part now: move the next task to a NEW session, and keep this one for follow-ups only'
+      : context >= 30 ? ' -> start new tasks in a new session; finish the current one here'
+        : ''));
 }
 if (!ladder.length) {
   console.log('do: no model left on the ladder (every tier is ' + premLabel + ' and its meter is full); wrap up');
