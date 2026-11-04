@@ -206,9 +206,23 @@ const session = sessionModel ? tiers.find(t => t.model === sessionModel) : null;
 // ---- report ----
 const when = d => d.toLocaleString('sv-SE').slice(0, 16);
 const clock = d => when(d).slice(11);
-// the meters as bars, first: 30 cells, the budget line marked on the weekly
-// bar with │; the skill shows this block verbatim when the user asks for usage
-const BAR_W = 30;
+// the meters as bars, first: 20 cells, the budget line marked on the weekly
+// bar with │; the skill shows this block verbatim when the user asks for usage.
+// Every line of the block is kept within WIDTH columns, so a narrow chat
+// column does not wrap the bars.
+const WIDTH = 68;
+const BAR_W = 20;
+// words wrapped to `width` columns
+const wrap = (text, width) => {
+  const lines = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    if (line && line.length + 1 + word.length > width) { lines.push(line); line = word; }
+    else line += (line ? ' ' : '') + word;
+  }
+  lines.push(line);
+  return lines;
+};
 const bar = (pct, marker) => {
   const filled = Math.round(Math.min(100, Math.max(0, pct)) / 100 * BAR_W);
   const cells = Array.from({ length: BAR_W }, (_, i) => (i < filled ? '█' : '░'));
@@ -218,12 +232,12 @@ const bar = (pct, marker) => {
 const barRow = (label, pct, note, marker) => pct === null ? null
   : label.padEnd(11) + bar(pct, marker) + String(Math.round(pct) + ' %').padStart(6) + (note ? (note.startsWith('/') ? ' ' : '  ') + note : '');
 // "2d 16h" until the weekly reset
-const resetsIn = ms => { const h = Math.max(0, Math.round(ms / HOUR)); return Math.floor(h / 24) + 'd ' + (h % 24) + 'h'; };
+const resetsIn = ms => { const h = Math.max(0, Math.round(ms / HOUR)); const d = Math.floor(h / 24); return (d ? d + 'd ' : '') + (h % 24) + 'h'; };
 [
   barRow('5-hour', five, fiveReset ? 'resets ' + clock(fiveReset) : ''),
-  barRow('All models', used, '/ ' + Math.round(budget) + ' % of calculated pace. Resets in ' + resetsIn(reset - now), budget),
+  barRow('All models', used, '/ ' + Math.round(budget) + ' % pace · resets in ' + resetsIn(reset - now), budget),
   prem !== null ? barRow(premLabel, prem, premOut ? 'out until the reset' : 'not paced') : null,
-  barRow('Context', context, context >= 50 ? 'next task in a new session' : context >= 30 ? 'new tasks in a new session' : ''),
+  barRow('Context', context, context >= 50 ? 'next task: new session' : context >= 30 ? 'new tasks: new session' : ''),
 ].filter(Boolean).forEach(l => console.log(l));
 console.log('');
 // the sheet under the bars, as GUIDE.md's ladder table: each tier and the
@@ -242,11 +256,17 @@ ladder.forEach((t, i) => {
   sheet.push([String(i + 1), name(t), takes]);
 });
 if (premOut) tiers.filter(t => t.model === premium).forEach(t => sheet.push(['-', name(t), 'out until the reset: its own meter is at 100 %']));
+// the last column wraps within WIDTH, its continuation lines under its start
 const widths = sheet[0].map((_, c) => Math.max(...sheet.map(r => r[c].length)));
-const sheetRow = r => r.map((v, c) => v.padEnd(widths[c])).join('  ').trimEnd();
-console.log(sheetRow(sheet[0]));
+const lastAt = widths.slice(0, -1).reduce((a, w) => a + w + 2, 0);
+widths[widths.length - 1] = Math.min(widths[widths.length - 1], WIDTH - lastAt);
+const sheetRow = r => {
+  const head = r.slice(0, -1).map((v, c) => v.padEnd(widths[c])).join('  ') + '  ';
+  return wrap(r[r.length - 1], WIDTH - lastAt).map((l, i) => (i === 0 ? head : ' '.repeat(lastAt)) + l);
+};
+sheetRow(sheet[0]).forEach(l => console.log(l));
 console.log(widths.map(w => '─'.repeat(w)).join('  '));
-sheet.slice(1).forEach(r => console.log(sheetRow(r)));
+sheet.slice(1).forEach(r => sheetRow(r).forEach(l => console.log(l)));
 // why this routing: the all-models meter against today's allowed usage
 const pts = Math.abs(Math.round(delta));
 const compare = delta < 0 ? pts + ' points under' : delta > 0 ? pts + ' points over' : 'exactly on';
@@ -264,19 +284,8 @@ let why = 'All models at ' + Math.round(used) + ' % is ' + compare + ' today\'s 
   + because[level]
   + (ladder.length > 1 && level !== 'stop' ? ' Bulky output goes to the lowest tier at every level, so it stays out of the session\'s context.' : '')
   + (premOut ? ' ' + premLabel + '\'s own meter is at 100 %, so it left the ladder until the reset and ' + name(ladder[0]) + ' takes tier 1.' : '');
-// wrapped to 78 columns
-const wrap = (text, width) => {
-  const lines = [];
-  let line = '';
-  for (const word of text.split(' ')) {
-    if (line && line.length + 1 + word.length > width) { lines.push(line); line = word; }
-    else line += (line ? ' ' : '') + word;
-  }
-  lines.push(line);
-  return lines;
-};
 console.log('');
-wrap(why, 78).forEach(l => console.log(l));
+wrap(why, WIDTH).forEach(l => console.log(l));
 console.log('');
 console.log('day ' + dayNo + ' of ' + dayCount + ' (calendar days), ' + r1(elapsed) + ' days elapsed, ' + r1(left) + ' days to reset');
 console.log('allowance today ' + r1(todayAllowance) + ' %, budget line now ' + r1(budget) + ' % (counted to ' + (endOfToday === reset.getTime() ? 'the reset' : 'midnight') + ')');
