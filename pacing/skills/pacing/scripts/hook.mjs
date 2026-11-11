@@ -6,12 +6,14 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MODELS } from './models.mjs';
+import { MODELS, relabel } from './models.mjs';
 
 const stateFile = path.join(os.homedir(), '.claude', 'pacing', 'state.json');
 if (!fs.existsSync(stateFile)) process.exit(0);
 let s;
 try { s = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { process.exit(0); }
+// a model renamed since the reading shows its current label
+s.next = relabel(s.next);
 const taken = new Date(s.t);
 const ageH = Math.round((Date.now() - taken) / 3600000);
 // stale: older than 12 h, or from before the last midnight (the budget line

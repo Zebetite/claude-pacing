@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MODELS, EFFORTS } from './models.mjs';
+import { MODELS, EFFORTS, relabel } from './models.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(os.homedir(), '.claude', 'pacing');
@@ -48,7 +48,7 @@ const defaults = () => ({
   fallback: { model: 'opus', effort: 'high' },
   installed: new Date().toLocaleDateString('sv-SE'),
 });
-const premiumText = c => (c.premium === undefined ? 'Fable 5.1 (default)' : c.premium === null ? 'none' : MODELS[c.premium] ? MODELS[c.premium].label : c.premium);
+const premiumText = c => (c.premium === undefined ? MODELS.fable.label + ' (default)' : c.premium === null ? 'none' : MODELS[c.premium] ? MODELS[c.premium].label : c.premium);
 const fallbackText = c => {
   const f = c.fallback === undefined ? { model: 'opus', effort: 'high' } : c.fallback;
   return f === null ? 'none (the remaining tiers move up)' : (MODELS[f.model] ? MODELS[f.model].label : f.model) + ' ' + f.effort + ' takes tier 1';
@@ -64,6 +64,8 @@ const read = () => {
     delete c.primary; delete c.fallback;
     write(c);
   }
+  // a model renamed since the config was written shows its current label
+  if (c.tiers) c.tiers = c.tiers.map(relabel);
   return c;
 };
 

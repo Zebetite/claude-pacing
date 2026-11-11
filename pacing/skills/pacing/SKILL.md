@@ -1,6 +1,6 @@
 ---
 name: pacing
-description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.1 high for the session, Opus 5.5 medium and Sonnet 5.5 medium subagents, Opus 5.5 high at the top while Fable's meter is full): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Use at session start, after each big task, and whenever the user mentions usage, which model to use, or throttling; `usage` or no argument reports; `help`, `setup`, `set`, `add`, `remove`, `reset`, `log`, `next`, `premium`, `fallback`, `version` manage it."
+description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.2 high for the session, Opus 5.5 medium and Sonnet 5.5 medium subagents, Opus 5.5 high at the top while Fable's meter is full): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Use at session start, after each big task, and whenever the user mentions usage, which model to use, or throttling; `usage` or no argument reports; `help`, `setup`, `set`, `add`, `remove`, `reset`, `log`, `next`, `premium`, `fallback`, `version` manage it."
 ---
 
 # Model pacing
@@ -126,7 +126,7 @@ one line when the level is not "on pace": the two numbers, the trend if
 any, the context line if it advises, and the `do:` line in words:
 
 ```
-All models 34 % used, budget line 41 %: ahead, keeping the work on Fable 5.1 high.
+All models 34 % used, budget line 41 %: ahead, keeping the work on Fable 5.2 high.
 All models 52 % used, budget line 41 %, trend +9 %/day: over by 11, routine and medium work goes to Opus 5.5 high.
 All models 58 % used, budget line 41 %, reaches 100 % Wednesday: throttle. No manual change now: this session dispatches to Opus 5.5 high subagents. New sessions default to Opus 5.5 high; check the model menu shows Opus 5.5, effort high.
 Fable meter at 100 %: switch the session to Opus 5.5 high now (model menu: Opus 5.5, effort high); Fable is out until Thursday's reset.

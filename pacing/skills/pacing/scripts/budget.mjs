@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MODELS } from './models.mjs';
+import { MODELS, relabel } from './models.mjs';
 
 const dataDir = path.join(os.homedir(), '.claude', 'pacing');
 fs.mkdirSync(dataDir, { recursive: true });
@@ -33,6 +33,7 @@ if (!tiers) {
     { model: 'sonnet', label: MODELS.sonnet.label, effort: 'medium' },
   ];
 }
+tiers = tiers.map(relabel);
 // when the premium model's meter is full, this tier takes its place at the
 // top (Opus 5.5 high by default): the session keeps a strong model for
 // judgment while routine work stays on the cheaper tier 2

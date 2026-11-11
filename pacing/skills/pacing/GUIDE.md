@@ -16,7 +16,7 @@ The default ladder:
 
 | tier | model | takes |
 |---|---|---|
-| 1 | Fable 5.1 high | the session: judgment work |
+| 1 | Fable 5.2 high | the session: judgment work |
 | 2 | Opus 5.5 medium | subagents: routine work |
 | 3 | Sonnet 5.5 medium | subagents: bulky output (logs, test runs, many files) |
 
@@ -36,7 +36,7 @@ the cheaper Opus 5.5 medium (`/pacing fallback` changes or removes that).
 >
 > **2. Pick tier 1 yourself in the model menu.** The skill cannot switch a
 > running session's model. With the default ladder, set the session to
-> **Fable 5.1** and the effort to **high**. New sessions start there by
+> **Fable 5.2** and the effort to **high**. New sessions start there by
 > themselves once the switch is on, but the app reads its preset file
 > only at startup: a change the skill makes while the app runs shows in
 > the model menu after the next app restart. Until then pick the model
