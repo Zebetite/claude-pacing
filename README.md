@@ -2,15 +2,15 @@
 
 A Claude Code plugin marketplace with one plugin, **pacing**.
 
-Use better models and still save weekly usage at the same time by
-delegating easier work to subagents with cheaper models. This skill
+The plugin makes use of better AI models and saves tokens at the same time by
+delegating easier tasks to subagents with cheaper models. This skill
 spends your weekly plan allowance on purpose. It uses tiers of models,
 the top tier is used for the most difficult work; the lower tiers do
 easier work through subagents. A day-by-day budget and the logged trend
-decide how far down the tiers work goes, so the week never runs out
+decide how far down the tiers work goes, so the week never runs out of tokens
 before the reset. That means it uses better models automatically when
 you have more usage left. You can custom set how many tiers you want and
-what model and effort should be on every tier.
+set exactly what model and effort each tier should use.
 
 The plugin lives in [`pacing/`](pacing/); its [README](pacing/README.md)
 has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
