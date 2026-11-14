@@ -19,6 +19,9 @@
 //   node config.mjs json            the config as JSON (for scripts)
 //   node config.mjs version         the plugin's version, from .claude-plugin/plugin.json
 //   node config.mjs where           the data folder
+//   node config.mjs notes [--project <folder>]   where the role agents' notes for a project
+//                                   are, and how long each file is
+//   node config.mjs note <role> <one fact> [--project <folder>]   add a line to a role's notes
 // Models are the Agent tool's ids; the label is what the user sees.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -85,7 +88,27 @@ const checkModel = m => { if (!MODELS[m]) fail('model must be one of ' + Object.
 const checkEffort = e => { if (!EFFORTS.includes(e)) fail('effort must be one of ' + EFFORTS.join(', ')); };
 const tierNo = (c, a) => { const n = Number(a); if (!(Number.isInteger(n) && n >= 1 && n <= c.tiers.length)) fail('tier must be 1 to ' + c.tiers.length); return n; };
 
-const [cmd, a, b, d] = process.argv.slice(2);
+// ---- the role agents' notes: one file per project and role, in the data
+//      folder. A retained agent ends with its session; what it learned that
+//      the next one would have to find again goes here, a line per fact. ----
+const ROLES = ['reader', 'implementer', 'verifier', 'researcher'];
+const argv = process.argv.slice(2);
+const projectAt = argv.indexOf('--project');
+const projectArg = projectAt >= 0 ? argv.splice(projectAt, 2)[1] : null;
+// the project is the repository the command runs in, wherever inside it
+const projectRoot = () => {
+  const dir = path.resolve(projectArg || process.cwd());
+  for (let up = dir; ; up = path.dirname(up)) {
+    if (fs.existsSync(path.join(up, '.git'))) return up;
+    if (path.dirname(up) === up) return dir;
+  }
+};
+// X:\pacing -> X-pacing, /home/me/app -> home-me-app
+const notesDir = root => path.join(dataDir, 'notes', root.split(/[^A-Za-z0-9._ -]+/).filter(Boolean).join('-'));
+const noteLines = f => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split(/\r?\n/).filter(l => l.startsWith('- ')) : []);
+const withoutDate = l => l.slice(2).replace(/ \(\d{4}-\d{2}-\d{2}\)$/, '');
+
+const [cmd, a, b, d] = argv;
 let cfg = read();
 switch (cmd || 'show') {
   case 'show':
@@ -102,6 +125,34 @@ switch (cmd || 'show') {
   case 'where':
     console.log(dataDir);
     break;
+  case 'notes': {
+    const root = projectRoot(), dir = notesDir(root);
+    console.log('notes for ' + root + ': ' + dir);
+    for (const r of ROLES) {
+      const n = noteLines(path.join(dir, r + '.md')).length;
+      console.log('  ' + r.padEnd(12) + (n ? String(n).padStart(3) + ' lines  ' : ' none yet  ') + path.join(dir, r + '.md'));
+    }
+    break;
+  }
+  case 'note': {
+    if (!ROLES.includes(a)) fail('role must be one of ' + ROLES.join(', '));
+    const text = argv.slice(2).join(' ').replace(/\s+/g, ' ').trim();
+    if (!text) fail('usage: note <role> "<one durable fact>"');
+    if (text.length > 300) fail('one fact, one line: at most 300 characters (this one has ' + text.length + ')');
+    const root = projectRoot(), dir = notesDir(root), f = path.join(dir, a + '.md');
+    fs.mkdirSync(dir, { recursive: true });
+    if (!fs.existsSync(f)) {
+      fs.writeFileSync(f, ['# ' + a + ' notes for ' + root, '',
+        'What the next ' + a + ' agent in this project would otherwise have to find again.',
+        'One fact per line; edit or remove a line that went stale.', '', ''].join('\n'));
+    }
+    const lines = noteLines(f);
+    if (lines.some(l => withoutDate(l) === text)) { console.log('already noted'); break; }
+    fs.appendFileSync(f, '- ' + text + ' (' + new Date().toLocaleDateString('sv-SE') + ')\n');
+    console.log('noted in ' + f + ' (' + (lines.length + 1) + ' lines)'
+      + (lines.length + 1 > 60 ? '; over 60 lines: say so in your report, the file needs consolidating' : ''));
+    break;
+  }
   case 'init': {
     fs.mkdirSync(dataDir, { recursive: true });
     if (cfg) {
@@ -194,5 +245,5 @@ switch (cmd || 'show') {
     break;
   }
   default:
-    fail('commands: show | json | init | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | premium <model>|none | fallback <model> <effort>|none | reset | version | where');
+    fail('commands: show | json | init | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | premium <model>|none | fallback <model> <effort>|none | reset | version | where | notes | note <role> <fact>');
 }

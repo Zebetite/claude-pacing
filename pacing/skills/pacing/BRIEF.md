@@ -1,9 +1,14 @@
 # Standing brief for subagents
 
-Paste the blocks below into every subagent prompt (Agent tool, a fresh
-agent with the tier's `model` and `effort`; a `fork` ignores the model
-override, so a lower tier is always a fresh agent). Add the task, the files,
-the goal and what was already ruled out above them.
+The plugin's role agents (`pacing:reader`, `pacing:verifier`,
+`pacing:implementer`, `pacing:researcher`) carry section 1 in their own
+prompts and read section 2's file themselves: nothing is pasted for them.
+A change to section 1 goes into the four files in `agents/` as well.
+
+For any other subagent, paste the blocks below into the prompt (Agent
+tool, a fresh agent with the tier's `model` and `effort`; a `fork` ignores
+the model override, so a lower tier is always a fresh agent). Add the
+task, the files, the goal and what was already ruled out above them.
 
 ## 1. General rules (every project)
 

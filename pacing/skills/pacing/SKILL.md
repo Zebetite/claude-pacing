@@ -1,6 +1,6 @@
 ---
 name: pacing
-description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.2 high for the session, Opus 5.5 medium and Sonnet 5.5 medium subagents, Opus 5.5 high at the top while Fable's meter is full): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Use at session start, after each big task, and whenever the user mentions usage, which model to use, or throttling; `usage` or no argument reports; `help`, `setup`, `set`, `add`, `remove`, `reset`, `log`, `next`, `premium`, `fallback`, `version` manage it."
+description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.2 high for the session, Opus 5.5 medium and Sonnet 5.5 medium subagents, Opus 5.5 high at the top while Fable's meter is full): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Use at session start, after each big task, and whenever the user mentions usage, which model to use, or throttling; `usage` or no argument reports; `help`, `setup`, `set`, `add`, `remove`, `reset`, `log`, `next`, `premium`, `fallback`, `notes`, `version` manage it."
 ---
 
 # Model pacing
@@ -28,7 +28,7 @@ the first big task is done.
 | `/pacing`, `usage`, no argument | sections 1 to 3 |
 | `help`, "usage help" | print GUIDE.md to the user, whole |
 | `setup` | section 4 |
-| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `version` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result |
+| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `version`, `notes` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result |
 | `log` | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" log` |
 
 **First run.** `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" init`.
@@ -73,15 +73,34 @@ large: logs, test runs, a fan-out over many files).
 
 This session's model is the user's to set; the lever is delegation.
 
-- Delegate with the Agent tool at the tier's `model` and `effort` from
-  the routing lines. Read BRIEF.md and `~/.claude/pacing/BRIEF.local.md`
-  once per session; every subagent prompt gets the general block, the
-  local additions, the project block (the project's CLAUDE.md rules
-  first), the task, the files, the goal and what was ruled out. A `fork`
-  ignores the model override: a lower tier is always a fresh agent.
-- **Agent type**: bulky *reading* (logs, test output, searching many
-  files) goes to the `Explore` type, which is read-only with a smaller
-  tool set; work that edits goes to a general-purpose agent.
+- **Role agents**: delegate with the Agent tool to the plugin's four
+  roles, at the `model` and `effort` the routing lines give that work:
+
+  | agent type | takes | tier |
+  |---|---|---|
+  | `pacing:reader` | bulky reading: logs, searches over many files, unfamiliar code | the lowest |
+  | `pacing:verifier` | test suites, builds, checks: runs and reports, never fixes | the lowest |
+  | `pacing:implementer` | a specified change | the one its class routes to |
+  | `pacing:researcher` | documentation and the web | the routine one; many pages are bulky: the lowest |
+
+  Work that routes to tier 1 stays in the session: no agent is started
+  for it. The roles carry the standing rules and read `BRIEF.local.md`
+  and their own notes themselves. The prompt holds only the task, the
+  files, the goal and what was ruled out.
+- **Retain them**: keep each agent's id. The next task for a role goes to
+  the same agent with SendMessage, its context intact, not to a new one.
+  Start a fresh one when the routing now gives that work another tier (an
+  agent keeps the model it started on), when the task has nothing to do
+  with what it has read, or after about five tasks or 150 000 tokens in
+  its notification, since its history is re-sent on every task. Never
+  start two of one role over the same files.
+- **Keep conclusions only**: the roles report the answer with paths and
+  line numbers; the plan and the decisions stay here. Check a result
+  against the task before using it.
+- **No role fits, or the `pacing:` agent types are not listed**: a fresh
+  general-purpose agent (`Explore` for read-only work) with the blocks of
+  BRIEF.md pasted into its prompt. A `fork` ignores the model override: a
+  lower tier is always a fresh agent.
 - Trivial work stays in the session until throttle (a subagent's start-up
   costs more than a grep); bulky work goes to the lowest tier at every
   level, so its output stays out of this context.

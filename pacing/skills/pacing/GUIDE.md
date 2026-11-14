@@ -126,11 +126,43 @@ from each session's next turn. A session that runs on a lower tier may
 hand one contained hard task to a tier 1 subagent; an open debugging hunt
 stays in the conversation.
 
-Subagents get the standing rules in every prompt, so the rules do not
-depend on the session remembering them: the general block from BRIEF.md,
-your own additions and project blocks from `~/.claude/pacing/BRIEF.local.md`
-(created empty on the first run, yours to fill, untouched by updates), and
-the project's own CLAUDE.md rules.
+## The role agents
+
+The work that leaves the session goes to four agents the plugin brings,
+each with its own instructions and tools:
+
+| agent | does | may change files |
+|---|---|---|
+| reader | searches, logs, test output, unfamiliar code; reports conclusions, not dumps | no |
+| verifier | runs tests, builds and checks; reports what passed and failed, never fixes | no |
+| implementer | makes a change the session specified | yes |
+| researcher | documentation and the web, with sources | no |
+
+The budget still picks the model: each call gets the model and effort of
+the tier that work routes to at the current level.
+
+**They are kept, not thrown away.** The session starts a role the first
+time it needs one and sends later tasks to the same agent, which still
+knows what it read. That saves the start-up cost of a new agent every
+time and gives better answers on the second task than on the first. An
+agent is replaced when its work moves to another tier, when a task has
+nothing to do with what it knows, or when it has grown long, since its
+whole history is sent again with every task.
+
+**What they learn outlasts the session.** An agent ends with its session,
+so each role keeps a notes file per project: where things live, how the
+tests run and how long they take, a trap to avoid. A new agent reads its
+file first and adds a line when it learns something lasting. The files
+are plain text in `~/.claude/pacing/notes/<project>/`, yours to read,
+edit or delete; `/pacing notes` shows where they are for the project at
+hand.
+
+The agents carry the standing rules in their own instructions, so the
+rules do not depend on the session remembering them: never touch another
+folder, never commit unasked, never delete, report failures verbatim.
+They also read your own additions and project blocks in
+`~/.claude/pacing/BRIEF.local.md` (created empty on the first run, yours
+to fill, untouched by updates) and the project's own CLAUDE.md rules.
 
 ## Commands
 
@@ -151,6 +183,7 @@ in plain words works too.
 | `/pacing next on`, `/pacing next off` | lets the skill set, or stop setting, the default model of new sessions |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model weekly meter belongs to (Fable by default), or says the plan has none |
 | `/pacing fallback opus high`, `/pacing fallback none` | the tier that takes the top place while that meter is full (Opus 5.5 high by default); none lets the remaining tiers move up |
+| `/pacing notes` | where the role agents' notes for this project are, and how long each is |
 | `/pacing version` | the installed plugin version |
 
 Your files live in `~/.claude/pacing`: the configuration in `config.json`,
