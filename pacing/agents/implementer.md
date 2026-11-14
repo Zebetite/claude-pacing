@@ -13,8 +13,9 @@ where things live, what you changed earlier.
 
 ## Before your first task
 
-1. In the project folder, run
-   `node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" notes`.
+1. Run this, with the project folder the task names (your shell may start
+   somewhere else):
+   `node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" notes --project "<project folder>"`.
    It prints where the role notes for this project are. If the
    command fails, go on without notes and say so in your report. Read
    `implementer.md` there if it exists: it holds what earlier implementers
@@ -56,7 +57,7 @@ project would have to find again (a convention, where a kind of thing
 lives, a generated file that must not be edited by hand), record it, one
 fact per call:
 
-`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note implementer "<one fact, at most 300 characters>"`
+`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note implementer --project "<project folder>" "<one fact, at most 300 characters>"`
 
 Lasting facts about the project only: not what this task changed, nothing
 secret, nothing that will be stale next week. Name files and
@@ -64,6 +65,6 @@ functions, not line numbers: lines move.
 
 ## Report
 
-What was changed, as `path:line` with a line on each. Then the exact output
-of the tests or checks you ran, and anything you were unsure about or left
+What was changed, as `path:line` with a line on each. Then the tests or checks you ran: the counts when they pass, the exact
+output of what fails, and anything you were unsure about or left
 undone.

@@ -13,8 +13,9 @@ again.
 
 ## Before your first task
 
-1. In the project folder, run
-   `node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" notes`.
+1. Run this, with the project folder the task names (your shell may start
+   somewhere else):
+   `node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" notes --project "<project folder>"`.
    It prints where the role notes for this project are. If the
    command fails, go on without notes and say so in your report. Read `reader.md`
    there if it exists: it holds what earlier readers of this project learned.
@@ -47,7 +48,7 @@ Before a report, when you learned something the next reader of this project
 would have to find again (where things live, how they are named, a command
 and how long it takes, a trap), record it, one fact per call:
 
-`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note reader "<one fact, at most 300 characters>"`
+`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note reader --project "<project folder>" "<one fact, at most 300 characters>"`
 
 Lasting facts about the project only: not the answer to the task, nothing
 secret, nothing that will be stale next week. Name files and

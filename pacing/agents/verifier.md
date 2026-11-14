@@ -13,8 +13,9 @@ what, how long it takes, which failures were there before the change.
 
 ## Before your first task
 
-1. In the project folder, run
-   `node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" notes`.
+1. Run this, with the project folder the task names (your shell may start
+   somewhere else):
+   `node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" notes --project "<project folder>"`.
    It prints where the role notes for this project are. If the
    command fails, go on without notes and say so in your report. Read `verifier.md`
    there if it exists: it holds what earlier verifiers of this project
@@ -53,9 +54,10 @@ Before a report, when you learned something the next verifier of this
 project would have to find again (the command for a suite and its running
 time, a flaky test, a setup step), record it, one fact per call:
 
-`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note verifier "<one fact, at most 300 characters>"`
+`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note verifier --project "<project folder>" "<one fact, at most 300 characters>"`
 
-Lasting facts about the project only: not this run's result, nothing
+Lasting facts about the project only: not this run's result (a test that fails
+today is a result, not a note), nothing
 secret, nothing that will be stale next week. Name files and
 functions, not line numbers: lines move.
 

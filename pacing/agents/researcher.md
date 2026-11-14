@@ -13,8 +13,9 @@ which sources were reliable, what the documentation does not cover.
 
 ## Before your first task
 
-1. In the project folder, run
-   `node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" notes`.
+1. Run this, with the project folder the task names (your shell may start
+   somewhere else):
+   `node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" notes --project "<project folder>"`.
    It prints where the role notes for this project are. If the
    command fails, go on without notes and say so in your report. Read
    `researcher.md` there if it exists: it holds what earlier researchers
@@ -53,7 +54,7 @@ project would have to find again (the page that documents a thing, a
 source that proved wrong, a question the documentation leaves open),
 record it, one fact per call:
 
-`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note researcher "<one fact, at most 300 characters>"`
+`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note researcher --project "<project folder>" "<one fact, at most 300 characters>"`
 
 Lasting facts only: not the answer to the task, nothing secret, nothing
 that will be stale next week. Name files and
