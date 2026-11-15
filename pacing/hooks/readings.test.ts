@@ -345,13 +345,40 @@ test('a session of its own, or one whose start is not known, keeps the plain lin
   expect(status.at(-1)).toBe('60% of budget, ⚪Tier 2[100%], (12% Weekly, 40% Fable)')
 })
 
-test('a side session before its first turn keeps the plain line', async ($, on) => {
+test('a side session before its first turn ends takes the model it is set to', async ($, on) => {
+  // the case reported: after a reload the session.measure calls of a turn
+  // came before its end, and the line went out without Sub Agent
   const status = engine(on)
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('process.run', () => ({ value: answer('ahead', 10, { spawned: true }) }))
+
+  await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('⚪Tier 2 Sub Agent - 50% of budget, 🟤Tier 4[100%], (10% Weekly, 40% Fable)')
+})
+
+test('a side session whose model is not known yet keeps the plain line', async ($, on) => {
+  const status = engine(on)
+  on('session.model', () => ({ value: 'opus' }))
   on('process.run', () => ({ value: answer('ahead', 10, { spawned: true }) }))
 
   await $.turn.complete(turn('claude-opus-5-5', 1, 'a1'))
   await $.session.measure(measure(10))
   expect(status.at(-1)).toBe('50% of budget, ⚪Tier 2[100%], (10% Weekly, 40% Fable)')
+})
+
+test('the line is redrawn when the main thread\'s turn ends', async ($, on) => {
+  const status = engine(on)
+  on('process.run', () => ({ value: answer('ahead', 10, { spawned: true }) }))
+
+  await $.session.measure(measure(10))
+  const before = status.length
+  await $.turn.complete(turn('claude-opus-5-5', 1))
+  expect(status.length).toBe(before + 1)
+  expect(status.at(-1)).toBe('⚪Tier 2 Sub Agent - 50% of budget, ⚪Tier 2[100%], (10% Weekly, 40% Fable)')
+  // a subagent's turn waits for the next measure
+  await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
+  expect(status.length).toBe(before + 1)
 })
 
 // ---- a carried per-model figure is not a current one ----

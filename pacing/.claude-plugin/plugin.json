@@ -1,6 +1,6 @@
 {
   "name": "pacing",
-  "version": "0.9.3-beta",
+  "version": "0.9.4-beta",
   "icon": "./.claude-plugin/icon.png",
   "license": "MIT",
   "homepage": "https://github.com/Zebetite/claude-pacing",

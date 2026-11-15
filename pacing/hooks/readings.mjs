@@ -142,6 +142,16 @@ export const statusText = (j, mix, self = null, now = Date.now()) => {
   return parts.join(', ') + (j.level === 'stop' ? ', wrap up' : '');
 };
 
+// the status line from a reading. A side session leads with its own tier, by
+// the model its main thread runs on; a model off the ladder is Other.
+export const lineOf = (j, model, tokens, agentTokens, now) => {
+  const prices = j.prices || {}, tierOf = j.tierOf || {};
+  const child = j.spawned === true && typeof model === 'string' && model !== '';
+  const id = child ? idOf(model, prices) : null;
+  const self = child ? (id && tierOf[id]) || 'Other' : null;
+  return statusText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now);
+};
+
 /** @type {import('claude-code').Register} */
 export const register = on => {
   // this module's memory, for this session; a reload starts it over, and
@@ -215,6 +225,10 @@ export const register = on => {
       t.read += u.cache_read_input_tokens || 0;
       t.write += u.cache_creation_input_tokens || 0;
     }
+    // the turn's tokens are in: the line shows them now, not at the next turn
+    if (!e.agentId && reading && !running) {
+      try { $.ui.status(lineOf(reading, sessionModel, tokens, agentTokens, lastTurnAt ?? Date.now())); } catch { /* never disturbs the turn */ }
+    }
     return result;
   });
 
@@ -252,11 +266,18 @@ export const register = on => {
       // the tier shares move every turn: the line is redrawn even when no
       // new reading was due
       if (reading) {
-        const child = reading.spawned === true;
-        const prices = reading.prices || {}, tierOf = reading.tierOf || {};
-        const id = child && sessionModel ? idOf(sessionModel, prices) : null;
-        const self = !child || !sessionModel ? null : (id && tierOf[id]) || 'Other';
-        $.ui.status(statusText(reading, tierMix(tokens, tierOf, prices, agentTokens, reading.agentTierOf), self, now));
+        // a side session's model before its first turn ends: the one it is
+        // set to (a reload starts this memory over, and the measures of a
+        // turn come before its end). A name the prices do not know (an
+        // alias) waits for the first turn's model rather than being Other.
+        let model = sessionModel;
+        if (!model && reading.spawned === true) {
+          try {
+            const m = await $.session.model();
+            if (typeof m === 'string' && idOf(m, reading.prices || {})) model = m;
+          } catch { /* not known yet */ }
+        }
+        $.ui.status(lineOf(reading, model, tokens, agentTokens, now));
       }
     } catch {
       // a reading is a convenience: a missing node, a timeout or a bad line
