@@ -12,6 +12,11 @@ before the reset. That means it uses better models automatically when
 you have more usage left. You can custom set how many tiers you want and
 set exactly what model and effort each tier should use.
 
+4 different agent roles (reader, verifier, implementer and researcher)
+and each stay with the session and keep notes per project, and a long
+session hands its work over to a new one. A status line shows the budget
+and each tier’s share.
+
 The plugin lives in [`pacing/`](pacing/); its [README](pacing/README.md)
 has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 
