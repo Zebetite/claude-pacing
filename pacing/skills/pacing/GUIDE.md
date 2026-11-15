@@ -26,28 +26,15 @@ the cheaper Opus 5.5 medium (`/pacing fallback` changes or removes that).
 
 ## ⚠️ Setup, two steps
 
-> **1. Run `/pacing setup`** once to confirm or change the ladder, and to
-> decide on the next-session model switch (the skill writes the
-> recommended model into the desktop app's preset for new local sessions,
-> and into `~/.claude/settings.json` for the terminal CLI). The other
-> automation, the SessionStart hook that shows every new session the last
-> reading and the recommended model, comes with the plugin and needs no
-> setup.
+> **1.** Type `/pacing setup` and answer the questions. Unsure? Keep the
+> defaults.
 >
-> **2. Pick tier 1 yourself in the model menu.** The skill cannot switch a
-> running session's model. With the default ladder, set the session to
-> **Fable 5.2** and the effort to **high**. New sessions start there by
-> themselves once the switch is on, but the app reads its preset file
-> only at startup: a change the skill makes while the app runs shows in
-> the model menu after the next app restart. Until then pick the model
-> and effort in the menu once; the app then stores that as its preset
-> itself. Every new session also shows
-> the recommended model in a pacing line at start and says so in its first
-> reply when it runs on something else: then **switch the model menu**
-> before the first big task. A preset of your own (one named per project
-> in the model menu) keeps its own model; the skill only sets the built-in
-> one. While that start line is fresh, the session uses it instead of
-> taking a new reading; the next reading comes after the first big task.
+> **2.** In the model menu, pick the tier 1 model and effort (the default
+> is **Fable 5.2** with effort **high**).
+
+That is all. You can see your weekly budget in the status bar: it shows
+the percentage of your allowance for the days passed. If it goes over
+100 %, it uses lower tiers. It also shows how much each tier is used.
 
 ## What it watches
 
@@ -174,7 +161,11 @@ the model menu (setup step 2). The skill steers by delegating work to
 subagents on the lower tiers, by writing the recommended model into the
 desktop app's built-in preset for new local sessions and into
 settings.json for the terminal CLI, and by telling you at the start of
-every session when to switch by hand. Your *other* open sessions it can
+every session when to switch by hand. The app reads its preset only when
+it starts, so a model the skill sets while the app runs shows in the
+model menu after the next restart; until then, pick it in the menu once.
+A preset of your own (one named per project in the model menu) keeps its
+own model: the skill sets only the built-in one. Your *other* open sessions it can
 switch for you: at throttle or Fable out it offers to move them to the
 recommended model, the app asks you to confirm, and the change applies
 from each session's next turn. A session that runs on a lower tier may
