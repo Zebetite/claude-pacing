@@ -27,6 +27,7 @@ rules; `skills/pacing/SKILL.md` is what Claude follows.
 | `agents/*.md` | the four role agents the session delegates to and keeps for its whole run: `reader`, `verifier`, `implementer`, `researcher` |
 | `skills/pacing/scripts/*.mjs` | `budget.mjs` (the rule), `config.mjs` (the ladder), `hook.mjs` (session start), `models.mjs` (the model table), `paths.mjs` (where a project's notes and handovers live) |
 | `hooks/hooks.json` | a SessionStart hook that shows the last reading and the recommended model |
+| `hooks/readings.json`, `readings.mjs` | automatic readings after a turn, and a status line with the budget and each tier's share, through a hooks module, on a Claude Code version that has them; an older one reads the file's empty `hooks` block and skips the module. `readings.test.ts` tests it (`claude plugin test`) |
 
 The scripts run with `node` (Node.js 18 or later), which must be on the
 PATH of the shell Claude Code uses.

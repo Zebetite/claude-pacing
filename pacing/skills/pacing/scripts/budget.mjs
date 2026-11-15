@@ -11,6 +11,11 @@
 // (1.5 by default), the rest 1. The line is a step at local midnight: the whole
 // of the current calendar day's allowance counts as available from its start.
 // --dry: compute only (no log entry, no state.json, no settings.json change).
+// --source hook: an automatic reading from the plugin's hooks module (after a
+// turn). It has no per-model meter, so it carries that figure over from the
+// last reading of the same week; it never changes settings.json or the app's
+// preset; it is not logged when the last reading is under 30 min old and
+// nothing moved; and it prints one JSON line for the module, not the report.
 // The config, the log and the state live in ~/.claude/pacing, outside the
 // plugin folder, which an update replaces.
 import fs from 'node:fs';
@@ -120,12 +125,12 @@ if (argv[0] === 'log') {
   for (const e of rows) {
     // local time, like the report
     console.log(new Date(e.t).toLocaleString('sv-SE').slice(0, 16) + '  all ' + String(e.all).padStart(5) + ' %  line ' + String(e.line).padStart(5) + ' %  '
-      + ((e.premium ?? e.fable) != null ? labelOf(e.premiumModel) + ' ' + String(e.premium ?? e.fable).padStart(3) + ' %  ' : '') + (e.five != null ? '5h ' + String(e.five).padStart(3) + ' %  ' : '') + e.level + (e.premiumOut || e.fableOut ? ', ' + labelOf(e.premiumModel) + ' out' : ''));
+      + ((e.premium ?? e.fable) != null ? labelOf(e.premiumModel) + ' ' + String(e.premium ?? e.fable).padStart(3) + ' %  ' : '') + (e.five != null ? '5h ' + String(e.five).padStart(3) + ' %  ' : '') + e.level + (e.premiumOut || e.fableOut ? ', ' + labelOf(e.premiumModel) + ' out' : '') + (e.source === 'hook' ? '  (auto)' : ''));
   }
   process.exit(0);
 }
 
-const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'context-tokens', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry'];
+const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'context-tokens', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry', 'source'];
 const opt = {};
 const unknown = [];
 for (let i = 0; i < argv.length; i++) {
@@ -140,7 +145,7 @@ for (let i = 0; i < argv.length; i++) {
 const usage = () => {
   console.log('usage: node budget.mjs --all <pct> --reset <ISO> [--premium <pct>] [--five <pct>] [--five-reset <ISO>] [--session <model>]');
   console.log('                      [--context <pct>] [--context-tokens <n>]');
-  console.log('                      [--extra-spent <amount> --extra-limit <amount> [--extra-currency <code>]] [--now <ISO>] [--dry]');
+  console.log('                      [--extra-spent <amount> --extra-limit <amount> [--extra-currency <code>]] [--now <ISO>] [--dry] [--source skill|hook]');
   console.log('       node budget.mjs log [n] | week [n]');
   console.log('       a meter the plan does not have: pass - for its percent');
   process.exit(1);
@@ -148,10 +153,24 @@ const usage = () => {
 // a mistyped flag must not pass as "no such meter"
 if (unknown.length) { console.log('unknown option ' + unknown.join(' ')); usage(); }
 if (opt.all === undefined || !opt.reset) usage();
+const source = opt.source || 'skill';
+if (!['skill', 'hook'].includes(source)) { console.log('--source is skill or hook'); usage(); }
+const auto = source === 'hook';
 const num = v => (v === undefined || v === '-' ? null : Number(v));
 const used = Number(opt.all);
-// the per-model meter is read only when the config names one
-const prem = premium ? num(opt.premium !== undefined ? opt.premium : opt.fable) : null;
+// the per-model meter is read only when the config names one. An automatic
+// reading never has it (the engine hands a plugin only the all-models, 5-hour
+// and spend windows), so it takes the last figure of the same week, with the
+// time that figure was read; a week with none has no figure.
+let premFrom = null;
+const premArg = opt.premium !== undefined ? opt.premium : opt.fable;
+if (auto && premium && premArg === undefined) {
+  const r = Date.parse(opt.reset);
+  const known = readLog().filter(e => e.premiumModel === premium && e.premium != null && Math.abs(Date.parse(e.reset) - r) <= HOUR);
+  const last = known[known.length - 1];
+  if (last) premFrom = { premium: last.premium, at: last.premiumAt || last.t };
+}
+const prem = premium ? (premFrom ? premFrom.premium : num(premArg)) : null;
 const five = num(opt.five);
 const context = num(opt.context);
 const contextTokens = num(opt['context-tokens']);
@@ -166,6 +185,11 @@ const now = opt.now ? new Date(opt.now) : new Date();
 const bad = [used, prem, five, context, contextTokens].some(v => v !== null && Number.isNaN(v))
   || Number.isNaN(reset.getTime()) || Number.isNaN(now.getTime()) || (fiveReset && Number.isNaN(fiveReset.getTime()));
 if (bad) { console.log('bad input: percents must be numbers, dates ISO 8601'); process.exit(1); }
+// an automatic reading answers the hooks module, not a person: the report's
+// lines are kept here, and one JSON line goes out at the end
+const said = [];
+const print = console.log;
+if (auto) console.log = (...a) => { said.push(a.join(' ')); };
 
 // ---- the budget line (a step per local day) ----
 // share(t): the part of the week's allowance that belongs to the time from the
@@ -477,11 +501,26 @@ if (!ladder.length) {
 }
 
 // ---- side effects: log, state, the default model for new sessions ----
+let logged = false;
 if (!opt.dry) {
-  const entry = { t: now.toISOString(), all: r1(used), premium: prem === null ? null : r1(prem), premiumModel: premium, premiumOut: premOut, five: five === null ? null : r1(five), fiveReset: opt['five-reset'] || null, line: r1(budget), level, reset: opt.reset };
-  fs.appendFileSync(logFile, JSON.stringify(entry) + '\n');
-  fs.writeFileSync(stateFile, JSON.stringify({ ...entry, delta: r1(delta), next: sessionTier, trend: trend && !trend.short ? { rate: r1(trend.rate), projected: r1(trend.projected) } : null }, null, 2) + '\n');
-  if (setNextModel && sessionTier) {
+  // an automatic reading fires after every turn, in every session: it is
+  // logged only when the last reading (of any source) is 30 min old, or the
+  // meter moved a whole point, or the level or the premium flag changed, so
+  // the log grows by about two readings an hour at most
+  const lastEntry = readLog().at(-1);
+  const age = lastEntry ? now - Date.parse(lastEntry.t) : Infinity;
+  const same = auto && lastEntry && age >= 0 && age < 30 * 60000 && Math.abs(used - lastEntry.all) < 1
+    && lastEntry.level === level && !!lastEntry.premiumOut === premOut;
+  if (!same) {
+    const entry = { t: now.toISOString(), all: r1(used), premium: prem === null ? null : r1(prem), premiumModel: premium, premiumOut: premOut, five: five === null ? null : r1(five), fiveReset: opt['five-reset'] || null, line: r1(budget), level, reset: opt.reset,
+      ...(auto ? { source: 'hook' } : {}), ...(premFrom ? { premiumAt: premFrom.at } : {}) };
+    fs.appendFileSync(logFile, JSON.stringify(entry) + '\n');
+    fs.writeFileSync(stateFile, JSON.stringify({ ...entry, delta: r1(delta), next: sessionTier, trend: trend && !trend.short ? { rate: r1(trend.rate), projected: r1(trend.projected) } : null }, null, 2) + '\n');
+    logged = true;
+  }
+  // only a reading the session takes on purpose changes what new sessions
+  // start on: a background run never rewrites a setting
+  if (setNextModel && sessionTier && !auto) {
     // the app's picker and preset know "max"; settings.json's effortLevel is
     // written as xhigh for max, as it was before (not verified either way)
     const effort = sessionTier.effort;
@@ -521,4 +560,20 @@ if (!opt.dry) {
       console.log('desktop app preset not changed: ' + e.message);
     }
   }
+}
+if (auto) {
+  const doLine = said.find(l => l.startsWith('do: '));
+  // for the status line: the meter as a share of the budget line, and what the
+  // module needs to split the session's own use by tier: each model's tier
+  // number (its first place on the configured ladder; the reader's model
+  // after the last tier when it is not on the ladder; the fallback's at tier
+  // 1, the place it takes) and its prices
+  const tierOf = {};
+  tiers.forEach((t, i) => { if (MODELS[t.model] && !tierOf[MODELS[t.model].id]) tierOf[MODELS[t.model].id] = i + 1; });
+  if (readerCfg && readerCfg !== 'ladder' && MODELS[readerCfg.model] && !tierOf[MODELS[readerCfg.model].id]) tierOf[MODELS[readerCfg.model].id] = tiers.length + 1;
+  if (fallbackTier && !tierOf[MODELS[fallbackTier.model].id]) tierOf[MODELS[fallbackTier.model].id] = 1;
+  const prices = Object.fromEntries(Object.values(MODELS).map(m => [m.id, m.price]));
+  print(JSON.stringify({ level, all: r1(used), line: r1(budget), ofBudget: budget > 0 ? Math.round(100 * used / budget) : null, tierOf, prices,
+    premium: prem === null ? null : r1(prem), premiumOut: premOut, premiumLabel: premLabel,
+    premiumAt: premFrom ? premFrom.at : null, logged, do: doLine ? doLine.slice(4) : null }));
 }

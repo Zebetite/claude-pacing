@@ -112,6 +112,30 @@ where the meter ended, how much of the time went at each level, and
 whether it crossed the budget line. `/pacing week` shows the same for the
 last two weeks.
 
+## Automatic readings
+
+On a Claude Code version with hooks modules, the plugin also takes a
+reading by itself after a turn: when the weekly meter has moved a whole
+point, or 30 minutes after the last reading. It keeps the start line
+fresh for the next session and shows it in the status line, with one
+notice when the level changes:
+
+    77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)
+
+That is the weekly meter as a share of today's budget line (over 100 %
+means over the line), how this session's own use splits over the tiers,
+subagents included, and the two meters. The split is an estimate: each
+model's tokens priced at its API rates, which is how the weekly meter
+weighs the models too. Tier 4 is the reader agent's model when it is not
+on the ladder. The circles are gold, silver, bronze and brown for tiers
+1 to 4 (🟡 ⚪ 🟠 🟤), then 🟣 🔴 🔵 🟢 for a longer ladder; ⚫ is a model the
+ladder does not hold. Claude Code hands a plugin only the all-models and 5-hour
+meters, so such a reading carries Fable's figure over from the last full
+reading of the week, and it never changes the next session's model: that
+stays with the readings the session takes. `/pacing log` marks them
+`(auto)`. On an older Claude Code the plugin works as before, without
+them.
+
 ## The session's own context
 
 Every turn re-sends the whole conversation, so a long session makes each

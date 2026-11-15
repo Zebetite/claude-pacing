@@ -60,7 +60,10 @@ the next session's model. It logs the reading, writes
 `state.json` for the hook, and (unless `next off`) sets the next
 session's tier as the default for new sessions: `~/.claude/settings.json`
 and, on Windows, the desktop app's built-in preset (read at app start; a
-user-made preset keeps its own model). `--dry` computes only.
+user-made preset keeps its own model). `--dry` computes only. Readings
+marked `(auto)` in `log` come from the plugin's hooks module after turns
+(`--source hook`): they lack the per-model meter and extra usage and set
+nothing for the next session, so they never replace this one.
 
 Classes of work: **judgment** (design, debugging, framework quirks,
 reviews, decisions on user data, final verification); **medium** (a

@@ -47,6 +47,9 @@ home folder is a new temp folder, so the tests never read or change your
 own `~/.claude`. The `tests/` folder is outside the plugin and is not
 published with it.
 
+The hooks module for automatic readings has its own test, which runs
+under Claude Code's test kit: `claude plugin test pacing`.
+
 ## Releases
 
 Each release is a commit that bumps `version` in

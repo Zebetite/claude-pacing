@@ -1,0 +1,5 @@
+{
+  "description": "Pacing: automatic readings after each turn (a hooks module). The empty hooks block keeps Claude Code versions without modules from refusing the file.",
+  "hooks": {},
+  "modules": ["./readings.mjs"]
+}

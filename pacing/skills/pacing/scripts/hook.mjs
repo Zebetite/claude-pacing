@@ -45,9 +45,11 @@ const menu = s.next ? s.next.label + ', effort ' + s.next.effort : 'unknown';
 const trend = s.trend ? ', trend ' + (s.trend.rate >= 0 ? '+' : '') + s.trend.rate + ' %/day, projected ' + s.trend.projected + ' % at reset' : '';
 const premLabel = s.premiumModel && MODELS[s.premiumModel] ? MODELS[s.premiumModel].label : 'Fable';
 const facts = 'all models ' + s.all + ' % used, budget line ' + s.line + ' %, level ' + s.level + (s.premiumOut || s.fableOut ? ', ' + premLabel + ' out' : '') + trend;
+// a reading the hooks module took after a turn, not one the session asked for
+const auto = s.source === 'hook' ? ', automatic' : '';
 const visible = stale
-  ? 'Pacing (' + ageH + ' h ago, stale): ' + facts + '. Last recommendation: ' + next + '; the session will take a fresh reading before the first big task.'
-  : 'Pacing (' + ageH + ' h ago): ' + facts + '. Recommended session model: ' + next + '. Check the model menu shows ' + menu + '.';
+  ? 'Pacing (' + ageH + ' h ago' + auto + ', stale): ' + facts + '. Last recommendation: ' + next + '; the session will take a fresh reading before the first big task.'
+  : 'Pacing (' + ageH + ' h ago' + auto + '): ' + facts + '. Recommended session model: ' + next + '. Check the model menu shows ' + menu + '.';
 const context = stale
   ? 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago, STALE: the budget line has moved since): ' + facts + '. Last recommendation: ' + next
     + '. Do not tell the user to switch models on this reading. Run the `pacing` skill (section 1, Measure) before the first big task and follow its do: line; read BRIEF.md before delegating.'
