@@ -126,12 +126,13 @@ That is the weekly meter as a share of today's budget line (over 100 %
 means over the line), how this session's own use splits over the tiers,
 subagents included, and the two meters. The split is an estimate: each
 model's tokens priced at its API rates, which is how the weekly meter
-weighs the models too. Tier 4 is the reader agent's model when it is not
-on the ladder. The circles are gold, silver, bronze and brown for tiers
-1 to 4 (🟡 ⚪ 🟠 🟤), then 🟣 🔴 🔵 🟢 for a longer ladder; ⚫ is a model the
-ladder does not hold. Claude Code hands a plugin only the all-models and 5-hour
-meters, so such a reading carries Fable's figure over from the last full
-reading of the week, and it never changes the next session's model: that
+weighs the models too. The reader agent's model, when it is not on the
+ladder, counts as the tier after the last (tier 4 with three tiers). The
+circles are gold, silver, bronze and brown for tiers 1 to 4 (🟡 ⚪ 🟠 🟤),
+then 🟣 🔴 🔵 🟢 for a longer ladder; ⚫ is a model the ladder does not
+hold. Claude Code hands a plugin only the all-models and 5-hour meters,
+so such a reading carries the per-model figure (Fable's by default) over
+from the last full reading of the week, and it never changes the next session's model: that
 stays with the readings the session takes. `/pacing log` marks them
 `(auto)`. On an older Claude Code the plugin works as before, without
 them.

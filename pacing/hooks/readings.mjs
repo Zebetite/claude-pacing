@@ -29,7 +29,10 @@ const percents = values => {
   const raw = values.map(v => (100 * v) / total);
   const out = raw.map(Math.floor);
   const order = raw.map((r, i) => [r - out[i], i]).sort((a, b) => b[0] - a[0]);
-  for (let k = 0; k < 100 - out.reduce((a, b) => a + b, 0); k++) out[order[k][1]]++;
+  // the points still missing, counted once: counted inside the loop, the
+  // bound would shrink as the loop adds them and leave the sum short of 100
+  const short = 100 - out.reduce((a, b) => a + b, 0);
+  for (let k = 0; k < short; k++) out[order[k][1]]++;
   return out;
 };
 
@@ -90,7 +93,8 @@ export const register = on => {
 
   on('session.measure', async ($, e, next) => {
     const result = await next(e);
-    const week = e.rateLimits.find(r => r.kind === 'seven_day');
+    const limits = e.rateLimits || [];
+    const week = limits.find(r => r.kind === 'seven_day');
     // no weekly window: an API key, not a subscription, or no response yet
     if (!week || !week.resetsAt || running) return result;
     const now = Date.now();
@@ -99,7 +103,7 @@ export const register = on => {
       if (due) {
         running = true;
         last = { pct: week.percentUsed, at: now };
-        const five = e.rateLimits.find(r => r.kind === 'five_hour');
+        const five = limits.find(r => r.kind === 'five_hour');
         const argv = ['node', $.plugin.root + '/skills/pacing/scripts/budget.mjs',
           '--all', String(week.percentUsed), '--reset', week.resetsAt, '--source', 'hook'];
         if (five) argv.push('--five', String(five.percentUsed), ...(five.resetsAt ? ['--five-reset', five.resetsAt] : []));

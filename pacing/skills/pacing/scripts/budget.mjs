@@ -159,8 +159,9 @@ const auto = source === 'hook';
 const num = v => (v === undefined || v === '-' ? null : Number(v));
 const used = Number(opt.all);
 // the per-model meter is read only when the config names one. An automatic
-// reading never has it (the engine hands a plugin only the all-models, 5-hour
-// and spend windows), so it takes the last figure of the same week, with the
+// reading never has it (the engine hands a plugin only the all-models and
+// 5-hour windows, and a gateway's spend limit; no per-model meter and no
+// extra usage), so it takes the last figure of the same week, with the
 // time that figure was read; a week with none has no figure.
 let premFrom = null;
 const premArg = opt.premium !== undefined ? opt.premium : opt.fable;

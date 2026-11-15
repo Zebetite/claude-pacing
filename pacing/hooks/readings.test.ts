@@ -85,6 +85,33 @@ test('a priced model off the ladder is Other, one with no price is left out; a l
   expect(status.at(-1)).toBe('90% of budget, 🟠Tier 3[75%] 🟣Tier 5[13%] ⚫Other[12%], (18% Weekly)')
 })
 
+test('the shares always add up to 100, however the spend divides', async ($, on) => {
+  const status = engine(on)
+  on('process.run', () => ({ value: answer('ahead', 10) }))
+
+  // 2:2:2:1 is 28.6, 28.6, 28.6, 14.3 %: three points short when rounded down
+  await $.turn.complete(turn('claude-fable-5-2', 2))
+  await $.turn.complete(turn('claude-opus-5-5', 2))
+  await $.turn.complete(turn('claude-sonnet-5-5', 2))
+  await $.turn.complete(turn('claude-haiku-5-5', 1))
+  await $.session.measure(measure(10))
+  const line = status.at(-1) ?? ''
+  const shares = [...line.matchAll(/\[(\d+)%\]/g)].map(m => Number(m[1]))
+  expect(shares).toEqual([29, 29, 28, 14])
+  expect(shares.reduce((a, b) => a + b, 0)).toBe(100)
+})
+
+test('an event with no rate limits at all is let through', async ($, on) => {
+  const status = engine(on)
+  let runs = 0
+  on('process.run', () => (runs++, { value: answer('ahead', 10) }))
+
+  const r = await $.session.measure({ context: { window: 1000000 }, changed: ['context'] } as any)
+  expect(r.changed).toEqual(['context'])
+  expect(runs).toBe(0)
+  expect(status).toEqual([])
+})
+
 test('no run without a weekly window, nor again before it moves a point', async ($, on) => {
   const status = engine(on)
   let runs = 0

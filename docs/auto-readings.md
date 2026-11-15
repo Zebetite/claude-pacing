@@ -1,7 +1,7 @@
 # Automatic readings after each turn (open item 8)
 
-Status: built and tested; not yet released. This file sits outside the
-plugin folder, so it is not published.
+Status: built, tested and released in 0.8.0-beta. This file sits outside
+the plugin folder, so it is not published.
 
 ## Goal
 
@@ -20,17 +20,19 @@ level in the status line.
 - `hooks/readings.mjs`: on `session.measure`, once the weekly window
   (`seven_day`) moved a whole point or 30 min passed, it runs
   `node <$.plugin.root>/skills/pacing/scripts/budget.mjs --all .. --reset ..
-  --five .. --five-reset .. --source hook`, and shows one toast when the
+  --source hook --five .. --five-reset ..`, and shows one toast when the
   level changes. The status line shows
   `77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)`:
   the meter as a share of the line; the session's own use by tier, from
   every turn's tokens (`turn.complete`, subagents included) priced per
-  model; the two meters. The status line is plain text, so the tiers
-  are marked by emoji circles: gold, silver, bronze, brown, then purple,
-  red, blue, green. A row above the prompt (`ui.render` on
-  `AbovePrompt`) could draw the squares in theme colours (tier 1 in the
-  app's green for added lines), and was tried live; the user preferred the
-  status line. Nothing goes into the system prompt (a section that changed
+  model, in shares that add up to 100; the two meters. The status line is
+  plain text, so the tiers are marked by emoji circles with no space
+  before "Tier": gold, silver, bronze, brown (🟡 ⚪ 🟠 🟤), then purple,
+  red, blue, green (🟣 🔴 🔵 🟢), and ⚫ for a model the ladder does not
+  hold. An earlier version drew the line as a row above the prompt
+  (`ui.render` on `AbovePrompt`), where the marks could take theme
+  colours (tier 1 in the app's green for added lines); it was tried live,
+  and the user preferred the status line. Nothing goes into the system prompt (a section that changed
   every turn would break the prompt cache). Any failure is swallowed.
 - `budget.mjs --source hook`: carries the per-model figure (and the time
   it was read) over from the last reading of the same week; logs with
