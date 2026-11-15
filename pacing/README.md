@@ -28,8 +28,8 @@ rules; `skills/pacing/SKILL.md` (reports and settings) and
 | `skills/pacing/GUIDE.md`, `BRIEF.md` | the user guide and the standing brief for subagents |
 | `skills/pacing/SETUP.md`, `HANDOVER.md` | the steps for `setup` and for writing a handover, read only when needed so that `SKILL.md` stays short |
 | `agents/*.md` | the four role agents the session delegates to and keeps for its whole run: `reader`, `verifier`, `implementer`, `researcher` |
-| `skills/pacing/scripts/*.mjs` | `budget.mjs` (the rule), `config.mjs` (the ladder), `hook.mjs` (session start), `models.mjs` (the model table), `paths.mjs` (where a project's notes and handovers live) |
-| `hooks/hooks.json` | a SessionStart hook that shows the last reading and the recommended model |
+| `skills/pacing/scripts/*.mjs` | `budget.mjs` (the rule), `config.mjs` (the ladder), `hook.mjs` (session start), `models.mjs` (the model table), `paths.mjs` (where a project's notes and handovers live), `safe.mjs` (writes that several sessions can make at once without losing one) |
+| `hooks/hooks.json` | a SessionStart hook that shows the last reading and the recommended model, and says when another session has been at work in the project; a SessionEnd hook that takes this session's mark off the project |
 | `hooks/readings.json`, `readings.mjs` | automatic readings after a turn, a status line with the budget and each tier's share, and a notice when a large session resumes after an hour's pause, through a hooks module, on a Claude Code version that has them; an older one reads the file's empty `hooks` block and skips the module. `readings.test.ts` tests it (`claude plugin test`) |
 
 The scripts run with `node` (Node.js 18 or later), which must be on the

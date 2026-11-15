@@ -2,7 +2,7 @@
 name: reader
 description: "Pacing role agent, read-only. Reads what is too bulky for the session: searches over many files, logs, test output, unfamiliar code. Returns conclusions with paths and line numbers, never the dumps. The session keeps one for the whole session and sends it task after task."
 tools: Read, Grep, Glob, Bash
-model: inherit
+model: haiku
 color: cyan
 ---
 

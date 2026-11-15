@@ -51,7 +51,7 @@ describe('budget.mjs last', () => {
     try {
       reading(s, 10, NOW, ['--premium', '2']);
       assert.equal(last(s, at(31)).out.trim(), 'measure: the last reading is 31 min old');
-      assert.equal(last(s, at(-5)).out.trim(), 'measure: the last reading is -5 min old');
+      assert.equal(last(s, at(-5)).out.trim(), 'measure: the last reading is dated after now');
       reading(s, 96, at(40), ['--premium', '2']);
       assert.equal(last(s, at(45)).out.trim(), 'measure: the week is nearly used, and extra usage is only in a full reading');
       reading(s, 90, '2026-11-19T11:50:00.000Z', ['--premium', '2']);

@@ -1,5 +1,5 @@
 {
-  "description": "Pacing: show every new session the last usage reading and the recommended model",
+  "description": "Pacing: show every new session the last usage reading and the recommended model, and whether another session is at work in the project",
   "hooks": {
     "SessionStart": [
       {
@@ -8,8 +8,25 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/hook.mjs"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/hook.mjs"
+            ],
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/hook.mjs",
+              "end"
+            ],
+            "timeout": 5
           }
         ]
       }

@@ -34,6 +34,8 @@ export const sandbox = () => {
   const run = (script, args = [], opts = {}) => {
     const r = spawnSync(process.execPath, [path.join(scripts, script), ...args], {
       cwd: opts.cwd || project, env: { ...env, ...(opts.env || {}) }, encoding: 'utf8',
+      // what the engine hands a hook on its standard input
+      ...(opts.input !== undefined ? { input: opts.input } : {}),
     });
     return { code: r.status, out: r.stdout, err: r.stderr, lines: r.stdout.split(/\r?\n/) };
   };
@@ -41,7 +43,7 @@ export const sandbox = () => {
     home, project, data, env, run,
     budget: (args, opts) => run('budget.mjs', args, opts),
     config: (args, opts) => run('config.mjs', args, opts),
-    hook: opts => run('hook.mjs', [], opts),
+    hook: opts => run('hook.mjs', (opts && opts.args) || [], opts),
     file: (...p) => path.join(data, ...p),
     read: (...p) => fs.readFileSync(path.join(data, ...p), 'utf8'),
     exists: (...p) => fs.existsSync(path.join(data, ...p)),

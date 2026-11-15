@@ -156,18 +156,18 @@ test('a failed run changes nothing and never throws into the session', async ($,
 
 // ---- the per-model meter in the status line ----
 
-test('a carried per-model figure says when it was read; the meter that set the level shows its own budget share', async ($, on) => {
+test('a carried per-model figure is current for half an hour; the meter that set the level shows its own budget share', async ($, on) => {
   const status = engine(on)
   const toasts: string[] = []
-  const at = '2026-11-13T09:40:00.000Z'
-  const d = new Date(at)
-  const hhmm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
-  let next = answer('ahead', 10, { premium: 18, premiumAt: at, premiumLevel: 'on pace', levelBy: 'all', premiumOfBudget: 90 })
+  const NOW = Date.parse('2026-11-13T10:00:00.000Z')
+  mock.clock(on, { now: NOW })
+  // read 20 min ago: still shown as it is
+  let next = answer('ahead', 10, { premium: 18, premiumAt: '2026-11-13T09:40:00.000Z', premiumLevel: 'on pace', levelBy: 'all', premiumOfBudget: 90 })
   on('process.run', () => ({ value: next }))
   on('ui.toast', (_, e) => (toasts.push(e.text), { value: undefined }))
 
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('50% of budget, (10% Weekly, 18% Fable at ' + hhmm + ')')
+  expect(status.at(-1)).toBe('50% of budget, (10% Weekly, 18% Fable)')
   next = answer('over', 11, { premium: 22, premiumAt: null, premiumLevel: 'over', levelBy: 'premium', premiumOfBudget: 110, do: 'medium tasks leave the session model too' })
   await $.session.measure(measure(11))
   expect(status.at(-1)).toBe('110% of Fable budget, (11% Weekly, 22% Fable)')
@@ -302,9 +302,8 @@ test('the line: from 300 000 tokens and an hour idle, in whole minutes', () => {
 // ---- a session another session started ----
 
 test('a side session leads with its own tier: Tier X Sub Agent - X% of budget', async ($, on) => {
-  mock.env(on, { CLAUDE_CODE_CHILD_SESSION: '1' })
   const status = engine(on)
-  on('process.run', () => ({ value: answer('ahead', 10) }))
+  on('process.run', () => ({ value: answer('ahead', 10, { spawned: true }) }))
 
   await $.turn.complete(turn('claude-opus-5-5', 9))
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
@@ -313,36 +312,125 @@ test('a side session leads with its own tier: Tier X Sub Agent - X% of budget', 
 })
 
 test('a side session: the per-model meter\'s share when it decides; a model off the ladder is Other', async ($, on) => {
-  mock.env(on, { CLAUDE_CODE_CHILD_SESSION: '1' })
   const status = engine(on)
-  let next = answer('over', 11, { premium: 22, levelBy: 'premium', premiumOfBudget: 110 })
+  let next = answer('over', 11, { premium: 22, levelBy: 'premium', premiumOfBudget: 110, spawned: true })
   on('process.run', () => ({ value: next }))
 
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await $.session.measure(measure(11))
   expect(status.at(-1)).toBe('🟡Tier 1 Sub Agent - 110% of Fable budget, 🟡Tier 1[100%], (11% Weekly, 22% Fable)')
-  next = answer('ahead', 12)
+  next = answer('ahead', 12, { spawned: true })
   await $.turn.complete({ ...turn('claude-fable-5-2', 1), usage: { model: 'claude-opus-4-8', input_tokens: 0, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } })
   await $.session.measure(measure(12))
   expect(status.at(-1)).toBe('⚫Other Sub Agent - 60% of budget, 🟡Tier 1[100%], (12% Weekly, 40% Fable)')
 })
 
-test('a session of its own keeps the plain line', async ($, on) => {
-  mock.env(on, { CLAUDE_CODE_CHILD_SESSION: '0' })
+test('a session of its own, or one whose start is not known, keeps the plain line', async ($, on) => {
+  // CLAUDE_CODE_CHILD_SESSION is set for every command the engine runs, in
+  // every session: it must not make a side session of this one
+  mock.env(on, { CLAUDE_CODE_CHILD_SESSION: '1' })
   const status = engine(on)
-  on('process.run', () => ({ value: answer('ahead', 10) }))
+  let next = answer('ahead', 10, { spawned: false })
+  on('process.run', () => ({ value: next }))
 
   await $.turn.complete(turn('claude-opus-5-5', 1))
   await $.session.measure(measure(10))
   expect(status.at(-1)).toBe('50% of budget, ⚪Tier 2[100%], (10% Weekly, 40% Fable)')
+  next = answer('ahead', 11, { spawned: null })
+  await $.session.measure(measure(11))
+  expect(status.at(-1)).toBe('55% of budget, ⚪Tier 2[100%], (11% Weekly, 40% Fable)')
+  // an older budget.mjs says nothing of it
+  next = answer('ahead', 12)
+  await $.session.measure(measure(12))
+  expect(status.at(-1)).toBe('60% of budget, ⚪Tier 2[100%], (12% Weekly, 40% Fable)')
 })
 
 test('a side session before its first turn keeps the plain line', async ($, on) => {
-  mock.env(on, { CLAUDE_CODE_CHILD_SESSION: '1' })
   const status = engine(on)
-  on('process.run', () => ({ value: answer('ahead', 10) }))
+  on('process.run', () => ({ value: answer('ahead', 10, { spawned: true }) }))
 
   await $.turn.complete(turn('claude-opus-5-5', 1, 'a1'))
   await $.session.measure(measure(10))
   expect(status.at(-1)).toBe('50% of budget, ⚪Tier 2[100%], (10% Weekly, 40% Fable)')
+})
+
+// ---- a carried per-model figure is not a current one ----
+
+// the case reported: Fable read at 71 %, then unread for 15 hours while all
+// models went from 45 to 49 %; the real meter stood at 90 %
+const STALE = { premium: 71, premiumAt: '2026-11-15T01:00:00.000Z', premiumEstimate: 90, premiumLevel: 'throttle', premiumHeld: true, premiumOfBudget: 152,
+  needFull: 'the Fable 5.2 figure is 15 h old', do: 'Fable 5.2\'s own meter is at throttle: SWITCH the session to Opus 5.5 high now' }
+const AT_16 = Date.parse('2026-11-15T16:00:00.000Z')
+
+test('a 15-hour-old carried figure is shown with its age and an estimate, never as current', async ($, on) => {
+  const status = engine(on)
+  const clock = mock.clock(on, { now: AT_16 })
+  let next = answer('over', 49, STALE)
+  on('process.run', () => ({ value: next }))
+
+  await $.session.measure(measure(49))
+  expect(status.at(-1)).toBe('152% of Fable budget, (49% Weekly, 71% Fable 15h ago, est. 90%)')
+  // the line is redrawn every turn: the age moves on without a new reading
+  await clock.advance(20 * 60000)
+  await $.session.measure(measure(49))
+  expect(status.at(-1)).toContain('71% Fable 15h ago, est. 90%')
+  // no estimate to give: the age alone; under an hour in minutes, past two days in days
+  next = answer('over', 50, { ...STALE, premiumEstimate: null, premiumAt: '2026-11-15T15:35:00.000Z' })
+  await $.session.measure(measure(50))
+  expect(status.at(-1)).toContain('(50% Weekly, 71% Fable 45m ago)')
+  next = answer('over', 51, { ...STALE, premiumEstimate: 71, premiumAt: '2026-11-12T16:20:00.000Z' })
+  await $.session.measure(measure(51))
+  expect(status.at(-1)).toContain('(51% Weekly, 71% Fable 3d ago)')
+})
+
+test('a full reading is asked for beside the next prompt: once per stale figure, again after an hour, never in the prompt\'s own text', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: AT_16 })
+  let next = answer('over', 49, STALE)
+  on('process.run', () => ({ value: next }))
+  const entered: { text: string; context?: readonly string[] }[] = []
+  on('prompt.submit', (_: unknown, e: any) => (entered.push({ text: e.text, context: e.context }), { text: e.text, context: e.context }))
+
+  // before any reading there is nothing to ask
+  await $.prompt.submit({ text: 'first', asUser: true })
+  expect(entered.at(-1)).toEqual({ text: 'first', context: undefined })
+  await $.session.measure(measure(49))
+  const r = await $.prompt.submit({ text: 'go on with the tests', asUser: true })
+  expect(r.text).toBe('go on with the tests')
+  expect(entered.at(-1)!.text).toBe('go on with the tests')
+  expect(entered.at(-1)!.context).toEqual([
+    'Pacing (automatic note, not from the user): the Fable 5.2 figure is 15 h old; it read 71 % then and is about 90 % by estimate. The automatic readings cannot read that meter. Before the next piece of work, take a full reading: run the `pacing` skill with `usage now`, and follow its do: line.',
+  ])
+  // not again for the same figure
+  await $.prompt.submit({ text: 'and the docs', asUser: true })
+  expect(entered.at(-1)!.context).toBeUndefined()
+  // a slash command is never given it, and does not use it up
+  await clock.advance(61 * 60000)
+  await $.prompt.submit({ text: '/compact', asUser: true })
+  expect(entered.at(-1)!.context).toBeUndefined()
+  // nothing came of it in an hour: once more
+  await $.prompt.submit({ text: 'next', asUser: true })
+  expect(entered.at(-1)!.context?.length).toBe(1)
+  // a full reading arrived: the automatic one carries a new figure and asks nothing
+  next = answer('over', 50, { premium: 90, premiumAt: '2026-11-15T17:05:00.000Z', premiumHeld: true, needFull: null })
+  await $.session.measure(measure(50))
+  await $.prompt.submit({ text: 'after the reading', asUser: true })
+  expect(entered.at(-1)!.context).toBeUndefined()
+  // and when that one goes stale in its turn, it is asked for anew
+  next = answer('over', 53, { premium: 90, premiumAt: '2026-11-15T17:05:00.000Z', premiumHeld: true, needFull: 'the Fable 5.2 figure is 3 h old' })
+  await $.session.measure(measure(53))
+  await $.prompt.submit({ text: 'later', asUser: true })
+  expect(entered.at(-1)!.context?.[0]).toContain('the Fable 5.2 figure is 3 h old; it read 90 % then.')
+})
+
+test('the note is one block beside the prompt, marked as automatic', async ($, on) => {
+  engine(on)
+  mock.clock(on, { now: AT_16 })
+  on('process.run', () => ({ value: answer('over', 49, STALE) }))
+  let got: readonly string[] | undefined
+  on('prompt.submit', (_: unknown, e: any) => (got = e.context, { text: e.text, context: e.context }))
+  await $.session.measure(measure(49))
+  await $.prompt.submit({ text: 'go', asUser: true })
+  expect(got?.length).toBe(1)
+  expect(got?.[0].startsWith('Pacing (automatic note, not from the user): ')).toBe(true)
 })

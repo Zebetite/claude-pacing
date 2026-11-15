@@ -256,3 +256,125 @@ describe('the per-model meter, paced from a carried figure', () => {
     } finally { s.cleanup(); }
   });
 });
+
+describe('a session another session started', () => {
+  // the desktop app's own record of a session, as it lies on disk
+  const record = (s, id, body) => s.write('../../AppData/Local/Claude-Data/app/claude-code-sessions/acct/org/' + id + '.json', JSON.stringify({ sessionId: id, ...body }));
+  const spawned = (s, env) => JSON.parse(s.budget(['--all', '10', '--reset', RESET, '--now', NOW, '--source', 'hook', '--dry'], { env }).out.trim()).spawned;
+  test('told from the app\'s record of the session: spawnedFrom', () => {
+    const s = sandbox();
+    try {
+      record(s, 'local_side', { spawnedFrom: { sessionId: 'local_top', sideSession: true, name: 'a-task' } });
+      record(s, 'local_top', { title: 'the top one' });
+      assert.equal(spawned(s, { CLAUDE_CODE_HOST_SESSION_ID: 'local_side' }), true);
+      assert.equal(spawned(s, { CLAUDE_CODE_HOST_SESSION_ID: 'local_top' }), false);
+    } finally { s.cleanup(); }
+  });
+  test('not known without the id, the record or a readable one; never from CLAUDE_CODE_CHILD_SESSION', () => {
+    const s = sandbox();
+    try {
+      // the engine sets this one for every command, in every session
+      assert.equal(spawned(s, { CLAUDE_CODE_CHILD_SESSION: '1' }), null);
+      assert.equal(spawned(s, { CLAUDE_CODE_HOST_SESSION_ID: 'local_none' }), null);
+      s.write('../../AppData/Local/Claude-Data/app/claude-code-sessions/acct/org/local_bad.json', '{cut');
+      assert.equal(spawned(s, { CLAUDE_CODE_HOST_SESSION_ID: 'local_bad' }), null);
+      assert.equal(spawned(s, { CLAUDE_CODE_HOST_SESSION_ID: '../../x' }), null);
+    } finally { s.cleanup(); }
+  });
+});
+
+describe('a carried per-model figure is not a current one', () => {
+  // the case reported: full readings at 41/52 and 45/71 %, then 15 hours of
+  // automatic ones while all models went to 49 % and Fable, unread, to 90 %
+  const reported = s => {
+    s.budget(['--all', '41', '--premium', '52', '--reset', RESET, '--now', '2026-11-14T12:00:00.000Z']);
+    s.budget(['--all', '45', '--premium', '71', '--reset', RESET, '--now', '2026-11-15T01:00:00.000Z']);
+  };
+  test('15 hours old: its age, an estimate from how the two meters moved, and a full reading asked for', () => {
+    const s = sandbox();
+    try {
+      reported(s);
+      const j = auto(s, 49, '2026-11-15T16:00:00.000Z');
+      assert.equal(j.premium, 71);
+      assert.equal(j.premiumAt, '2026-11-15T01:00:00.000Z');
+      // (71 - 52) / (45 - 41) = 4.75 points of Fable per point of all models; 4 points on: 90
+      assert.equal(j.premiumEstimate, 90);
+      assert.equal(j.needFull, 'the Fable 5.2 figure is 15 h old');
+      // the level rests on what was read, never on the estimate
+      assert.equal(j.premiumLevel, 'throttle');
+    } finally { s.cleanup(); }
+  });
+  test('a full reading is asked for once all models moved 2 points, or the figure is an hour old', () => {
+    const s = sandbox();
+    try {
+      s.budget(['--all', '10', '--premium', '12', '--reset', RESET, '--now', NOW]);
+      assert.equal(auto(s, 11, at(20)).needFull, null, 'a point on, 20 min: not yet');
+      assert.equal(auto(s, 12, at(25)).needFull, 'all models moved 2 points since the Fable 5.2 meter was read');
+      assert.equal(auto(s, 10, at(60)).needFull, 'the Fable 5.2 figure is 60 min old');
+    } finally { s.cleanup(); }
+  });
+  test('with the model held off tier 1 the session no longer draws on it: three hours; out, or another model on tier 1: never', () => {
+    const s = sandbox();
+    try {
+      s.budget(['--all', '10', '--premium', '30', '--reset', RESET, '--now', NOW]);
+      const held = auto(s, 14, at(60));
+      assert.equal(held.premiumHeld, true);
+      assert.equal(held.needFull, null);
+      assert.equal(auto(s, 14, at(180)).needFull, 'the Fable 5.2 figure is 3 h old');
+    } finally { s.cleanup(); }
+    const t = sandbox();
+    try {
+      t.budget(['--all', '10', '--premium', '100', '--reset', RESET, '--now', NOW]);
+      assert.equal(auto(t, 20, at(600)).needFull, null, 'out until the reset');
+      t.config(['set', '1', 'opus', 'high']);
+      t.budget(['--all', '10', '--premium', '12', '--reset', RESET, '--now', at(601)]);
+      assert.equal(auto(t, 20, at(1200)).needFull, null, 'not tier 1');
+    } finally { t.cleanup(); }
+  });
+  test('no figure this week yet: asked for; no estimate without two full readings to go by', () => {
+    const s = sandbox();
+    try {
+      const j = auto(s, 10);
+      assert.equal(j.needFull, 'no Fable 5.2 reading this week yet');
+      assert.equal(j.premiumEstimate, null);
+      s.budget(['--all', '10', '--premium', '12', '--reset', RESET, '--now', NOW]);
+      assert.equal(auto(s, 15, at(90)).premiumEstimate, null, 'one full reading: no slope');
+    } finally { s.cleanup(); }
+  });
+  test('a reading the session takes asks for nothing', () => {
+    const s = sandbox();
+    try {
+      reported(s);
+      const r = s.budget(['--all', '49', '--premium', '90', '--reset', RESET, '--now', '2026-11-15T16:00:00.000Z', '--dry']);
+      assert.doesNotMatch(r.out, /needFull|full reading/);
+      const j = auto(s, 49, '2026-11-15T16:05:00.000Z');
+      assert.equal(j.premium, 71, 'the dry reading was not logged');
+    } finally { s.cleanup(); }
+  });
+  test('`log` marks a carried figure with how old it was', () => {
+    const s = sandbox();
+    try {
+      reported(s);
+      auto(s, 49, '2026-11-15T16:00:00.000Z');
+      const rows = s.budget(['log']).out.trim().split(/\r?\n/);
+      assert.match(rows.at(-1), /Fable 5\.2 {2}71 % \(15 h old\) {2}/);
+      assert.doesNotMatch(rows.at(-2), /old\)/, 'a full reading is not marked');
+    } finally { s.cleanup(); }
+  });
+  test('the start line says how old a carried figure is, and asks for a full reading before the first big task', () => {
+    const s = sandbox();
+    try {
+      s.write('state.json', JSON.stringify({ t: new Date().toISOString(), all: 49, line: 46.7, level: 'over', reset: RESET, source: 'hook',
+        premiumModel: 'fable', premium: 71, premiumAt: new Date(Date.now() - 15 * 3600000).toISOString(), premiumHeld: true, next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } }));
+      const j = JSON.parse(s.hook().out);
+      assert.match(j.systemMessage, /Fable 5\.2 was last read 15 h ago, at 71 %: the session will take a full reading before the first big task\.$/);
+      assert.match(j.hookSpecificOutput.additionalContext, /The all-models figure is fresh, but Fable 5\.2 was last read 15 h ago, at 71 %, which an automatic reading cannot renew: run the `pacing` skill with `usage now` before the first big task\./);
+      assert.doesNotMatch(j.hookSpecificOutput.additionalContext, /This reading is fresh/);
+      // read 20 minutes ago: nothing to add
+      const st = JSON.parse(s.read('state.json'));
+      st.premiumAt = new Date(Date.now() - 20 * 60000).toISOString();
+      s.write('state.json', JSON.stringify(st));
+      assert.match(JSON.parse(s.hook().out).hookSpecificOutput.additionalContext, /This reading is fresh/);
+    } finally { s.cleanup(); }
+  });
+});

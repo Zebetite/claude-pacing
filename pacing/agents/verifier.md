@@ -2,7 +2,7 @@
 name: verifier
 description: "Pacing role agent, read-only. Runs test suites, builds, linters and check scripts, and compares a change with what the task asked for. Reports pass or fail with the failing output verbatim; never fixes. The session keeps one for the whole session and sends it task after task."
 tools: Read, Grep, Glob, Bash
-model: inherit
+model: haiku
 color: green
 ---
 

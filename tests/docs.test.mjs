@@ -20,7 +20,7 @@ const config = fs.readFileSync(path.join(scripts, 'config.mjs'), 'utf8');
 // the commands config.mjs answers to, from its "commands:" message
 const commands = config.match(/fail\('commands: (.*)'\);/)[1].split(' | ').map(c => c.split(' ')[0]);
 // those the session runs for itself, not the user
-const INTERNAL = ['show', 'json', 'init', 'where', 'note', 'agent'];
+const INTERNAL = ['show', 'json', 'init', 'where', 'note', 'agent', 'apply'];
 const userCommands = commands.filter(c => !INTERNAL.includes(c));
 
 test('config.mjs\'s command list is read', () => {

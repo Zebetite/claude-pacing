@@ -90,18 +90,39 @@ export const tierMix = (tokens, tierOf, prices) => {
 const CIRCLES = ['🟡', '⚪', '🟠', '🟤', '🟣', '🔴', '🔵', '🟢'];
 const square = tier => (tier === 'Other' ? '⚫' : CIRCLES[tier - 1] || '⚫');
 
-// "09:40": the time a carried figure was read, on the engine's clock
-const hhmm = iso => { const d = new Date(iso); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+// "45m", "15h", "3d": how old a carried figure is
+const ageText = ms => { const m = Math.round(ms / 60000); return m < 60 ? m + 'm' : m < 48 * 60 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; };
+// A carried per-model figure counts as current for half an hour (within that
+// an automatic reading is at most a point behind on all models too). Past
+// it, the status line says how old the figure is, and where the meter
+// probably is when budget.mjs could estimate it.
+const CARRIED_CURRENT = 30 * 60 * 1000;
+// The line the session reads beside the user's next prompt when a full
+// reading is due: the module cannot read the per-model meter, the session
+// can. One line, once per stale figure, and again after an hour if nothing
+// came of it; never a tool call on every turn.
+const ASK_AGAIN = 60 * 60 * 1000;
+export const fullReadingAsk = j => (j && j.needFull
+  ? 'Pacing (automatic note, not from the user): ' + j.needFull
+    + (j.premium != null ? '; it read ' + Math.round(j.premium) + ' % then' + (j.premiumEstimate != null ? ' and is about ' + Math.round(j.premiumEstimate) + ' % by estimate' : '') : '')
+    + '. The automatic readings cannot read that meter. Before the next piece of work, take a full reading: run the `pacing` skill with `usage now`, and follow its do: line.'
+  : null);
 
 // A session another session started (a side session in the desktop app)
 // says so up front, with the tier of the model it runs on:
 //   ⚪Tier 2 Sub Agent - 77% of budget, ⚪Tier 2[90%] 🟤Tier 4[10%], (36% Weekly, 40% Fable)
 // `self` is that tier ('Other' off the ladder), or null for any other session.
-export const statusText = (j, mix, self = null) => {
+// `now` (ms) dates a carried per-model figure: "71% Fable 15h ago, est. 90%".
+export const statusText = (j, mix, self = null, now = Date.now()) => {
   const meters = [Math.round(j.all) + '% Weekly'];
   // the engine never hands a plugin the per-model meter: its figure is carried
-  // over from the last full reading, and says from when
-  if (j.premium != null && j.premiumLabel) meters.push(Math.round(j.premium) + '% ' + j.premiumLabel.split(' ')[0] + (j.premiumAt ? ' at ' + hhmm(j.premiumAt) : ''));
+  // over from the last full reading, and is never shown as current once old
+  if (j.premium != null && j.premiumLabel) {
+    const age = j.premiumAt ? now - Date.parse(j.premiumAt) : 0;
+    const old = age > CARRIED_CURRENT;
+    meters.push(Math.round(j.premium) + '% ' + j.premiumLabel.split(' ')[0]
+      + (old ? ' ' + ageText(age) + ' ago' + (j.premiumEstimate != null && Math.round(j.premiumEstimate) > Math.round(j.premium) ? ', est. ' + Math.round(j.premiumEstimate) + '%' : '') : ''));
+  }
   const parts = [];
   // the budget share of the meter that decides: the per-model one when it set
   // the level or moved the session off its model
@@ -129,11 +150,12 @@ export const register = on => {
   let lastTurnAt = null;
   let contextTokens = null;
   let warnedFor = null;
-  // a session another session started: the desktop app sets
-  // CLAUDE_CODE_CHILD_SESSION=1 in its environment (read once; not part of
-  // the documented hooks API, so anything else counts as a session of its
-  // own). The model it runs on: its main thread's last turn.
-  let child = null;
+  // the request for a full reading: which figure it was made for, and when
+  let askedFor = null;
+  let askedAt = 0;
+  // a session another session started is told by budget.mjs (`spawned`, from
+  // the desktop app's own record of the session). The model it runs on: its
+  // main thread's last turn.
   let sessionModel = null;
 
   on('prompt.submit', async ($, e, next) => {
@@ -149,8 +171,22 @@ export const register = on => {
           $.ui.toast(note, { timeoutMs: 15000 });
         }
       }
-    } catch {
-      // a warning is a convenience: it never stands in the prompt's way
+      // a full reading is due: the session is told beside this prompt, in a
+      // block the user does not see; the prompt's own text is never touched
+      if (typed && reading && reading.needFull) {
+        const now = await $.clock.now();
+        const key = reading.premiumAt || 'none';
+        if (askedFor !== key || now - askedAt >= ASK_AGAIN) {
+          const ask = fullReadingAsk(reading);
+          askedFor = key;
+          askedAt = now;
+          if (ask) return next({ ...e, context: [...(e.context ?? []), ask] });
+        }
+      }
+    } catch (err) {
+      // a warning is a convenience: it never stands in the prompt's way. A
+      // failure beneath, in the prompt's own entry, is not this hook's to hide
+      if (next.called) throw err;
     }
     // the prompt goes on as typed, always
     return next(e);
@@ -180,7 +216,9 @@ export const register = on => {
     const week = limits.find(r => r.kind === 'seven_day');
     // no weekly window: an API key, not a subscription, or no response yet
     if (!week || !week.resetsAt || running) return result;
-    const now = Date.now();
+    // the engine's clock, which a test can set; the system's where there is none
+    let now;
+    try { now = await $.clock.now(); } catch { now = Date.now(); }
     const due = !last || Math.abs(week.percentUsed - last.pct) >= 1 || now - last.at >= MIN_GAP;
     try {
       if (due) {
@@ -205,13 +243,11 @@ export const register = on => {
       // the tier shares move every turn: the line is redrawn even when no
       // new reading was due
       if (reading) {
-        if (child === null) {
-          try { child = (await $.env.get('CLAUDE_CODE_CHILD_SESSION')) === '1'; } catch { child = false; }
-        }
+        const child = reading.spawned === true;
         const prices = reading.prices || {}, tierOf = reading.tierOf || {};
         const id = child && sessionModel ? idOf(sessionModel, prices) : null;
         const self = !child || !sessionModel ? null : (id && tierOf[id]) || 'Other';
-        $.ui.status(statusText(reading, tierMix(tokens, tierOf, prices), self));
+        $.ui.status(statusText(reading, tierMix(tokens, tierOf, prices), self, now));
       }
     } catch {
       // a reading is a convenience: a missing node, a timeout or a bad line

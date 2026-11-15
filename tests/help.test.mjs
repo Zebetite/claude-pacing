@@ -34,7 +34,7 @@ test('the command list names every command a user can give', () => {
   const short = help([]);
   const list = short.match(/^Commands, each after `\/pacing`: (.*)\.$/m)[1].split(' · ');
   const commands = config.match(/fail\('commands: (.*)'\);/)[1].split(' | ').map(c => c.split(' ')[0]);
-  const INTERNAL = ['show', 'json', 'init', 'where', 'note', 'agent'];
+  const INTERNAL = ['show', 'json', 'init', 'where', 'note', 'agent', 'apply'];
   for (const c of commands.filter(c => !INTERNAL.includes(c))) assert.ok(list.includes(c), c);
   for (const c of ['usage', 'usage now', 'help full', 'setup', 'log', 'week', 'handover done']) assert.ok(list.includes(c), c);
 });

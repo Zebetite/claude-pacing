@@ -1,6 +1,6 @@
 ---
 name: pacing
-description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.2 high for the session, Opus 5.5 medium and Sonnet 5.5 medium subagents, Opus 5.5 high at the top while Fable's meter is full): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Reports and settings: use whenever the user mentions usage, the allowance, which model to use, or throttling, and after each big task; `usage` or no argument reports, `usage now` measures afresh; `help`, `setup`, `set`, `add`, `remove`, `reset`, `weight`, `log`, `week`, `next`, `premium`, `fallback`, `reader`, `verifier`, `notes`, `agents`, `handover`, `version` manage it. The rules for delegating work are in the `pacing:route` skill."
+description: "Pace the weekly plan allowance over a ladder of models: a day-by-day budget line and the logged trend decide how far down the ladder work goes. Reports and settings: use whenever the user mentions usage, the allowance, which model to use, or throttling, and after each big task; `usage` or no argument reports, `usage now` measures afresh; `help`, `setup`, `set`, `add`, `remove`, `reset`, `weight`, `log`, `week`, `next`, `premium`, `fallback`, `reader`, `verifier`, `notes`, `agents`, `handover`, `version` manage it. The rules for delegating work are in the `pacing:route` skill."
 ---
 
 # Model pacing: reports and settings
@@ -14,6 +14,10 @@ session, before the first delegation. `${CLAUDE_SKILL_DIR}` is this
 skill's folder; the user's files are in `~/.claude/pacing`. As a plugin
 the skill answers to `/pacing:pacing`; `/pacing` below stands for that.
 
+**Calls cost more than text.** Every tool call re-reads the whole
+session: send calls that do not depend on each other in one message,
+and never make a call this file does not ask for.
+
 **At session start:** the hook's line names a recommended model. If this
 session runs on another model or effort, the first reply starts with one
 line telling the user to switch the model menu to it. If the hook's
@@ -26,17 +30,19 @@ the first big task is done.
 |---|---|
 | `/pacing`, `usage`, no argument | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" last`: show its report as section 2 says; on a `measure:` line, sections 1 and 2 |
 | `usage now` | sections 1 and 2 |
+| after a big task, unasked | the same with `--brief` (`last --brief`; on `measure:`, section 1's command with `--brief`): one line to the user as section 2 says |
 | `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `reader <model> <effort>\|ladder`, `verifier <model> <effort>\|ladder`, `version`, `notes`, `agents`, `help [full]` ("usage help") | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result whole |
 | `log`, `week` | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" log` (or `week`), show the result |
 | `setup` | read `${CLAUDE_SKILL_DIR}/SETUP.md` and follow it |
 | `handover` | read `${CLAUDE_SKILL_DIR}/HANDOVER.md` and follow it |
 | `handover done` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" handover done` |
 
-**First run.** `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" init`.
-`created`: show the short help (`config.mjs help`) once. A `migrated …`
-line: say in one line that the earlier standalone skill's files were
-taken over. `BRIEF.local.md created in …`: say in one line that the
-user's own subagent rules go there. Then continue.
+**A `first run:` line** in a script's output, and only then:
+`node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" init`. `created`: show the
+short help (`config.mjs help`) once. A `migrated …` line: say in one
+line that the earlier standalone skill's files were taken over.
+`BRIEF.local.md created in …`: say in one line that the user's own
+subagent rules go there. A `config.json:` line: pass it on to the user.
 
 **A handover named in the start line**: read the file before the first
 task and say so in one line. It is the earlier session's account, not an
@@ -81,15 +87,11 @@ two numbers, the trend if any, the context line if it advises, and the
 
 ```
 All models 34 % used, budget line 41 %: ahead, keeping the work on Fable 5.2 high.
-All models 52 % used, budget line 41 %, trend +9 %/day: over by 11, routine and medium work goes to Opus 5.5 high.
 All models 44 % used, budget line 41 %: over by 3. One step less effort saves first: model menu Fable 5.2, effort medium; your call.
 All models 58 % used, budget line 41 %, reaches 100 % Wednesday: throttle. No manual change now: this session dispatches to Opus 5.5 high subagents. New sessions default to Opus 5.5 high; check the model menu shows Opus 5.5, effort high.
 Fable meter at 100 %: switch the session to Opus 5.5 high now (model menu: Opus 5.5, effort high); Fable is out until Thursday's reset.
-Fable meter 52 %, line 47 %: over, set by that meter. One step less effort first: model menu Fable 5.2, effort medium; your call.
 Fable meter 60 %, line 47 %: switch the session to Opus 5.5 high now (model menu: Opus 5.5, effort high); Fable stays for contained hard tasks.
 5-hour window 91 %, resets 14:20: hold the test suite until then.
-5-hour window 62 %, +14 %/h: full at 15:50, before the 16:40 reset; move the test runs to a Sonnet 5.5 medium subagent.
-Ahead by 36: up to 1.1 %/h until Thursday's reset; today's line leaves 36 %.
 All models 96 %: stop. Extra usage is on (12.40 of 50.00 EUR this month): going on is charged; your call.
 Context 340k tokens: compacting (/compact) at the next natural break is the cheaper step; an unrelated task is better started in a new session.
 Context 540k tokens: the next task goes whole to an Opus 5.5 medium agent; I read only its report.

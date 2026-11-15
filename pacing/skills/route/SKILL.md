@@ -5,17 +5,18 @@ description: "Delegating work under pacing: which work this session keeps and wh
 
 # Pacing: routing work
 
-The procedure for routing this session's work over the pacing ladder. The
-`pacing` skill reports (`usage`, `help`, settings); this one is loaded
-when work is routed. Its scripts and files are in the `pacing` skill's
-folder, `${CLAUDE_SKILL_DIR}/../pacing`; the user's files are in
-`~/.claude/pacing`.
+The rules for routing this session's work over the pacing ladder; the
+`pacing` skill reports and holds the settings. The scripts and files are
+in its folder, `${CLAUDE_SKILL_DIR}/../pacing`.
 
-**The routing lines.** `node "${CLAUDE_SKILL_DIR}/../pacing/scripts/budget.mjs" last` prints the
-report of the last reading with its routing lines (`judgment ->`,
-`medium ->`, ..., `do:`, `effort:`, `upward:`, the context line). On a
-`measure:` line, or after each big task, run the `pacing` skill with
-`usage`: it takes a reading.
+**The routing lines.** `node "${CLAUDE_SKILL_DIR}/../pacing/scripts/budget.mjs" last --brief`
+prints what the last reading decides: the level, `route:` (which model
+takes each class of work), `do:`, `effort:`, `upward:` and the context
+line when it advises. On a `measure:` line, or after each big task, the
+`pacing` skill takes a reading.
+
+Every tool call re-reads the whole session: send calls that do not
+depend on each other in one message.
 
 ## Classes of work
 
@@ -32,7 +33,9 @@ fan-out over many files).
 This session's model is the user's to set; the lever is delegation.
 
 - **Role agents**: delegate with the Agent tool to the plugin's four
-  roles, at the `model` and `effort` the routing lines give that work:
+  roles, always with the `model` and `effort` the routing lines give
+  that work (left out, the implementer and the researcher run on this
+  session's model):
 
   | agent type | takes | tier |
   |---|---|---|
@@ -58,7 +61,9 @@ This session's model is the user's to set; the lever is delegation.
   for the next batch or stays in the session.
 - **Record each finished task**: `node "${CLAUDE_SKILL_DIR}/../pacing/scripts/config.mjs" agent <role>
   <agent id> <model> <effort> <tokens>`, the tokens from its
-  notification. It says when that role needs a fresh agent. When a
+  notification, beside the next tool call, never alone; several as
+  `config.mjs apply agent ... + agent ...`. It says when that role needs
+  a fresh agent. When a
   summary lost the ids, `config.mjs agents` lists the kept ones and their
   cost.
 - **Keep conclusions only**: the roles report answers with paths and line
@@ -81,8 +86,8 @@ This session's model is the user's to set; the lever is delegation.
   unasked. Read only its report. Offer a new session with a handover only
   for a task that needs the user's steering, many rounds of questions, or
   is unrelated.
-- When in doubt between two tiers, take the higher: a wrong result costs
-  a redo above.
+- In doubt between two tiers, take the higher: a wrong result costs a
+  redo.
 - **Over** (`effort:` line): once, before medium work leaves the session,
   tell the user that one step less effort on this session's model is the
   cheapest saving, with the model menu's words. Where
@@ -96,17 +101,15 @@ This session's model is the user's to set; the lever is delegation.
   held, list them (`mcp__ccd_session_mgmt__list_sessions`) and offer to
   move those above the recommendation with
   `mcp__ccd_session_mgmt__set_session_model` / `set_session_effort`
-  (deferred; the app asks the user first). Never switch one the user did
-  not agree to.
+  (deferred; the app asks). Never switch one the user did not
+  agree to.
 - **`upward:` line** (a lower-tier session, or the per-model model held):
   one contained hard task with a clear deliverable may go to the subagent
   it names; an open debugging hunt may not.
 - **5-hour window**: at 85 % or more, hold heavy work until the printed
   time; when the pace line says the window fills before it resets, move
-  bulky work to subagents or pause heavy runs. Delegation does not help
-  this meter's total, only its timing.
-- **Spend rate**: the `%/h` figure is what the headroom buys until the
-  reset; mention it when the user asks what a task may cost.
+  bulky work to subagents or pause heavy runs. Delegation helps this
+  meter's timing, not its total.
 - **Extra usage on**: 100 % is not a wall but a charge; at "stop", go on
   only with the user's word, and say what has been spent of the cap.
 

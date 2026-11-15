@@ -142,9 +142,16 @@ desktop app) leads with the tier of the model it runs on:
 
 Claude Code hands a plugin only the all-models and 5-hour meters,
 so such a reading carries the per-model figure (Fable's by default) over
-from the last full reading of the week, and the status line says when
-that was (`40% Fable at 09:40`). The figure can only have risen since,
-so a carried level may be too mild, never too strict. When Fable's meter
+from the last full reading of the week. The figure can only have risen
+since, so a carried level may be too mild, never too strict, and it is
+never shown as current once it is half an hour old: the status line
+gives its age and, where the readings allow, an estimate of where the
+meter is now (`71% Fable 15h ago, est. 90%`). The estimate is only
+shown; the level never rests on it. Once the figure is an hour old, or
+the all-models meter has moved 2 points since it was read, Claude is
+told beside your next prompt to take a full reading, once, and again an
+hour later if none came; the next session's start line says so too.
+`/pacing log` marks such a figure with its age. When Fable's meter
 sets the level, the first figure is its share of the line instead
 (`110% of Fable budget`). An automatic reading never changes the next
 session's model: that stays with the readings the session takes.
@@ -216,6 +223,24 @@ it before its first task, so moving on no longer means starting from
 nothing. The handover is the earlier session's account, not an order:
 you decide what the new session does. `/pacing handover done` files it
 away once the work is picked up; nothing is deleted.
+
+**Two sessions in one folder.** Two sessions editing the same project
+folder overwrite each other's work. So each session leaves a mark for
+the project when it starts and at each reading, and a new session's
+start line says when another one has been at work there, how long ago
+and for how long, and tells Claude to check with you before editing
+files. It is a notice, never a block. A mark counts for 45 minutes when
+the plugin's automatic readings keep it fresh (they come at least every
+30 minutes while a session works), and for 2 hours otherwise; a session
+that ends takes its mark with it. A session is told from another by the
+session id Claude Code gives it; where that is not known, no mark is
+left and nothing is said. The plugin does not lock or track your source
+files: Claude's edit tool already refuses a file that changed since it
+was read, and parallel work on code belongs in separate git worktrees.
+
+The plugin's own files (the settings, the last reading, the agents'
+notes) can be written by several sessions at once without one losing
+the other's change.
 
 ## What the skill can and cannot do
 
@@ -331,6 +356,9 @@ first hands work to a subagent; a plain report never loads them.
 Your files live in `~/.claude/pacing`: the configuration in `config.json`,
 the readings in `log.jsonl`, the last one in `state.json`, your subagent
 rules in `BRIEF.local.md`. A plugin update replaces the plugin's own
-folder and leaves that one alone. The first run creates the configuration
+folder and leaves that one alone. If `config.json` is edited by hand into
+something the commands would not write, the value in question falls back
+to its default and the report says which; a file that no longer parses
+is set aside as `config.json.damaged`. The first run creates the configuration
 from the defaults (or takes over the files of an earlier standalone
 install of this skill) and shows this guide once.

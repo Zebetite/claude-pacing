@@ -78,11 +78,19 @@ level in the status line.
   leads with its own tier: `⚪Tier 2 Sub Agent - 77% of budget, ...`.
   The tier is that of the model its main thread's last turn ran on
   (`⚫Other` off the ladder); before its first turn the line is the plain
-  one. The module tells such a session by `CLAUDE_CODE_CHILD_SESSION=1`,
-  which the desktop app sets in a side session's environment (seen in a
-  live side session on 2026-11-15). That variable is not part of the
-  documented hooks API: if it changes or goes, the line falls back to the
-  plain one. Tested under the kit with `mock.env`.
+  one. `budget.mjs --source hook` tells the module (`spawned` in its JSON
+  line) from the desktop app's own record of the session:
+  `<LOCALAPPDATA>/Claude-Data/<app>/claude-code-sessions/<a>/<b>/<id>.json`
+  carries `spawnedFrom` on a session another one started, and the id is
+  `CLAUDE_CODE_HOST_SESSION_ID` in the engine's environment. Checked
+  against real records on 2026-11-15: two side sessions true, the top
+  session false. It is the app's own file, not a documented interface,
+  and seen on Windows only: anything missing reads as "not known" and the
+  line stays the plain one.
+  0.9.0-beta and 0.9.1-beta told a side session by
+  `CLAUDE_CODE_CHILD_SESSION=1`, which was wrong: the engine sets that
+  variable for every command it runs, in every session, and never in its
+  own environment, so the label never showed.
 
 - **The per-model meter, paced.** `budget.mjs` now draws the same line
   against the per-model meter and gives it a level by the same
@@ -133,3 +141,54 @@ level in the status line.
   hour at most, and the trend does not jump from the denser data. The
   trend takes the oldest reading of the last two days, so density should
   not move it; check with `/pacing log` and `/pacing week` after a day.
+
+## Safe writes and the shared-checkout notice (after 0.9.1-beta, not released)
+
+- **Safe writes** (`scripts/safe.mjs`). `config.json`, `state.json`, the
+  notes files, the marks below, and the user's `settings.json` and the
+  app's preset file are changed with `updateFile`: read, change, and
+  write back only if the file is still what was read, the check and the
+  rename under a lock file made with the exclusive flag (taken over
+  after 10 s, waited for up to 5 s), the write itself to a temporary
+  file renamed over the target (retried while Windows reports the target
+  busy). A writer that loses the first, optimistic try makes the next
+  ones holding the lock from read to write, so many writers queue up.
+  The hooks module writes no file itself: it runs `budget.mjs`.
+  `log.jsonl` and the agents log only grow by one appended line and are
+  left as they were. `handover new` reserves its name with an exclusive
+  marker; `handover done` tolerates a file another session moved.
+- **Marks per project** (`paths.mjs`): `<data>/sessions/<project>.json`,
+  an entry per session id (`since`, `t`, `live`). Written by `hook.mjs`
+  at SessionStart, by every reading that is not `--dry` (`live` when the
+  hooks module took it), removed by `hook.mjs end` at SessionEnd. The id
+  is `CLAUDE_CODE_SESSION_ID` from the environment of the commands the
+  engine runs, else `session_id` from the hook's input, read for 250 ms
+  at most. Unknown id: no mark, no notice.
+- **Not run live:** the SessionEnd hook in a real session, and whether
+  the engine hands a SessionStart command hook `CLAUDE_CODE_SESSION_ID`
+  in its environment (the hook's input is the fallback either way).
+
+## A carried per-model figure (after 0.9.1-beta, not released)
+
+- **The bug.** An automatic reading carries the per-model figure of the
+  last full reading. On 2026-11-15 it read 71 % for about 15 hours while
+  the real meter went to 90 %: the status line showed it as current
+  (`71% Fable`), the level rested on it, and nothing asked for a new one.
+- **Its age.** Past 30 min the status line says how old the figure is
+  (`71% Fable 15h ago`); `log` marks it (`71 % (15 h old)`), the start
+  line says it from an hour.
+- **An estimate,** shown only: the figure plus what all models moved since
+  it was read, times how the two meters moved against each other between
+  this week's full readings (`est. 90%`; in the reported case the slope
+  of 4.75 gave exactly the 90 % a full reading then found). Never used
+  for a level, so it can neither raise nor lower one.
+- **A full reading asked for** (`needFull` in the JSON line) while tier 1
+  is the per-model model: no figure this week, the figure an hour old, or
+  all models 2 points on since it was read; three hours while the model
+  is held off tier 1. The module adds one block of context beside the
+  user's next typed prompt (`prompt.submit`, `next({ ...e, context })`),
+  marked as an automatic note, the prompt's own text untouched: once per
+  stale figure, again after an hour if no full reading came. No tool call
+  on any turn; the session takes the reading with the skill.
+- **Not run live:** the context block in a real session. It rests on the
+  engine attaching `context` after the prompt as its types document.

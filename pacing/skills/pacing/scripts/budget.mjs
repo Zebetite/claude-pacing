@@ -23,7 +23,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MODELS, EFFORTS, relabel } from './models.mjs';
+import { MODELS, EFFORTS, relabel, checkConfig } from './models.mjs';
+import { loadConfig, projectRoot, markSession } from './paths.mjs';
+import { updateFile, updateJson } from './safe.mjs';
 
 const dataDir = path.join(os.homedir(), '.claude', 'pacing');
 fs.mkdirSync(dataDir, { recursive: true });
@@ -32,8 +34,11 @@ const logFile = path.join(dataDir, 'log.jsonl');
 const stateFile = path.join(dataDir, 'state.json');
 const settingsFile = path.join(os.homedir(), '.claude', 'settings.json');
 
-const cfg = fs.existsSync(cfgFile) ? JSON.parse(fs.readFileSync(cfgFile, 'utf8')) : {};
-let tiers = cfg.tiers ? cfg.tiers : cfg.primary ? [cfg.primary, cfg.fallback] : null;
+// a missing file is a first run (the defaults); a damaged one or a value no
+// command writes gives a note in the report, never a crash
+const loaded = loadConfig(checkConfig);
+const cfg = loaded.cfg || {};
+let tiers = cfg.tiers || null;
 if (!tiers) {
   tiers = [
     { model: 'fable', label: MODELS.fable.label, effort: 'high' },
@@ -64,15 +69,21 @@ const premium = cfg.premium === undefined ? 'fable' : cfg.premium;
 const premLabel = premium && MODELS[premium] ? MODELS[premium].label : null;
 const labelOf = m => (m && MODELS[m] ? MODELS[m].label : 'Fable');
 const name = t => t.label + ' ' + t.effort;
+// "a Fable 5.2 high", "an Opus 5.5 high"
+const aName = t => (/^[AEIOU]/.test(t.label) ? 'an ' : 'a ') + name(t);
 const r1 = n => Math.round(n * 10) / 10;
 const DAY = 24 * 60 * 60 * 1000;
 const HOUR = 60 * 60 * 1000;
+// "40 min", "15 h": an age
+const mins = ms => (ms >= 2 * HOUR ? Math.round(ms / HOUR) + ' h' : Math.round(ms / 60000) + ' min');
 
 // ---- arguments ----
 const argv = process.argv.slice(2);
-// a line that does not parse (a cut-off write, a stray edit) is skipped, not fatal
+// a line that does not parse (a cut-off write, a stray edit) or is no reading
+// (no time, no figure) is skipped, not fatal
+const isReading = e => !!e && typeof e === 'object' && !Array.isArray(e) && !Number.isNaN(Date.parse(e.t)) && typeof e.all === 'number';
 const readLog = () => fs.existsSync(logFile)
-  ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } })
+  ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).flatMap(l => { try { const e = JSON.parse(l); return isReading(e) ? [e] : []; } catch { return []; } })
   : [];
 
 // ---- the week in sum: the readings of one week (the same reset, within an
@@ -130,9 +141,12 @@ if (argv[0] === 'log') {
   const rows = readLog().slice(-(Number(argv[1]) || 20));
   if (!rows.length) { console.log('no readings yet'); process.exit(0); }
   for (const e of rows) {
+    // a per-model figure an automatic reading carried over is marked with how
+    // old it was then: "Fable 5.2 71 % (15 h old)", never shown as read
+    const carried = e.premiumAt ? Date.parse(e.t) - Date.parse(e.premiumAt) : 0;
     // local time, like the report
     console.log(new Date(e.t).toLocaleString('sv-SE').slice(0, 16) + '  all ' + String(e.all).padStart(5) + ' %  line ' + String(e.line).padStart(5) + ' %  '
-      + ((e.premium ?? e.fable) != null ? labelOf(e.premiumModel) + ' ' + String(e.premium ?? e.fable).padStart(3) + ' %  ' : '') + (e.five != null ? '5h ' + String(e.five).padStart(3) + ' %  ' : '') + e.level + (e.levelBy === 'premium' ? ' (' + labelOf(e.premiumModel) + ')' : '') + (e.premiumOut || e.fableOut ? ', ' + labelOf(e.premiumModel) + ' out' : e.premiumHeld ? ', ' + labelOf(e.premiumModel) + ' held' : '') + (e.source === 'hook' ? '  (auto)' : ''));
+      + ((e.premium ?? e.fable) != null ? labelOf(e.premiumModel) + ' ' + String(e.premium ?? e.fable).padStart(3) + ' %' + (carried >= 30 * 60000 ? ' (' + mins(carried) + ' old)' : '') + '  ' : '') + (e.five != null ? '5h ' + String(e.five).padStart(3) + ' %  ' : '') + e.level + (e.levelBy === 'premium' ? ' (' + labelOf(e.premiumModel) + ')' : '') + (e.premiumOut || e.fableOut ? ', ' + labelOf(e.premiumModel) + ' out' : e.premiumHeld ? ', ' + labelOf(e.premiumModel) + ' held' : '') + (e.source === 'hook' ? '  (auto)' : ''));
   }
   process.exit(0);
 }
@@ -147,7 +161,6 @@ if (argv[0] === 'log') {
 //      figure has a test of its own further down, once the line is known.
 //      The line itself is drawn for now, not for the reading's time. ----
 const FRESH = 30 * 60000;
-const mins = ms => (ms >= 2 * HOUR ? Math.round(ms / HOUR) + ' h' : Math.round(ms / 60000) + ' min');
 let fromState = null;
 if (argv[0] === 'last') {
   const i = argv.indexOf('--now');
@@ -155,18 +168,20 @@ if (argv[0] === 'last') {
   let s = null;
   try { s = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { s = null; }
   const age = s ? at - Date.parse(s.t) : NaN;
-  const why = !s || !s.reset || s.all == null ? 'no reading yet'
-    : !(age >= 0 && age <= FRESH) ? 'the last reading is ' + mins(age) + ' old'
+  const why = !s || !s.reset || s.all == null || Number.isNaN(age) ? 'no reading yet'
+    : age < 0 ? 'the last reading is dated after now'
+      : age > FRESH ? 'the last reading is ' + mins(age) + ' old'
       : Date.parse(s.reset) <= at.getTime() ? 'the week has reset since the last reading'
         : s.level === 'stop' ? 'the week is nearly used, and extra usage is only in a full reading'
           : null;
   if (why) { console.log('measure: ' + why); process.exit(0); }
   fromState = { ...s, age };
-  argv.splice(0, argv.length, '--all', String(s.all), '--reset', s.reset, '--now', at.toISOString(), '--dry',
+  const brief = argv.includes('--brief');
+  argv.splice(0, argv.length, '--all', String(s.all), '--reset', s.reset, '--now', at.toISOString(), '--dry', ...(brief ? ['--brief'] : []),
     ...(s.five != null && s.fiveReset && Date.parse(s.fiveReset) > at.getTime() ? ['--five', String(s.five), '--five-reset', s.fiveReset] : []));
 }
 
-const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'context-tokens', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry', 'source', 'categories'];
+const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'context-tokens', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry', 'source', 'categories', 'brief'];
 const opt = {};
 const unknown = [];
 for (let i = 0; i < argv.length; i++) {
@@ -174,15 +189,15 @@ for (let i = 0; i < argv.length; i++) {
   if (a.startsWith('--')) {
     const k = a.slice(2);
     if (!KNOWN.includes(k)) unknown.push(a);
-    else if (k === 'dry') opt.dry = true;
+    else if (k === 'dry' || k === 'brief') opt[k] = true;
     else opt[k] = argv[++i];
   }
 }
 const usage = () => {
   console.log('usage: node budget.mjs --all <pct> --reset <ISO> [--premium <pct>] [--five <pct>] [--five-reset <ISO>] [--session <model>]');
-  console.log('                      [--context <pct>] [--context-tokens <n>] [--categories "<name>=<tokens>,..."]');
+  console.log('                      [--context <pct>] [--context-tokens <n>] [--categories "<name>=<tokens>,..."] [--brief]');
   console.log('                      [--extra-spent <amount> --extra-limit <amount> [--extra-currency <code>]] [--now <ISO>] [--dry] [--source skill|hook]');
-  console.log('       node budget.mjs log [n] | week [n]');
+  console.log('       node budget.mjs last [--brief] [--now <ISO>] | log [n] | week [n]');
   console.log('       a meter the plan does not have: pass - for its percent');
   process.exit(1);
 };
@@ -192,8 +207,9 @@ if (opt.all === undefined || !opt.reset) usage();
 const source = opt.source || 'skill';
 if (!['skill', 'hook'].includes(source)) { console.log('--source is skill or hook'); usage(); }
 const auto = source === 'hook';
-const num = v => (v === undefined || v === '-' ? null : Number(v));
-const used = Number(opt.all);
+// an empty value is a mistake, not 0 %
+const num = v => (v === undefined || v === '-' ? null : String(v).trim() === '' ? NaN : Number(v));
+const used = String(opt.all).trim() === '' ? NaN : Number(opt.all);
 // the per-model meter is read only when the config names one. An automatic
 // reading never has it (the engine hands a plugin only the all-models and
 // 5-hour windows, and a gateway's spend limit; no per-model meter and no
@@ -241,14 +257,16 @@ const extraOn = extraSpent !== null && extraLimit !== null && extraLimit > 0;
 const reset = new Date(opt.reset);
 const fiveReset = opt['five-reset'] ? new Date(opt['five-reset']) : null;
 const now = opt.now ? new Date(opt.now) : new Date();
-const bad = [used, prem, five, context, contextTokens].some(v => v !== null && Number.isNaN(v))
+const bad = [used, prem, five, context, contextTokens].some(v => v !== null && (Number.isNaN(v) || v < 0))
   || Number.isNaN(reset.getTime()) || Number.isNaN(now.getTime()) || (fiveReset && Number.isNaN(fiveReset.getTime()));
-if (bad) { console.log('bad input: percents must be numbers, dates ISO 8601'); process.exit(1); }
+if (bad) { console.log('bad input: percents must be numbers from 0, dates ISO 8601'); process.exit(1); }
 // an automatic reading answers the hooks module, not a person: the report's
 // lines are kept here, and one JSON line goes out at the end
 const said = [];
 const print = console.log;
-if (auto) console.log = (...a) => { said.push(a.join(' ')); };
+// --brief (a reading after a task, or for the routing): the same lines are
+// kept, and only the ones that carry a decision go out at the end
+if (auto || opt.brief) console.log = (...a) => { said.push(a.join(' ')); };
 
 // ---- the budget line (a step per local day) ----
 // share(t): the part of the week's allowance that belongs to the time from the
@@ -611,9 +629,11 @@ if (context !== null || contextTokens !== null) {
   // start and the report). Such an agent gets the tier its class routes
   // to, never below tier 2 (a whole task is more than a routine step), and
   // judgment work the fallback tier: a strong model that is not the
-  // premium one, whose meter the session itself draws on.
+  // premium one, whose meter the session itself draws on. A fallback on
+  // the model that is out or held is no fallback: tier 1 of what is left.
   const tierNo = r => (r === 'L' ? ladder.length : Math.min(r, ladder.length));
-  const wholeOf = cls => (cls === 'judgment' ? fallbackTier || ladder[0] : ladder[Math.max(2, tierNo(route[cls])) - 1] || ladder[ladder.length - 1]);
+  const strong = fallbackTier && !(premAway && fallbackTier.model === premium) ? fallbackTier : ladder[0];
+  const wholeOf = cls => (cls === 'judgment' ? strong : ladder[Math.max(2, tierNo(route[cls])) - 1] || ladder[ladder.length - 1]);
   const whole = ladder.length && level !== 'stop'
     ? ['judgment', 'medium', 'routine'].map(cls => cls + ' on ' + name(wholeOf(cls))).join(', ') : null;
   console.log('context ' + size
@@ -626,6 +646,8 @@ if (context !== null || contextTokens !== null) {
       : ctxLevel === 1 ? ' -> for work that continues, suggest compacting the conversation at a natural break (/compact), the cheaper step; a task unrelated to this session\'s work starts in a new session'
         : ''));
 }
+if (loaded.missing) console.log('first run: no settings yet, the defaults are used; run config.mjs init once');
+if (loaded.problems.length) console.log('config.json: ' + loaded.problems.join('; '));
 if (!ladder.length) {
   console.log('do: no model left on the ladder (every tier is ' + premLabel + ' and its meter is full); wrap up');
 } else {
@@ -672,9 +694,9 @@ if (!ladder.length) {
   if (premHeld && level !== 'throttle') {
     // what is left of the held meter goes to work that needs it most
     const held = tiers.find(t => t.model === premium);
-    console.log('upward: ' + premLabel + ' is kept for judgment work: one contained hard task with a clear deliverable may go to a ' + name(held) + ' subagent; an open debugging hunt may not');
+    console.log('upward: ' + premLabel + ' is kept for judgment work: one contained hard task with a clear deliverable may go to ' + aName(held) + ' subagent; an open debugging hunt may not');
   } else if (session && ladder.indexOf(session) > 0 && ladder[0].model !== session.model && !premAway) {
-    console.log('upward: this session runs on ' + name(session) + '; one contained hard task with a clear deliverable may go to a ' + name(ladder[0]) + ' subagent');
+    console.log('upward: this session runs on ' + name(session) + '; one contained hard task with a clear deliverable may go to ' + aName(ladder[0]) + ' subagent');
   } else if (sessionModel && !session) {
     console.log('note: the session model "' + opt.session + '" is not on the ladder');
   }
@@ -684,6 +706,9 @@ if (!ladder.length) {
 // ---- side effects: log, state, the default model for new sessions ----
 let logged = false;
 if (!opt.dry) {
+  // this session is at work in this project (paths.mjs, the marks): a reading
+  // the hooks module took after a turn says it is live
+  if (process.env.CLAUDE_CODE_SESSION_ID) markSession(updateJson, projectRoot(process.env.CLAUDE_PROJECT_DIR || process.cwd()), process.env.CLAUDE_CODE_SESSION_ID, { live: auto, now: now.getTime() });
   // an automatic reading fires after every turn, in every session: it is
   // logged only when the last reading (of any source) is 30 min old, or the
   // meter moved a whole point, or the level or the premium flag changed, so
@@ -697,7 +722,10 @@ if (!opt.dry) {
       ...(premLevel ? { premiumLevel: premLevel } : {}), ...(premHeld ? { premiumHeld: true } : {}), ...(levelBy === 'premium' ? { levelBy } : {}),
       ...(auto ? { source: 'hook' } : {}), ...(premFrom ? { premiumAt: premFrom.at } : {}) };
     fs.appendFileSync(logFile, JSON.stringify(entry) + '\n');
-    fs.writeFileSync(stateFile, JSON.stringify({ ...entry, delta: r1(delta), next: sessionTier, trend: trend && !trend.short ? { rate: r1(trend.rate), projected: r1(trend.projected) } : null }, null, 2) + '\n');
+    // swapped in whole (safe.mjs), and never over a newer reading that
+    // another session wrote meanwhile
+    const state = { ...entry, delta: r1(delta), next: sessionTier, trend: trend && !trend.short ? { rate: r1(trend.rate), projected: r1(trend.projected) } : null };
+    updateJson(stateFile, cur => (cur && Date.parse(cur.t) > now.getTime() ? null : state));
     logged = true;
   }
   // only a reading the session takes on purpose changes what new sessions
@@ -709,12 +737,18 @@ if (!opt.dry) {
     const cliEffort = effort === 'max' ? 'xhigh' : effort;
     // the terminal CLI's default: ~/.claude/settings.json
     try {
-      const s = fs.existsSync(settingsFile) ? JSON.parse(fs.readFileSync(settingsFile, 'utf8')) : {};
-      if (s.model !== sessionTier.model || s.effortLevel !== cliEffort) {
+      // the user's own settings file, which Claude Code and other sessions
+      // write too: only these two keys change, on the file as it is at that
+      // moment (safe.mjs); a file that does not parse is left alone
+      let changed = false;
+      updateFile(settingsFile, text => {
+        const s = text === null ? {} : JSON.parse(text);
+        changed = s.model !== sessionTier.model || s.effortLevel !== cliEffort;
+        if (!changed) return null;
         s.model = sessionTier.model; s.effortLevel = cliEffort;
-        fs.writeFileSync(settingsFile, JSON.stringify(s, null, 2) + '\n');
-        console.log('settings.json: the terminal CLI now defaults to ' + name(sessionTier) + ' (model "' + s.model + '", effortLevel "' + cliEffort + '")');
-      }
+        return JSON.stringify(s, null, 2) + '\n';
+      });
+      if (changed) console.log('settings.json: the terminal CLI now defaults to ' + name(sessionTier) + ' (model "' + sessionTier.model + '", effortLevel "' + cliEffort + '")');
     } catch (e) {
       console.log('settings.json not changed: ' + e.message);
     }
@@ -727,22 +761,99 @@ if (!opt.dry) {
         ? fs.readdirSync(dataDir).map(d => path.join(dataDir, d, 'ccd-session-presets.json')).filter(p => fs.existsSync(p))
         : [];
       for (const p of presetFiles) {
-        const j = JSON.parse(fs.readFileSync(p, 'utf8'));
+        // the app's own file, which the app writes too: changed on the file
+        // as it is at that moment, and swapped in whole (safe.mjs)
         let changed = false;
-        for (const acc of Object.values(j.byAccount || {})) {
-          const s = acc.builtIns && acc.builtIns.local && acc.builtIns.local.settings;
-          if (s && (s.modelId !== modelId || s.effort !== effort)) { s.modelId = modelId; s.effort = effort; changed = true; }
-        }
-        if (changed) {
-          fs.writeFileSync(p, JSON.stringify(j, null, '\t') + '\n');
-          console.log('desktop app preset: new local sessions now start on ' + name(sessionTier) + ' (' + p + ')');
-        }
+        updateFile(p, text => {
+          if (text === null) return null;
+          const j = JSON.parse(text);
+          changed = false;
+          for (const acc of Object.values(j.byAccount || {})) {
+            const s = acc.builtIns && acc.builtIns.local && acc.builtIns.local.settings;
+            if (s && (s.modelId !== modelId || s.effort !== effort)) { s.modelId = modelId; s.effort = effort; changed = true; }
+          }
+          return changed ? JSON.stringify(j, null, '\t') + '\n' : null;
+        });
+        if (changed) console.log('desktop app preset: new local sessions now start on ' + name(sessionTier) + ' (' + p + ')');
       }
     } catch (e) {
       console.log('desktop app preset not changed: ' + e.message);
     }
   }
 }
+if (opt.brief && !auto) {
+  // The full report says the routing three times (the sheet, the paragraph
+  // under it, the routing lines) for a person to read. After a task the
+  // session needs the level, what to do and what advises: one line each,
+  // the routing in one line.
+  const byTier = new Map();
+  if (ladder.length) for (const cls of CLASSES) { const t = pick(route[cls]); byTier.set(t, [...(byTier.get(t) || []), cls]); }
+  const parts = [...byTier].map(([t, cls]) => cls.join(', ') + ' -> ' + name(t) + (ladder.indexOf(t) === 0 ? ' (the session)' : ''));
+  if (ladder.length > 1) parts.push('bulky -> ' + name(pick('L')));
+  if (ladder.length && level !== 'stop') {
+    parts.push('reader -> ' + name(readerTier || pick('L')));
+    parts.push('verifier -> ' + name(verifierTier || pick('L')) + (verifierTier ? ' (plain runs; checks to judge -> ' + name(pick('L')) + ')' : ''));
+  }
+  const keep = l => /^(All models used |last reading |last week:|first run:|config.json: |do: |effort: |upward: |note: |next session: |settings.json|desktop app preset)/.test(l)
+    || (premLabel && l.startsWith(premLabel + ' used '))
+    || (/^(5-hour window|fixed overhead|context) /.test(l) && l.includes(' -> '))
+    || (level === 'stop' && l.startsWith('extra usage: '));
+  for (const l of said.filter(keep)) {
+    if (l.startsWith('do: ') && parts.length) print('route: ' + parts.join('; '));
+    print(l);
+  }
+}
+// Whether another session started this one (a side session in the desktop
+// app). The app keeps a record per session, in the folder
+// <LOCALAPPDATA>/Claude-Data/<app>/claude-code-sessions/<a>/<b>/ as
+// <session id>.json, with `spawnedFrom` on a
+// session another one started, and names the id in the engine's environment
+// (CLAUDE_CODE_HOST_SESSION_ID). The app's own file, not a documented
+// interface, and seen on Windows only: anything missing or unreadable is
+// "not known" (null), never an error. CLAUDE_CODE_CHILD_SESSION is no such
+// mark: the engine sets it for every command it runs, in every session.
+const spawnedSession = () => {
+  try {
+    const id = process.env.CLAUDE_CODE_HOST_SESSION_ID;
+    if (!id || !/^[\w-]+$/.test(id)) return null;
+    const base = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Claude-Data');
+    const dirs = d => (fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => path.join(d, e.name)) : []);
+    for (const app of dirs(base)) for (const a of dirs(path.join(app, 'claude-code-sessions'))) for (const b of dirs(a)) {
+      const f = path.join(b, id + '.json');
+      if (fs.existsSync(f)) { const s = JSON.parse(fs.readFileSync(f, 'utf8')).spawnedFrom; return !!(s && typeof s === 'object' && s.sessionId); }
+    }
+  } catch { /* not known */ }
+  return null;
+};
+// ---- a carried per-model figure is not a current one ----
+// An automatic reading has no per-model meter and carries the last figure a
+// full reading took. That figure went unread for 15 hours once, at 71 % while
+// the meter reached 90 %. So the reading says how old the figure is, where the
+// meter probably is by now, and when a full reading is due:
+//   age       from the time the figure was read
+//   estimate  the figure plus what all models moved since, times how the two
+//             meters moved against each other between this week's full
+//             readings (the per-model allowance is the smaller one, so its
+//             meter moves faster). Shown as an estimate, never used for a
+//             level: a level rests on figures that were read.
+//   needFull  while tier 1 is that model: no figure this week, the figure an
+//             hour old, or all models 2 points on since it was read (two
+//             points were ten on the per-model meter in the case above).
+//             With the model held off tier 1 this session no longer draws
+//             on it, and three hours is soon enough.
+const fulls = weekLog.filter(e => e.premiumModel === premium && typeof e.premium === 'number' && !e.premiumAt);
+const premAgeMs = premFrom ? Math.max(0, now - Date.parse(premFrom.at)) : null;
+const readAt = premFrom ? fulls.filter(e => e.t === premFrom.at).at(-1) || fulls.at(-1) : null;
+const allMoved = readAt ? Math.max(0, used - readAt.all) : null;
+const ratio = fulls.length >= 2 && fulls.at(-1).all - fulls[0].all >= 2 && fulls.at(-1).premium >= fulls[0].premium
+  ? Math.min(10, (fulls.at(-1).premium - fulls[0].premium) / (fulls.at(-1).all - fulls[0].all)) : null;
+const premEstimate = premFrom && prem !== null && ratio !== null && allMoved > 0 && ratio * allMoved >= 1 ? Math.min(100, r1(prem + ratio * allMoved)) : null;
+const FULL_AGE = HOUR, FULL_AGE_HELD = 3 * HOUR, FULL_MOVED = 2;
+const needFull = !(auto && premium && premTop) || premOut ? null
+  : prem === null ? 'no ' + premLabel + ' reading this week yet'
+    : premAgeMs !== null && premAgeMs >= (premHeld ? FULL_AGE_HELD : FULL_AGE) ? 'the ' + premLabel + ' figure is ' + mins(premAgeMs) + ' old'
+      : !premHeld && allMoved !== null && allMoved >= FULL_MOVED ? 'all models moved ' + r1(allMoved) + ' points since the ' + premLabel + ' meter was read'
+        : null;
 if (auto) {
   const doLine = said.find(l => l.startsWith('do: '));
   // for the status line: the meter as a share of the budget line, and what the
@@ -760,5 +871,6 @@ if (auto) {
     premium: prem === null ? null : r1(prem), premiumOut: premOut, premiumLabel: premLabel,
     premiumAt: premFrom ? premFrom.at : null, premiumLevel: premLevel, premiumHeld: premHeld, levelBy,
     premiumOfBudget: premLevel && budget > 0 ? Math.round(100 * prem / budget) : null,
-    logged, do: doLine ? doLine.slice(4) : null }));
+    premiumEstimate: premEstimate, needFull,
+    spawned: spawnedSession(), logged, do: doLine ? doLine.slice(4) : null }));
 }
