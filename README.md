@@ -15,6 +15,38 @@ set exactly what model and effort each tier should use.
 The plugin lives in [`pacing/`](pacing/); its [README](pacing/README.md)
 has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 
+## What it does
+
+- **Tiers of models.** By default Fable 5.2 high runs the session, and
+  Opus 5.5 medium and Sonnet 5.5 medium take work as subagents. While
+  Fable's own weekly meter is full, Opus 5.5 high takes the top place.
+  The number of tiers and each tier's model and effort are yours to set.
+- **A budget line for every day.** The weekly meter is compared with a
+  line that steps up at midnight. Ahead of it, the top model does nearly
+  everything; past it, more work moves down the tiers. The logged trend
+  can raise the level before the meter gets there.
+- **A status line after every turn** (new in 0.8):
+
+  ```
+  77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)
+  ```
+
+  The weekly meter as a share of today's line, how this session's own
+  use splits over the tiers (subagents included), and the weekly meters.
+  It comes from readings the plugin takes by itself after a turn, on a
+  Claude Code version with hooks modules; older versions run the rest of
+  the plugin as before.
+- **Role agents the session keeps.** A reader (Haiku 5.5 by default) for
+  logs, searches and unfamiliar code, a verifier for tests and checks, an
+  implementer for specified edits, and a researcher for documentation.
+  Each leaves notes per project for the next agent of its role.
+- **Handover between sessions.** A session that has grown long writes
+  what the next one needs; the next session's start line names the file.
+- **A start line in every new session** with the last reading and the
+  recommended model, which can also become the default for new sessions.
+- **Weekly summaries** (`/pacing week`), and at "over" a suggestion to
+  lower the session's effort one step before work moves down a tier.
+
 ## Install
 
 In a Claude Code session:
