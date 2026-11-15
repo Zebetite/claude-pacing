@@ -23,8 +23,9 @@ rules; `skills/pacing/SKILL.md` is what Claude follows.
 | `.claude-plugin/plugin.json` | the manifest: name `pacing`, the version |
 | `skills/pacing/SKILL.md` | the skill, invoked as `/pacing:pacing` (or by typing "usage") |
 | `skills/pacing/GUIDE.md`, `BRIEF.md` | the user guide and the standing brief for subagents |
+| `skills/pacing/SETUP.md`, `HANDOVER.md` | the steps for `setup` and for writing a handover, read only when needed so that `SKILL.md` stays short |
 | `agents/*.md` | the four role agents the session delegates to and keeps for its whole run: `reader`, `verifier`, `implementer`, `researcher` |
-| `skills/pacing/scripts/*.mjs` | `budget.mjs` (the rule), `config.mjs` (the ladder), `hook.mjs` (session start), `models.mjs` (the model table) |
+| `skills/pacing/scripts/*.mjs` | `budget.mjs` (the rule), `config.mjs` (the ladder), `hook.mjs` (session start), `models.mjs` (the model table), `paths.mjs` (where a project's notes and handovers live) |
 | `hooks/hooks.json` | a SessionStart hook that shows the last reading and the recommended model |
 
 The scripts run with `node` (Node.js 18 or later), which must be on the
@@ -62,10 +63,12 @@ folder, which an update replaces:
 
 | file | what |
 |---|---|
-| `config.json` | the ladder, the last-day weight, the per-model meter, the next-session switch |
+| `config.json` | the ladder, the last-day weight, the per-model meter and its fallback, the reader's model, the next-session switch |
 | `log.jsonl`, `state.json` | the readings, and the last one for the hook |
 | `BRIEF.local.md` | the user's own rules for subagents (never part of the plugin) |
 | `notes/<project>/<role>.md` | what each role agent learned about a project, a line per fact, for the next agent of that role |
+| `agents/<project>.jsonl` | each task a role agent finished: role, agent id, model, effort, tokens |
+| `handover/<project>/*.md` | what a long session left for the next one; those picked up are kept in `done/` |
 
 With the next-session switch on, the skill also writes the recommended
 model into `~/.claude/settings.json` (`model`, `effortLevel`) and, on

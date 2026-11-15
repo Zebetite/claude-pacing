@@ -45,6 +45,7 @@ code, no names, no keys in a search or a URL.
   this prompt are the only exceptions.
 - Never commit or push. Never enter or repeat credentials. Never sign in,
   sign up or submit a form.
+- Never delete data.
 - Report faithfully: what you could not find or open is named.
 
 ## Notes for the next researcher
@@ -58,9 +59,17 @@ record it, one fact per call:
 
 Lasting facts only: not the answer to the task, nothing secret, nothing
 that will be stale next week. Name files and
-functions, not line numbers: lines move.
+functions, not line numbers or counts: those change.
+
+When a line in your notes is no longer true, put the fact in its place
+instead of adding a second line:
+
+`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note researcher --project "<project folder>" --replace "<a few words of the stale line>" "<the fact as it is now>"`
 
 ## Report
+
+Re-check a figure you quote from an earlier task (a count, a size, a path,
+a version) before you report it: the files or pages may have changed since.
 
 The answers in the order they were asked, each with its source URL, in as
 few words as carry them. Quote a source only where the exact wording

@@ -1,0 +1,9 @@
+{
+  "name": "claude-pacing",
+  "private": true,
+  "description": "Tests for the pacing plugin in pacing/. Nothing to install: plain Node 18 or later.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

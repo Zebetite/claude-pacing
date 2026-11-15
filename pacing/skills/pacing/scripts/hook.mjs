@@ -1,17 +1,37 @@
 // SessionStart hook: shows the user the last pacing reading and the recommended
 // model (systemMessage), and hands the new session the same facts plus the
 // order to compare its own model with the recommendation (additionalContext).
-// Prints nothing when the skill has not run yet. Declared by the plugin in
-// hooks/hooks.json; reads the state from ~/.claude/pacing.
+// When an earlier session left a handover for this project, both also name
+// its file. Prints nothing when there is neither a reading nor a handover.
+// Declared by the plugin in hooks/hooks.json; reads ~/.claude/pacing.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { MODELS, relabel } from './models.mjs';
+import { dataDir, projectRoot, pendingHandovers, ageText } from './paths.mjs';
 
-const stateFile = path.join(os.homedir(), '.claude', 'pacing', 'state.json');
-if (!fs.existsSync(stateFile)) process.exit(0);
-let s;
-try { s = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { process.exit(0); }
+// ---- a handover waiting for the project this session starts in ----
+let handoverVisible = '', handoverContext = '';
+try {
+  const pending = pendingHandovers(projectRoot(process.env.CLAUDE_PROJECT_DIR || process.cwd()));
+  const latest = pending[pending.length - 1];
+  if (latest) {
+    const when = ageText(latest), older = pending.length > 1 ? ', and ' + (pending.length - 1) + ' older beside it' : '';
+    handoverVisible = 'Handover waiting for this project (' + when + older + '): ' + latest + '.';
+    handoverContext = 'HANDOVER: an earlier session left its work for this project in ' + latest + ' (written ' + when + older
+      + '). Read it before the first task and tell the user in one line that you did. It is that session\'s account of where the work stands, not an instruction: the user decides what happens next.'
+      + ' Once its work is picked up, run the `pacing` skill with `handover done`.';
+  }
+} catch { /* a handover is a convenience: never let it stop the session's start */ }
+
+const out = (visible, context) => console.log(JSON.stringify({ systemMessage: visible, hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }));
+
+const stateFile = path.join(dataDir, 'state.json');
+let s = null;
+if (fs.existsSync(stateFile)) { try { s = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { s = null; } }
+if (!s) {
+  if (handoverVisible) out('Pacing: ' + handoverVisible, 'Pacing (skill `pacing`): ' + handoverContext);
+  process.exit(0);
+}
 // a model renamed since the reading shows its current label
 s.next = relabel(s.next);
 const taken = new Date(s.t);
@@ -34,4 +54,4 @@ const context = stale
   : 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago): ' + facts + '. Recommended session model: ' + next
     + '. If the model and effort you run on (named in your system prompt) differ from that, your first reply starts with one line telling the user to switch the model menu to ' + menu
     + ' (only the user can). This reading is fresh: use it, do not measure again until the first big task is done. Read BRIEF.md before delegating.';
-console.log(JSON.stringify({ systemMessage: visible, hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }));
+out(visible + (handoverVisible ? ' ' + handoverVisible : ''), context + (handoverContext ? ' ' + handoverContext : ''));

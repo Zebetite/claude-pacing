@@ -52,9 +52,17 @@ and how long it takes, a trap), record it, one fact per call:
 
 Lasting facts about the project only: not the answer to the task, nothing
 secret, nothing that will be stale next week. Name files and
-functions, not line numbers: lines move.
+functions, not line numbers or counts: those change.
+
+When a line in your notes is no longer true, put the fact in its place
+instead of adding a second line:
+
+`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note reader --project "<project folder>" --replace "<a few words of the stale line>" "<the fact as it is now>"`
 
 ## Report
+
+Re-check a figure you quote from an earlier task (a count, a size, a path,
+a test result) before you report it: the files may have changed since.
 
 The answer first, in a few lines. Then the evidence as `path:line`, and the
 exact output of any command that matters. No file dumps: the session asked

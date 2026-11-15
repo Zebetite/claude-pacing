@@ -61,9 +61,17 @@ fact per call:
 
 Lasting facts about the project only: not what this task changed, nothing
 secret, nothing that will be stale next week. Name files and
-functions, not line numbers: lines move.
+functions, not line numbers or counts: those change.
+
+When a line in your notes is no longer true, put the fact in its place
+instead of adding a second line:
+
+`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note implementer --project "<project folder>" --replace "<a few words of the stale line>" "<the fact as it is now>"`
 
 ## Report
+
+Re-check a figure you quote from an earlier task (a count, a size, a path,
+a test result) before you report it: the files may have changed since.
 
 What was changed, as `path:line` with a line on each. Then the tests or checks you ran: the counts when they pass, the exact
 output of what fails, and anything you were unsure about or left

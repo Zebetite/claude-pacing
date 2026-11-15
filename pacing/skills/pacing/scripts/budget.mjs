@@ -6,6 +6,7 @@
 // --premium is the per-model weekly meter of config.premium (Fable by default;
 // --fable is the old name of the flag and still accepted).
 //   node budget.mjs log [n]        the last n readings (20)
+//   node budget.mjs week [n]       the last n weeks in sum (2): last use, time by level, the line
 // The week is 7 days ending at --reset; the last 24 h weigh config.lastDayWeight
 // (1.5 by default), the rest 1. The line is a step at local midnight: the whole
 // of the current calendar day's allowance counts as available from its start.
@@ -15,7 +16,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { MODELS, relabel } from './models.mjs';
+import { MODELS, EFFORTS, relabel } from './models.mjs';
 
 const dataDir = path.join(os.homedir(), '.claude', 'pacing');
 fs.mkdirSync(dataDir, { recursive: true });
@@ -39,6 +40,10 @@ tiers = tiers.map(relabel);
 // judgment while routine work stays on the cheaper tier 2
 const fallback = cfg.fallback === undefined ? { model: 'opus', effort: 'high' } : cfg.fallback;
 const fallbackTier = fallback && MODELS[fallback.model] ? { model: fallback.model, label: MODELS[fallback.model].label, effort: fallback.effort } : null;
+// the reader agent (pacing:reader) reads at a model of its own, Haiku 5.5
+// medium by default: finding and summing up asks less than the work the
+// lowest tier is chosen for. 'ladder' makes it follow the lowest tier.
+const readerCfg = cfg.reader === undefined ? { model: 'haiku', effort: 'medium' } : cfg.reader;
 const lastDayWeight = cfg.lastDayWeight || 1.5;
 const setNextModel = cfg.setNextModel !== false;
 // the per-model weekly meter: which ladder model it belongs to (fable unless
@@ -58,6 +63,57 @@ const readLog = () => fs.existsSync(logFile)
   ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } })
   : [];
 
+// ---- the week in sum: the readings of one week (the same reset, within an
+//      hour: the API's reset time jitters) give the last use, the share of
+//      the time spent at each level, and whether the meter crossed the line.
+//      A reading's level holds until the next reading, the last one's until
+//      the reset (or now, for the week still running). ----
+const weeksOf = entries => {
+  const weeks = [];
+  for (const e of entries) {
+    if (!e.reset || !e.t) continue;
+    const r = Date.parse(e.reset);
+    let w = weeks.find(x => Math.abs(x.reset - r) <= HOUR);
+    if (!w) { w = { reset: r, entries: [] }; weeks.push(w); }
+    w.entries.push(e);
+  }
+  for (const w of weeks) w.entries.sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
+  return weeks.sort((a, b) => a.reset - b.reset);
+};
+const SUM_LEVELS = ['ahead', 'on pace', 'over', 'throttle', 'stop'];
+const summarise = (w, until) => {
+  const es = w.entries, last = es[es.length - 1];
+  const time = {};
+  es.forEach((e, i) => {
+    const end = i + 1 < es.length ? Date.parse(es[i + 1].t) : Math.min(w.reset, until);
+    time[e.level] = (time[e.level] || 0) + Math.max(0, end - Date.parse(e.t));
+  });
+  const total = Object.values(time).reduce((a, b) => a + b, 0);
+  const shares = SUM_LEVELS.filter(l => time[l] > 0).map(l => l + ' ' + Math.round(100 * time[l] / total) + ' %');
+  const gaps = es.filter(e => e.line != null).map(e => ({ e, d: e.all - e.line }));
+  const over = gaps.filter(g => g.d > 0);
+  const peak = gaps.reduce((m, g) => (!m || g.d > m.d ? g : m), null);
+  return { last, readings: es.length, shares, over, peak };
+};
+const stamp = t => new Date(t).toLocaleString('sv-SE').slice(0, 16);
+const crossedText = s => (!s.peak ? 'no line logged'
+  : s.over.length ? 'line crossed on ' + s.over.length + ' of ' + s.readings + ' readings (peak ' + r1(s.peak.d) + ' points over, ' + stamp(s.peak.e.t) + ')'
+    : r1(-s.peak.d) === 0 ? 'line never crossed (touched it)' : 'line never crossed (closest ' + r1(-s.peak.d) + ' points under)');
+
+if (argv[0] === 'week') {
+  const n = Number(argv[1]) || 2;
+  const weeks = weeksOf(readLog()).slice(-n).reverse();
+  if (!weeks.length) { console.log('no readings yet'); process.exit(0); }
+  const nowMs = Date.now();
+  for (const w of weeks) {
+    const s = summarise(w, nowMs);
+    console.log('week to ' + stamp(w.reset) + (w.reset > nowMs ? ' (running)' : '') + ': ' + s.readings + ' readings, last ' + s.last.all + ' % at ' + stamp(s.last.t));
+    if (s.shares.length) console.log('  time by level: ' + s.shares.join(', '));
+    console.log('  ' + crossedText(s));
+  }
+  process.exit(0);
+}
+
 if (argv[0] === 'log') {
   const rows = readLog().slice(-(Number(argv[1]) || 20));
   if (!rows.length) { console.log('no readings yet'); process.exit(0); }
@@ -69,7 +125,7 @@ if (argv[0] === 'log') {
   process.exit(0);
 }
 
-const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry'];
+const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'context-tokens', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry'];
 const opt = {};
 const unknown = [];
 for (let i = 0; i < argv.length; i++) {
@@ -82,9 +138,10 @@ for (let i = 0; i < argv.length; i++) {
   }
 }
 const usage = () => {
-  console.log('usage: node budget.mjs --all <pct> --reset <ISO> [--premium <pct>] [--five <pct>] [--five-reset <ISO>] [--session <model>] [--context <pct>]');
+  console.log('usage: node budget.mjs --all <pct> --reset <ISO> [--premium <pct>] [--five <pct>] [--five-reset <ISO>] [--session <model>]');
+  console.log('                      [--context <pct>] [--context-tokens <n>]');
   console.log('                      [--extra-spent <amount> --extra-limit <amount> [--extra-currency <code>]] [--now <ISO>] [--dry]');
-  console.log('       node budget.mjs log [n]');
+  console.log('       node budget.mjs log [n] | week [n]');
   console.log('       a meter the plan does not have: pass - for its percent');
   process.exit(1);
 };
@@ -97,6 +154,7 @@ const used = Number(opt.all);
 const prem = premium ? num(opt.premium !== undefined ? opt.premium : opt.fable) : null;
 const five = num(opt.five);
 const context = num(opt.context);
+const contextTokens = num(opt['context-tokens']);
 // extra usage: past 100 % the work goes on and is charged, when the plan allows it
 const extraSpent = num(opt['extra-spent']);
 const extraLimit = num(opt['extra-limit']);
@@ -105,7 +163,7 @@ const extraOn = extraSpent !== null && extraLimit !== null && extraLimit > 0;
 const reset = new Date(opt.reset);
 const fiveReset = opt['five-reset'] ? new Date(opt['five-reset']) : null;
 const now = opt.now ? new Date(opt.now) : new Date();
-const bad = [used, prem, five, context].some(v => v !== null && Number.isNaN(v))
+const bad = [used, prem, five, context, contextTokens].some(v => v !== null && Number.isNaN(v))
   || Number.isNaN(reset.getTime()) || Number.isNaN(now.getTime()) || (fiveReset && Number.isNaN(fiveReset.getTime()));
 if (bad) { console.log('bad input: percents must be numbers, dates ISO 8601'); process.exit(1); }
 
@@ -196,6 +254,9 @@ const ladder = !premOut ? tiers
   : fallbackTier && fallbackTier.model !== premium && !rest.some(t => t.model === fallbackTier.model && t.effort === fallbackTier.effort)
     ? [fallbackTier, ...rest]
     : rest;
+// a reader model whose meter is out follows the lowest tier like 'ladder'
+const readerTier = readerCfg && readerCfg !== 'ladder' && MODELS[readerCfg.model] && !(premOut && readerCfg.model === premium)
+  ? { model: readerCfg.model, label: MODELS[readerCfg.model].label, effort: readerCfg.effort } : null;
 const route = ROUTES[level];
 const pick = r => { const i = r === 'L' ? ladder.length : Math.min(r, ladder.length); return ladder[i - 1]; };
 // the model a session should run on at this level
@@ -230,6 +291,15 @@ const bar = (pct, marker) => {
   if (marker !== undefined && marker < 100) cells[Math.min(BAR_W - 1, Math.max(0, Math.round(marker / 100 * BAR_W) - 1))] = '│';
   return cells.join('');
 };
+// What a long session costs follows its size in tokens, not its share of the
+// window: the whole history is sent again on every turn, and stored again
+// after a pause. From CTX_ADVISE a task unrelated to the session's work is
+// better started fresh; from CTX_URGE the session says so before the next
+// task. A reading with the percentage alone falls back to 30 % and 50 %, the
+// same sizes in a window of a million tokens.
+const CTX_ADVISE = 300000, CTX_URGE = 500000;
+const ctxLevel = contextTokens !== null ? (contextTokens >= CTX_URGE ? 2 : contextTokens >= CTX_ADVISE ? 1 : 0)
+  : context !== null ? (context >= 50 ? 2 : context >= 30 ? 1 : 0) : 0;
 const barRow = (label, pct, note, marker) => pct === null ? null
   : label.padEnd(11) + bar(pct, marker) + String(Math.round(pct) + ' %').padStart(6) + (note ? (note.startsWith('/') ? ' ' : '  ') + note : '');
 // "2d 16h" until the weekly reset
@@ -238,7 +308,8 @@ const resetsIn = ms => { const h = Math.max(0, Math.round(ms / HOUR)); const d =
   barRow('5-hour', five, fiveReset ? 'resets ' + clock(fiveReset) : ''),
   barRow('All models', used, '/ ' + Math.round(budget) + ' % pace · resets in ' + resetsIn(reset - now), budget),
   prem !== null ? barRow(premLabel, prem, premOut ? 'out until the reset' : 'not paced') : null,
-  barRow('Context', context, context >= 50 ? 'next task: new session' : context >= 30 ? 'new tasks: new session' : ''),
+  barRow('Context', context, ctxLevel === 2 ? 'new session for the next task' : ctxLevel === 1 ? 'unrelated tasks: new session'
+    : contextTokens !== null ? Math.round(contextTokens / 1000) + 'k tokens' : ''),
 ].filter(Boolean).forEach(l => console.log(l));
 console.log('');
 // the sheet under the bars, as GUIDE.md's ladder table: each tier and the
@@ -247,7 +318,8 @@ const sheet = [['tier', 'model', 'takes now · level ' + level]];
 const CLASSES = ['judgment', 'medium', 'routine', 'trivial'];
 ladder.forEach((t, i) => {
   const work = CLASSES.filter(cls => pick(route[cls]) === t);
-  const bulky = ladder.length > 1 && i === ladder.length - 1 ? 'bulky output (logs, test runs, many files)' : '';
+  const bulky = ladder.length > 1 && i === ladder.length - 1
+    ? (readerTier ? 'bulky output (test runs, builds, checks)' : 'bulky output (logs, test runs, many files)') : '';
   const where = i === 0 ? 'the session: ' : 'subagents: ';
   const takes = level === 'stop' ? (i === 0 ? 'the session: wrap up, the week is nearly used' : 'nothing: wrap up')
     : work.length ? where + work.join(', ') + ' work' + (bulky ? '; ' + bulky : '')
@@ -256,6 +328,7 @@ ladder.forEach((t, i) => {
           : 'nothing at this level';
   sheet.push([String(i + 1), name(t), takes]);
 });
+if (readerTier && ladder.length && level !== 'stop') sheet.push(['r', name(readerTier), 'the reader agent: bulky reading (logs, searches, unfamiliar code)']);
 if (premOut) tiers.filter(t => t.model === premium).forEach(t => sheet.push(['-', name(t), 'out until the reset: its own meter is at 100 %']));
 // the last column wraps within WIDTH, its continuation lines under its start
 const widths = sheet[0].map((_, c) => Math.max(...sheet.map(r => r[c].length)));
@@ -283,8 +356,10 @@ const because = {
 let why = 'All models at ' + Math.round(used) + ' % is ' + compare + ' today\'s allowed ' + Math.round(budget) + ' %'
   + (trend && trend.bumped ? ', and the trend projects ' + Math.round(trend.projected) + ' % at the reset, which raises the level' : '') + ': '
   + because[level]
-  + (ladder.length > 1 && level !== 'stop' ? ' Bulky output goes to the lowest tier at every level, so it stays out of the session\'s context.' : '')
-  + (premOut ? ' ' + premLabel + '\'s own meter is at 100 %, so it left the ladder until the reset and ' + name(ladder[0]) + ' takes tier 1.' : '');
+  + (ladder.length > 1 && level !== 'stop' ? ' Bulky output goes to the lowest tier at every level' + (readerTier ? ', bulky reading to the reader on ' + name(readerTier) : '') + ', so it stays out of the session\'s context.' : '')
+  // with every tier on the premium model and no fallback, nothing takes tier 1
+  + (premOut ? ' ' + premLabel + '\'s own meter is at 100 %, so it left the ladder until the reset'
+    + (ladder[0] ? ' and ' + name(ladder[0]) + ' takes tier 1.' : ' and no model is left.') : '');
 console.log('');
 wrap(why, WIDTH).forEach(l => console.log(l));
 console.log('');
@@ -292,6 +367,16 @@ console.log('day ' + dayNo + ' of ' + dayCount + ' (calendar days), ' + r1(elaps
 console.log('allowance today ' + r1(todayAllowance) + ' %, budget line now ' + r1(budget) + ' % (counted to ' + (endOfToday === reset.getTime() ? 'the reset' : 'midnight') + ')');
 console.log('All models used ' + r1(used) + ' %, delta ' + (delta >= 0 ? '+' : '') + r1(delta)
   + (prem !== null ? ', ' + premLabel + ' ' + r1(prem) + ' %' : '') + ' -> ' + level + (trend && trend.bumped ? ' (raised by the trend)' : '') + (premOut ? ', ' + premLabel + ' out' : ''));
+// the first reading of a new week sums up the week before it, once
+{
+  const weeks = weeksOf(readLog());
+  const thisWeek = weeks.some(w => Math.abs(w.reset - reset) <= HOUR);
+  const before = weeks.filter(w => w.reset < reset.getTime() - HOUR).pop();
+  if (!thisWeek && before) {
+    const s = summarise(before, now.getTime());
+    console.log('last week: ended at ' + s.last.all + ' %' + (s.shares.length ? ', time by level ' + s.shares.join(', ') : '') + '; ' + crossedText(s));
+  }
+}
 if (trend) {
   console.log('trend: ' + (trend.rate >= 0 ? '+' : '') + r1(trend.rate) + ' %/day over the last ' + r1(trend.hours) + ' h, projected ' + r1(trend.projected) + ' % at reset'
     + (trend.reach ? ', reaches 100 % ' + when(trend.reach) : '')
@@ -337,10 +422,13 @@ if (extraSpent !== null && extraLimit !== null) {
 }
 // the session's own context is re-sent on every turn: past a point, the
 // transcript costs more than any model choice saves
-if (context !== null) {
-  console.log('context ' + r1(context) + ' % of the window'
-    + (context >= 50 ? ' -> this session is the expensive part now: move the next task to a NEW session, and keep this one for follow-ups only'
-      : context >= 30 ? ' -> start new tasks in a new session; finish the current one here'
+if (context !== null || contextTokens !== null) {
+  const size = contextTokens !== null
+    ? Math.round(contextTokens / 1000) + 'k tokens' + (context !== null ? ' (' + r1(context) + ' % of the window)' : '')
+    : r1(context) + ' % of the window';
+  console.log('context ' + size
+    + (ctxLevel === 2 ? ' -> this session is the expensive part now, above all after a pause: say so before the next task and offer a handover (/pacing handover); a task unrelated to this work goes to a NEW session, and only short follow-ups stay'
+      : ctxLevel === 1 ? ' -> a task unrelated to this session\'s work starts in a new session; follow-ups that build on it stay here'
         : ''));
 }
 if (!ladder.length) {
@@ -354,7 +442,11 @@ if (!ladder.length) {
   }
   if (ladder.length > 1) {
     const tL = pick('L');
-    console.log('  bulky    -> tier ' + ladder.length + ' ' + name(tL) + ' (subagent) at any level: logs, test runs, many files; the output stays out of the session\'s context');
+    console.log('  bulky    -> tier ' + ladder.length + ' ' + name(tL) + ' (subagent) at any level: ' + (readerTier ? 'test runs, builds, checks' : 'logs, test runs, many files') + '; the output stays out of the session\'s context');
+  }
+  if (level !== 'stop') {
+    console.log('  reader   -> ' + (readerTier ? name(readerTier) + ' (pacing:reader) at any level: logs, searches, unfamiliar code'
+      : 'tier ' + ladder.length + ' ' + name(pick('L')) + ' (pacing:reader), the lowest tier'));
   }
   const t2 = pick(2);
   const notes = {
@@ -366,6 +458,16 @@ if (!ladder.length) {
   };
   const switchNow = premOut ? premLabel + ' is out until the reset: SWITCH the session to ' + name(pick(1)) + ' now (model menu: ' + pick(1).label + ', effort ' + pick(1).effort + '). ' : '';
   console.log('do: ' + switchNow + notes[level]);
+  // At "over" the cheapest lever comes first: one step less effort on the
+  // session's own model saves on every turn and keeps the work where it is.
+  // Only the user can change it (the model menu, or the app's prompt when the
+  // session offers set_session_effort). A session on another tier is left
+  // alone, and so is one that is told to switch model now (premium out).
+  const top = ladder[0], lower = EFFORTS[EFFORTS.indexOf(top.effort) - 1];
+  if (level === 'over' && lower && !premOut && (!sessionModel || sessionModel === top.model)) {
+    console.log('effort: first offer to lower this session\'s effort one step, ' + name(top) + ' -> ' + lower
+      + ' (model menu: ' + top.label + ', effort ' + lower + '; the user decides); medium work still goes to ' + name(pick(2)));
+  }
   if (session && ladder.indexOf(session) > 0 && ladder[0].model !== session.model && !premOut) {
     console.log('upward: this session runs on ' + name(session) + '; one contained hard task with a clear deliverable may go to a ' + name(ladder[0]) + ' subagent');
   } else if (sessionModel && !session) {

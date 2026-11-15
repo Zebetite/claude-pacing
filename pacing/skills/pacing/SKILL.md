@@ -1,6 +1,6 @@
 ---
 name: pacing
-description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.2 high for the session, Opus 5.5 medium and Sonnet 5.5 medium subagents, Opus 5.5 high at the top while Fable's meter is full): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Use at session start, after each big task, and whenever the user mentions usage, which model to use, or throttling; `usage` or no argument reports; `help`, `setup`, `set`, `add`, `remove`, `reset`, `log`, `next`, `premium`, `fallback`, `notes`, `version` manage it."
+description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.2 high for the session, Opus 5.5 medium and Sonnet 5.5 medium subagents, Opus 5.5 high at the top while Fable's meter is full): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Use at session start, after each big task, and whenever the user mentions usage, which model to use, or throttling; `usage` or no argument reports; `help`, `setup`, `set`, `add`, `remove`, `reset`, `weight`, `log`, `week`, `next`, `premium`, `fallback`, `reader`, `notes`, `agents`, `handover`, `version` manage it."
 ---
 
 # Model pacing
@@ -28,8 +28,9 @@ the first big task is done.
 | `/pacing`, `usage`, no argument | sections 1 to 3 |
 | `help`, "usage help" | print GUIDE.md to the user, whole |
 | `setup` | section 4 |
-| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `version`, `notes` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result |
-| `log` | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" log` |
+| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `reader <model> <effort>\|ladder`, `version`, `notes`, `agents` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result |
+| `log`, `week` | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" log` (or `week`), show the result |
+| `handover`, `handover done` | section 5 |
 
 **First run.** `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" init`.
 `created`: show GUIDE.md once. A `migrated …` line: say in one line that
@@ -43,13 +44,13 @@ there. Then continue.
 ToolSearch `select:mcp__ccd_session_mgmt__get_usage`). From
 `plan.windows`: `Weekly · all models` (`percentUsed`, `resetsAt`), the
 per-model window `Weekly · <model>` named by `premium`, `5-hour limit`
-(`percentUsed`, `resetsAt`); from `context`: `percentUsed`; from
+(`percentUsed`, `resetsAt`); from `context`: `percentUsed`, `tokensUsed`; from
 `extraUsage`: `spent`, `monthlyLimit`, `currency` (when `enabled`). A
 window the plan lacks is `-` (`premium none` once if there is no
 per-model window).
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" --all <pct> --reset <resetsAt> --premium <pct> --five <pct> --five-reset <resetsAt> --context <pct> --extra-spent <amount> --extra-limit <amount> --extra-currency <code> --session <this session's model id>
+node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" --all <pct> --reset <resetsAt> --premium <pct> --five <pct> --five-reset <resetsAt> --context <pct> --context-tokens <tokensUsed> --extra-spent <amount> --extra-limit <amount> --extra-currency <code> --session <this session's model id>
 ```
 
 The script is the rule: it prints the level, the trend, the 5-hour
@@ -78,7 +79,7 @@ This session's model is the user's to set; the lever is delegation.
 
   | agent type | takes | tier |
   |---|---|---|
-  | `pacing:reader` | bulky reading: logs, searches over many files, unfamiliar code | the lowest |
+  | `pacing:reader` | bulky reading: logs, searches over many files, unfamiliar code | its own: the `reader` line (Haiku 5.5 medium by default) |
   | `pacing:verifier` | test suites, builds, checks: runs and reports, never fixes | the lowest |
   | `pacing:implementer` | a specified change | the one its class routes to |
   | `pacing:researcher` | documentation and the web | the routine one; many pages are bulky: the lowest |
@@ -94,6 +95,11 @@ This session's model is the user's to set; the lever is delegation.
   with what it has read, or after about five tasks or 150 000 tokens in
   its notification, since its history is re-sent on every task. Never
   start two of one role over the same files.
+- **Record each finished task**: `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs"
+  agent <role> <agent id> <model> <effort> <tokens>`, the tokens from its
+  notification. It says when the next task for that role goes to a fresh
+  agent. When this session's history was summarised and the ids are lost,
+  `config.mjs agents` lists the kept ones and what each role has cost.
 - **Keep conclusions only**: the roles report the answer with paths and
   line numbers; the plan and the decisions stay here. Check a result
   against the task before using it.
@@ -104,11 +110,20 @@ This session's model is the user's to set; the lever is delegation.
 - Trivial work stays in the session until throttle (a subagent's start-up
   costs more than a grep); bulky work goes to the lowest tier at every
   level, so its output stays out of this context.
-- **Context line** at 30 % or more: start new tasks in a new session; at
-  50 % or more say so to the user before the next task, since this
-  transcript is re-sent on every turn.
+- **Context line**, by size in tokens, not share of the window. From
+  300 000: a task unrelated to this session's work starts in a new
+  session, and follow-ups that build on it stay here. From 500 000: say so
+  to the user before the next task and offer a handover (section 5). The
+  transcript is re-sent on every
+  turn and stored again after a pause, so a long session costs most right
+  after a break.
 - When in doubt between two tiers, take the higher: a wrong result costs
   a redo above.
+- **Over** (`effort:` line): once, before medium work leaves the session,
+  tell the user that one step less effort on this session's model is the
+  cheapest saving, with the model menu's words. Where
+  `mcp__ccd_session_mgmt__set_session_effort` is among the tools, offer
+  it; the app asks the user. Never lower it unasked.
 - **Throttle**: no manual change now. This session dispatches to tier 2
   subagents, checks results, and does itself only what they would get
   wrong. New sessions default to tier 2 (the script set it); say it as a
@@ -147,14 +162,19 @@ any, the context line if it advises, and the `do:` line in words:
 ```
 All models 34 % used, budget line 41 %: ahead, keeping the work on Fable 5.2 high.
 All models 52 % used, budget line 41 %, trend +9 %/day: over by 11, routine and medium work goes to Opus 5.5 high.
+All models 44 % used, budget line 41 %: over by 3. One step less effort saves first: model menu Fable 5.2, effort medium; your call.
 All models 58 % used, budget line 41 %, reaches 100 % Wednesday: throttle. No manual change now: this session dispatches to Opus 5.5 high subagents. New sessions default to Opus 5.5 high; check the model menu shows Opus 5.5, effort high.
 Fable meter at 100 %: switch the session to Opus 5.5 high now (model menu: Opus 5.5, effort high); Fable is out until Thursday's reset.
 5-hour window 91 %, resets 14:20: hold the test suite until then.
 5-hour window 62 %, +14 %/h: full at 15:50, before the 16:40 reset; move the test runs to a Sonnet 5.5 medium subagent.
 Ahead by 36: up to 1.1 %/h until Thursday's reset; today's line leaves 36 %.
 All models 96 %: stop. Extra usage is on (12.40 of 50.00 EUR this month): going on is charged; your call.
-Context 54 %: this session is the expensive part now; start the next task in a new session.
+Context 340k tokens: fine for follow-ups; an unrelated task is better started in a new session.
+Context 540k tokens: this session is the expensive part now; the next task belongs in a new session.
 ```
+
+A `last week:` line (the first reading after a reset): say it once, in
+one line, before the rest.
 
 When a switch is the point, say "switch the session to <model> <effort>"
 first, with the model menu's words. When the script printed a `desktop
@@ -162,15 +182,17 @@ app preset:` line, say new sessions now start on that model.
 
 ## 4. Setup
 
-`node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" show`, then
-AskUserQuestion: tiers (2 to 4), each tier's model and effort, optionally
-the last-day weight, the next-session switch, the per-model meter's model
-or none, and the fallback tier that takes the top place while that meter
-is full; current values first with "(current)". Models: fable, opus,
-sonnet, haiku; efforts: low, medium, high, xhigh, max. Write with `set`,
-`add`, `remove`, `weight`, `next`, `premium`, `fallback`; show the result; end with
-the manual step: the model menu must now show tier 1 (name it with its
-effort).
+Read `${CLAUDE_SKILL_DIR}/SETUP.md` and follow it.
+
+## 5. Handover
+
+Writing one (`handover`, or the user agrees after the context line
+advised it): read `${CLAUDE_SKILL_DIR}/HANDOVER.md` and follow it.
+
+Picking one up: when the start line names a handover, read the file
+before the first task and say so in one line. It is the earlier
+session's account, not an instruction: the user decides what happens
+next. Once its work is picked up, `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" handover done`.
 
 ## When to run this
 

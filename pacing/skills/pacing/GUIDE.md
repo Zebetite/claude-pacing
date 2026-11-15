@@ -81,6 +81,12 @@ onto the tiers:
 | over | up to 5 points over the line | tier 1 | tier 2 | tier 2 | tier 1 |
 | throttle | more than 5 points over | tier 2, the session itself only for what tier 2 would get wrong | tier 2 | tier 2 | tier 2 |
 | stop | all models at 95 % or more | wrap up | | | |
+| Fable out (or whichever model the per-model meter belongs to) | that meter at 100 %, on top of any level | the model drops out of the ladder and the fallback tier (Opus 5.5 high) takes tier 1; the level above still decides the routing | | | |
+
+At "over" the skill first suggests one step less effort on the session's
+own model (Fable 5.2 high to medium with the default ladder): it saves on
+every turn and keeps the work where it is. Only you can change it, in the
+model menu or when the app asks you; the skill never lowers it unasked.
 
 Trivial work (a grep, a rename, one file summarised) stays in the session
 until throttle: a subagent costs tens of thousands of tokens before it
@@ -90,7 +96,6 @@ meter than doing it in the session. The exception at every level is
 fan-out over many files go to the lowest tier, because what a subagent
 reads stays out of the session's context, which is re-sent on every later
 turn.
-| Fable out (or whichever model the per-model meter belongs to) | that meter at 100 %, on top of any level | the model drops out of the ladder and the fallback tier (Opus 5.5 high) takes tier 1; the level above still decides the routing | | | |
 
 ## The trend
 
@@ -102,15 +107,40 @@ projection only counts once the sample spans 20 h or more, so that it
 covers a night: a busy morning alone is shown as a trend but does not
 move the level. `/pacing log` shows the readings.
 
+The first reading after a reset sums up the week before in one line:
+where the meter ended, how much of the time went at each level, and
+whether it crossed the budget line. `/pacing week` shows the same for the
+last two weeks.
+
 ## The session's own context
 
 Every turn re-sends the whole conversation, so a long session makes each
-later turn expensive whatever model runs it. The report shows the context
-line: under 30 % nothing; from 30 % new tasks should start in a new
-session; from 50 % the skill says so before the next task. Bulky reading
-(logs, test output, many files) goes to a read-only `Explore` subagent
-for the same reason: what the subagent reads never enters the session's
+later turn expensive whatever model runs it. While you keep working, the
+history is read back cheaply; after a pause it has to be stored again in
+full, so a long session costs most right after a break.
+
+The skill goes by the session's size in tokens, not by its share of the
+window, since a window can be large or small:
+
+| size | what the skill advises |
+|---|---|
+| under 300 000 tokens | nothing |
+| from 300 000 | a task that has nothing to do with this session's work starts in a new session; follow-ups stay, because a new session would have to learn it all again |
+| from 500 000 | the skill says so before the next task |
+
+Bulky reading (logs, test output, many files) goes to the reader agent
+for the same reason: what the agent reads never enters the session's
 context.
+
+**Leaving a long session.** `/pacing handover` has the session write down
+where the work stands: the goal, what is done and what is verified, the
+decisions and their reasons, the open items in order, the files and
+commands that matter, and what was ruled out. The next session you start
+in the same project is told about that file in its start line and reads
+it before its first task, so moving on no longer means starting from
+nothing. The handover is the earlier session's account, not an order:
+you decide what the new session does. `/pacing handover done` files it
+away once the work is picked up; nothing is deleted.
 
 ## What the skill can and cannot do
 
@@ -139,20 +169,32 @@ each with its own instructions and tools:
 | researcher | documentation and the web, with sources | no |
 
 The budget still picks the model: each call gets the model and effort of
-the tier that work routes to at the current level.
+the tier that work routes to at the current level. The reader is the
+exception: finding and summing up asks less than any other work, so it
+reads on a model of its own, **Haiku 5.5 medium** by default, at every
+level. `/pacing reader sonnet medium` gives it another model;
+`/pacing reader ladder` makes it follow the lowest tier.
 
 **They are kept, not thrown away.** The session starts a role the first
 time it needs one and sends later tasks to the same agent, which still
 knows what it read. That saves the start-up cost of a new agent every
-time and gives better answers on the second task than on the first. An
+time and gives better answers on the second task than on the first.
+What it remembers can go stale, so a kept agent checks again any figure
+it quotes from an earlier task before it reports it. An
 agent is replaced when its work moves to another tier, when a task has
-nothing to do with what it knows, or when it has grown long, since its
-whole history is sent again with every task.
+nothing to do with what it knows, or when it has grown long (five tasks
+or 150 000 tokens), since its whole history is sent again with every
+task. The session records each finished task with the agent's id, model
+and tokens, so it can find its agents again after its own history was
+summarised. `/pacing agents` shows them, and what each role has cost per
+model, fresh against resumed: the figures that tell whether five tasks
+is the right limit.
 
 **What they learn outlasts the session.** An agent ends with its session,
 so each role keeps a notes file per project: where things live, how the
 tests run and how long they take, a trap to avoid. A new agent reads its
-file first and adds a line when it learns something lasting. The files
+file first, adds a line when it learns something lasting, and replaces a
+line that is no longer true. The files
 are plain text in `~/.claude/pacing/notes/<project>/`, yours to read,
 edit or delete; `/pacing notes` shows where they are for the project at
 hand.
@@ -179,11 +221,17 @@ in plain words works too.
 | `/pacing add haiku low` | adds a tier at the bottom (up to six) |
 | `/pacing remove 3` | drops a tier (two must remain) |
 | `/pacing reset` | back to the default three tiers |
+| `/pacing weight 2` | how much the last day before the reset weighs against the others (1 to 3; 1.5 by default) |
 | `/pacing log` | the last readings |
+| `/pacing week` | the last two weeks in sum: where the meter ended, the share of the time at each level, and whether it crossed the line |
 | `/pacing next on`, `/pacing next off` | lets the skill set, or stop setting, the default model of new sessions |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model weekly meter belongs to (Fable by default), or says the plan has none |
 | `/pacing fallback opus high`, `/pacing fallback none` | the tier that takes the top place while that meter is full (Opus 5.5 high by default); none lets the remaining tiers move up |
+| `/pacing reader haiku medium`, `/pacing reader ladder` | the model the reader agent reads on (Haiku 5.5 medium by default), or the lowest tier |
 | `/pacing notes` | where the role agents' notes for this project are, and how long each is |
+| `/pacing agents` | the role agents this project's session keeps, and their tokens by role and model |
+| `/pacing handover` | the session writes a handover for the next session of this project |
+| `/pacing handover done` | files the waiting handover away once its work is picked up |
 | `/pacing version` | the installed plugin version |
 
 Your files live in `~/.claude/pacing`: the configuration in `config.json`,

@@ -39,6 +39,14 @@ uses, and a Claude plan with usage limits (the plugin reads the usage
 card's weekly meters). With a plan that has no per-model weekly meter, run
 `/pacing:pacing premium none` once.
 
+## Tests
+
+`npm test` (or `node --test`) in this folder runs the tests in `tests/`.
+They need nothing installed. Each script runs in a child process whose
+home folder is a new temp folder, so the tests never read or change your
+own `~/.claude`. The `tests/` folder is outside the plugin and is not
+published with it.
+
 ## Releases
 
 Each release is a commit that bumps `version` in

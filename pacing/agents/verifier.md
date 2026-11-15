@@ -59,9 +59,17 @@ time, a flaky test, a setup step), record it, one fact per call:
 Lasting facts about the project only: not this run's result (a test that fails
 today is a result, not a note), nothing
 secret, nothing that will be stale next week. Name files and
-functions, not line numbers: lines move.
+functions, not line numbers or counts: those change.
+
+When a line in your notes is no longer true, put the fact in its place
+instead of adding a second line:
+
+`node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" note verifier --project "<project folder>" --replace "<a few words of the stale line>" "<the fact as it is now>"`
 
 ## Report
+
+Re-check a figure you quote from an earlier task (a count, a size, a path,
+a test result) before you report it: the files may have changed since.
 
 The verdict first: passed, failed, or could not be run, with the counts.
 Then each failure with its exact output and `path:line`. Passing output is
