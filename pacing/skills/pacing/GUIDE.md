@@ -131,8 +131,13 @@ That is the weekly meter as a share of today's budget line (over 100 %
 means over the line), how this session's own use splits over the tiers,
 subagents included, and the two meters.<!-- /help --> The split is an estimate: each
 model's tokens priced at its API rates, which is how the weekly meter
-weighs the models too. The reader agent's model, when it is not on the
-ladder, counts as the tier after the last (tier 4 with three tiers). The
+weighs the models too. The tiers are those in force at the reading:
+while Fable's meter is out or held, the fallback (Opus 5.5 high) is tier
+1. Claude Code names the model of each turn but not its effort, so a
+model on two tiers counts at the higher one for the session's own turns
+and the lower one for its subagents. The reader agent's model, when it
+is not on the ladder, counts as the tier after the last (tier 4 with
+three tiers). The
 circles are gold, silver, bronze and brown for tiers 1 to 4 (🟡 ⚪ 🟠 🟤),
 then 🟣 🔴 🔵 🟢 for a longer ladder; ⚫ is a model the ladder does not
 hold. A session that another session started (a side session in the

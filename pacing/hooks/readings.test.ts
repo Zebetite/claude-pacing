@@ -434,3 +434,31 @@ test('the note is one block beside the prompt, marked as automatic', async ($, o
   expect(got?.length).toBe(1)
   expect(got?.[0].startsWith('Pacing (automatic note, not from the user): ')).toBe(true)
 })
+
+// ---- one model on two tiers ----
+
+// Fable held: Opus 5.5 high (the fallback) on top, Opus 5.5 medium at tier 2,
+// as budget.mjs maps them for the ladder in force
+const HELD_MAP = { tierOf: { 'claude-opus-5-5': 1, 'claude-sonnet-5-5': 3, 'claude-fable-5-2': 1, 'claude-haiku-5-5': 4 },
+  agentTierOf: { 'claude-opus-5-5': 2, 'claude-sonnet-5-5': 3, 'claude-fable-5-2': 1, 'claude-haiku-5-5': 4 } }
+
+test('the session on the fallback is tier 1; its subagents on the same model are tier 2', async ($, on) => {
+  const status = engine(on)
+  on('process.run', () => ({ value: answer('ahead', 10, { ...HELD_MAP, spawned: true }) }))
+
+  await $.turn.complete(turn('claude-opus-5-5', 6))
+  await $.turn.complete(turn('claude-opus-5-5', 3, 'a1'))
+  await $.turn.complete(turn('claude-haiku-5-5', 1, 'a2'))
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('🟡Tier 1 Sub Agent - 50% of budget, 🟡Tier 1[60%] ⚪Tier 2[30%] 🟤Tier 4[10%], (10% Weekly, 40% Fable)')
+})
+
+test('an older budget.mjs without agentTierOf: every turn counts by tierOf, as before', async ($, on) => {
+  const status = engine(on)
+  on('process.run', () => ({ value: answer('ahead', 10) }))
+
+  await $.turn.complete(turn('claude-fable-5-2', 8))
+  await $.turn.complete(turn('claude-opus-5-5', 2, 'a1'))
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('50% of budget, 🟡Tier 1[80%] ⚪Tier 2[20%], (10% Weekly, 40% Fable)')
+})

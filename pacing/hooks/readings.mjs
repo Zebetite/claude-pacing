@@ -67,16 +67,22 @@ const percents = values => {
 // the model id a usage record names, as the prices know it
 const idOf = (model, prices) => Object.keys(prices).find(p => model.startsWith(p));
 
-// the session's spend by tier, from the tokens seen per model id
-export const tierMix = (tokens, tierOf, prices) => {
+// the session's spend by tier, from the tokens seen per model id: its own
+// turns' at each model's tier for the session (tierOf), its subagents' at the
+// model's tier for a subagent (agentTierOf; one model can hold two places,
+// the session's above, a subagent's below). An older budget.mjs sends no
+// agentTierOf: then both count by tierOf.
+export const tierMix = (tokens, tierOf, prices, agentTokens = {}, agentTierOf = tierOf) => {
   const byTier = new Map();
-  for (const [model, t] of Object.entries(tokens)) {
-    const id = idOf(model, prices);
-    if (!id) continue;
-    const [pin, pout, pread, pwrite] = prices[id];
-    const usd = (t.in * pin + t.out * pout + t.read * pread + t.write * pwrite) / 1e6;
-    const key = tierOf[id] ?? 'Other';
-    byTier.set(key, (byTier.get(key) || 0) + usd);
+  for (const [seen, map] of [[tokens, tierOf], [agentTokens, agentTierOf || tierOf]]) {
+    for (const [model, t] of Object.entries(seen)) {
+      const id = idOf(model, prices);
+      if (!id) continue;
+      const [pin, pout, pread, pwrite] = prices[id];
+      const usd = (t.in * pin + t.out * pout + t.read * pread + t.write * pwrite) / 1e6;
+      const key = map[id] ?? tierOf[id] ?? 'Other';
+      byTier.set(key, (byTier.get(key) || 0) + usd);
+    }
   }
   const keys = [...byTier.keys()].sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a - b));
   const shares = percents(keys.map(k => byTier.get(k)));
@@ -140,7 +146,9 @@ export const statusText = (j, mix, self = null, now = Date.now()) => {
 export const register = on => {
   // this module's memory, for this session; a reload starts it over, and
   // budget.mjs keeps the log thin across sessions and reloads by itself
+  // tokens per model id: the session's own turns, and its subagents'
   const tokens = {};
+  const agentTokens = {};
   let last = null;
   let reading = null;
   let running = false;
@@ -200,7 +208,8 @@ export const register = on => {
     }
     const u = e.usage;
     if (u && u.model) {
-      const t = (tokens[u.model] ||= { in: 0, out: 0, read: 0, write: 0 });
+      const seen = e.agentId ? agentTokens : tokens;
+      const t = (seen[u.model] ||= { in: 0, out: 0, read: 0, write: 0 });
       t.in += u.input_tokens || 0;
       t.out += u.output_tokens || 0;
       t.read += u.cache_read_input_tokens || 0;
@@ -247,7 +256,7 @@ export const register = on => {
         const prices = reading.prices || {}, tierOf = reading.tierOf || {};
         const id = child && sessionModel ? idOf(sessionModel, prices) : null;
         const self = !child || !sessionModel ? null : (id && tierOf[id]) || 'Other';
-        $.ui.status(statusText(reading, tierMix(tokens, tierOf, prices), self, now));
+        $.ui.status(statusText(reading, tierMix(tokens, tierOf, prices, agentTokens, reading.agentTierOf), self, now));
       }
     } catch {
       // a reading is a convenience: a missing node, a timeout or a bad line

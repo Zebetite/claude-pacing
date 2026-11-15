@@ -856,18 +856,33 @@ const needFull = !(auto && premium && premTop) || premOut ? null
         : null;
 if (auto) {
   const doLine = said.find(l => l.startsWith('do: '));
-  // for the status line: the meter as a share of the budget line, and what the
-  // module needs to split the session's own use by tier: each model's tier
-  // number (its first place on the configured ladder; the reader's model
-  // after the last tier when it is not on the ladder; the fallback's at tier
-  // 1, the place it takes) and its prices
-  const tierOf = {};
-  tiers.forEach((t, i) => { if (MODELS[t.model] && !tierOf[MODELS[t.model].id]) tierOf[MODELS[t.model].id] = i + 1; });
-  if (readerCfg && readerCfg !== 'ladder' && MODELS[readerCfg.model] && !tierOf[MODELS[readerCfg.model].id]) tierOf[MODELS[readerCfg.model].id] = tiers.length + 1;
-  if (verifierCfg && verifierCfg !== 'ladder' && MODELS[verifierCfg.model] && !tierOf[MODELS[verifierCfg.model].id]) tierOf[MODELS[verifierCfg.model].id] = Math.max(tiers.length, ...Object.values(tierOf)) + 1;
-  if (fallbackTier && !tierOf[MODELS[fallbackTier.model].id]) tierOf[MODELS[fallbackTier.model].id] = 1;
+  // For the status line: the meter as a share of the budget line, and what the
+  // module needs to split the session's use by tier: each model's prices, and
+  // its tier number on the ladder in force now (with the fallback on top
+  // while the per-model meter is out or held). A usage record names a model,
+  // not an effort, and one model can hold two places (Opus 5.5 high as the
+  // fallback on top, Opus 5.5 medium at tier 2). So the session's own turns
+  // count at a model's first place (tierOf), and its subagents' at its first
+  // place below tier 1 (agentTierOf): subagents take the lower tiers. A model
+  // off the ladder now (the premium one while out or held, a configured tier
+  // the ladder dropped) keeps its configured place; the reader's and the
+  // verifier's models, off the ladder, come after its last tier.
+  const tierOf = {}, agentTierOf = {};
+  const idOf = t => (t && MODELS[t.model] ? MODELS[t.model].id : null);
+  ladder.forEach((t, i) => {
+    const id = idOf(t);
+    if (!id) return;
+    if (!tierOf[id]) tierOf[id] = i + 1;
+    if (i > 0 && !agentTierOf[id]) agentTierOf[id] = i + 1;
+  });
+  tiers.forEach((t, i) => { const id = idOf(t); if (id && !tierOf[id]) tierOf[id] = i + 1; });
+  if (fallbackTier && !tierOf[idOf(fallbackTier)]) tierOf[idOf(fallbackTier)] = 1;
+  const last = Math.max(ladder.length, tiers.length);
+  if (readerCfg && readerCfg !== 'ladder' && idOf(readerCfg) && !tierOf[idOf(readerCfg)]) tierOf[idOf(readerCfg)] = last + 1;
+  if (verifierCfg && verifierCfg !== 'ladder' && idOf(verifierCfg) && !tierOf[idOf(verifierCfg)]) tierOf[idOf(verifierCfg)] = Math.max(last, ...Object.values(tierOf)) + 1;
+  for (const id of Object.keys(tierOf)) if (!agentTierOf[id]) agentTierOf[id] = tierOf[id];
   const prices = Object.fromEntries(Object.values(MODELS).map(m => [m.id, m.price]));
-  print(JSON.stringify({ level, all: r1(used), line: r1(budget), ofBudget: budget > 0 ? Math.round(100 * used / budget) : null, tierOf, prices,
+  print(JSON.stringify({ level, all: r1(used), line: r1(budget), ofBudget: budget > 0 ? Math.round(100 * used / budget) : null, tierOf, agentTierOf, prices,
     premium: prem === null ? null : r1(prem), premiumOut: premOut, premiumLabel: premLabel,
     premiumAt: premFrom ? premFrom.at : null, premiumLevel: premLevel, premiumHeld: premHeld, levelBy,
     premiumOfBudget: premLevel && budget > 0 ? Math.round(100 * prem / budget) : null,

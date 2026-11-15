@@ -378,3 +378,35 @@ describe('a carried per-model figure is not a current one', () => {
     } finally { s.cleanup(); }
   });
 });
+
+describe('the tier map for the status line follows the ladder in force', () => {
+  test('default: the configured ladder, the reader and the verifier after it; subagents the same', () => {
+    const s = sandbox();
+    try {
+      const j = auto(s, 10, NOW, ['--dry', '--premium', '5']);
+      assert.deepEqual(j.tierOf, { 'claude-fable-5-2': 1, 'claude-opus-5-5': 2, 'claude-sonnet-5-5': 3, 'claude-haiku-5-5': 4 });
+      assert.deepEqual(j.agentTierOf, j.tierOf);
+    } finally { s.cleanup(); }
+  });
+  test('Fable held: the fallback, Opus 5.5 high, is tier 1 for the session; Opus subagents are tier 2', () => {
+    const s = sandbox();
+    try {
+      const j = auto(s, 10, NOW, ['--dry', '--premium', '30']);
+      assert.equal(j.premiumHeld, true);
+      assert.equal(j.tierOf['claude-opus-5-5'], 1);
+      assert.equal(j.agentTierOf['claude-opus-5-5'], 2);
+      // Fable, off the ladder while held, keeps its configured place
+      assert.equal(j.tierOf['claude-fable-5-2'], 1);
+      assert.equal(j.tierOf['claude-sonnet-5-5'], 3);
+      assert.equal(j.tierOf['claude-haiku-5-5'], 4);
+    } finally { s.cleanup(); }
+  });
+  test('Fable out, fallback none: the remaining tiers move up', () => {
+    const s = sandbox();
+    try {
+      s.config(['fallback', 'none']);
+      const j = auto(s, 10, NOW, ['--dry', '--premium', '100']);
+      assert.deepEqual([j.tierOf['claude-opus-5-5'], j.tierOf['claude-sonnet-5-5'], j.agentTierOf['claude-opus-5-5'], j.agentTierOf['claude-sonnet-5-5']], [1, 2, 1, 2]);
+    } finally { s.cleanup(); }
+  });
+});
