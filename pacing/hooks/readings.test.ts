@@ -3,7 +3,8 @@
 // module's $.process.run with what budget.mjs --source hook prints, and catch
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
+import { pauseNote, unattended } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -15,8 +16,8 @@ const PRICES = {
 // the default ladder: Fable, Opus, Sonnet; the reader on Haiku after it
 const TIER_OF = { 'claude-fable-5-2': 1, 'claude-opus-5-5': 2, 'claude-sonnet-5-5': 3, 'claude-haiku-5-5': 4 }
 
-const measure = (pct: number, more: { kind: string; percentUsed: number; resetsAt?: string }[] = []) => ({
-  context: { window: 1000000, tokens: 50000, percent: 5 },
+const measure = (pct: number, more: { kind: string; percentUsed: number; resetsAt?: string }[] = [], tokens = 50000) => ({
+  context: { window: 1000000, tokens, percent: Math.round(tokens / 10000) },
   rateLimits: [{ kind: 'seven_day', percentUsed: pct, resetsAt: RESET }, ...more],
   changed: ['rateLimits' as const],
 })
@@ -151,4 +152,197 @@ test('a failed run changes nothing and never throws into the session', async ($,
   const r = await $.session.measure(measure(10))
   expect(r.changed).toEqual(['rateLimits'])
   expect(status).toEqual([])
+})
+
+// ---- the per-model meter in the status line ----
+
+test('a carried per-model figure says when it was read; the meter that set the level shows its own budget share', async ($, on) => {
+  const status = engine(on)
+  const toasts: string[] = []
+  const at = '2026-11-13T09:40:00.000Z'
+  const d = new Date(at)
+  const hhmm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+  let next = answer('ahead', 10, { premium: 18, premiumAt: at, premiumLevel: 'on pace', levelBy: 'all', premiumOfBudget: 90 })
+  on('process.run', () => ({ value: next }))
+  on('ui.toast', (_, e) => (toasts.push(e.text), { value: undefined }))
+
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('50% of budget, (10% Weekly, 18% Fable at ' + hhmm + ')')
+  next = answer('over', 11, { premium: 22, premiumAt: null, premiumLevel: 'over', levelBy: 'premium', premiumOfBudget: 110, do: 'medium tasks leave the session model too' })
+  await $.session.measure(measure(11))
+  expect(status.at(-1)).toBe('110% of Fable budget, (11% Weekly, 22% Fable)')
+  expect(toasts).toEqual(['Pacing: ahead -> over (Fable meter). medium tasks leave the session model too'])
+})
+
+test('the session moved off the per-model meter\'s model is one toast, though the level stays', async ($, on) => {
+  engine(on)
+  const toasts: string[] = []
+  let next = answer('ahead', 10)
+  on('process.run', () => ({ value: next }))
+  on('ui.toast', (_, e) => (toasts.push(e.text), { value: undefined }))
+
+  await $.session.measure(measure(10))
+  next = answer('ahead', 11, { premium: 30, premiumHeld: true, premiumLevel: 'throttle', premiumOfBudget: 150, do: 'Fable 5.2\'s own meter is at throttle: SWITCH the session to Opus 5.5 high now' })
+  await $.session.measure(measure(11))
+  expect(toasts).toEqual(['Pacing: Fable 5.2\'s own meter is at throttle: SWITCH the session to Opus 5.5 high now'])
+})
+
+// ---- the warning after a pause ----
+
+const T0 = Date.parse('2026-11-15T10:00:00.000Z')
+// the engine beneath, for a prompt: what entered, and the order things happened in
+const prompts = (on: any, order: string[]) => {
+  const entered: string[] = []
+  on('prompt.submit', (_: unknown, e: any) => (order.push('turn'), entered.push(e.text), { text: e.text }))
+  on('ui.toast', (_: unknown, e: any) => (order.push('toast: ' + e.text), { value: undefined }))
+  return entered
+}
+const big = (on: any) => on('process.run', () => ({ value: answer('ahead', 10) }))
+
+test('after an hour idle, a large session is told once, before the turn, and the prompt goes on unchanged', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const order: string[] = []
+  const entered = prompts(on, order)
+
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await $.session.measure(measure(10, [], 420000))
+  await clock.advance(85 * 60000)
+  const r = await $.prompt.submit({ text: 'go on with the tests', asUser: true })
+  expect(r.text).toBe('go on with the tests')
+  expect(entered).toEqual(['go on with the tests'])
+  expect(order).toEqual([
+    'toast: Pacing: this session is 420k tokens and sat idle 1 h 25 min, so its cache has lapsed and this turn stores it all again. After a break, /compact or a handover first is cheaper.',
+    'turn',
+  ])
+  // a second prompt in the same pause: no second warning
+  await $.prompt.submit({ text: 'and the docs', asUser: true })
+  expect(order.filter(o => o.startsWith('toast')).length).toBe(1)
+  // the next pause is a new one
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(61 * 60000)
+  await $.prompt.submit({ text: 'next', asUser: true })
+  expect(order.filter(o => o.startsWith('toast')).length).toBe(2)
+  expect(order.at(-2)).toContain('sat idle 1 h 1 min')
+})
+
+test('no warning under an hour, under 300 000 tokens, or before any turn', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const order: string[] = []
+  prompts(on, order)
+
+  // no turn yet: nothing to measure the pause from
+  await $.session.measure(measure(10, [], 420000))
+  await clock.advance(3 * 3600000)
+  await $.prompt.submit({ text: 'a', asUser: true })
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(59 * 60000)
+  await $.prompt.submit({ text: 'b', asUser: true })
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await $.session.measure(measure(10, [], 299999))
+  await clock.advance(2 * 3600000)
+  await $.prompt.submit({ text: 'c', asUser: true })
+  expect(order).toEqual(['turn', 'turn', 'turn'])
+})
+
+test('a subagent\'s turn does not end the pause; a slash command is not warned and does not use the warning up', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const order: string[] = []
+  prompts(on, order)
+
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await $.session.measure(measure(10, [], 600000))
+  await clock.advance(50 * 60000)
+  await $.turn.complete(turn('claude-opus-5-5', 1, 'a1'))
+  await clock.advance(20 * 60000)
+  await $.prompt.submit({ text: '/compact' , asUser: true })
+  expect(order).toEqual(['turn'])
+  await $.prompt.submit({ text: 'go on', asUser: true })
+  expect(order.filter(o => o.startsWith('toast'))).toEqual([
+    'toast: Pacing: this session is 600k tokens and sat idle 1 h 10 min, so its cache has lapsed and this turn stores it all again. After a break, /compact or a handover first is cheaper.',
+  ])
+})
+
+test('a failing toast never stops the prompt', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const entered: string[] = []
+  on('prompt.submit', (_: unknown, e: any) => (entered.push(e.text), { text: e.text }))
+  on('ui.toast', () => { throw new Error('no toasts here') })
+
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await $.session.measure(measure(10, [], 420000))
+  await clock.advance(2 * 3600000)
+  const r = await $.prompt.submit({ text: 'still goes', asUser: true })
+  expect(r.text).toBe('still goes')
+  expect(entered).toEqual(['still goes'])
+})
+
+// the kit raises a test's prompt with no origin, so the prompts nobody typed
+// are checked here, on the module's own filter
+test('prompts nobody typed are not warned: notifications, schedules, peers, a plugin\'s own', () => {
+  for (const kind of ['task-notification', 'scheduled-trigger', 'auto-continuation', 'peer', 'coordinator', 'plugin']) expect(unattended({ kind })).toBe(true)
+  for (const o of [undefined, { kind: 'composer' }, { kind: 'bridge' }, { kind: 'sdk' }, { kind: 'plugin', asUser: true }]) expect(unattended(o)).toBe(false)
+})
+
+test('the line: from 300 000 tokens and an hour idle, in whole minutes', () => {
+  expect(pauseNote(300000, 3600000)).toContain('300k tokens and sat idle 1 h,')
+  expect(pauseNote(299999, 7200000)).toBe(null)
+  expect(pauseNote(500000, 3599999)).toBe(null)
+  expect(pauseNote(null as any, 7200000)).toBe(null)
+  expect(pauseNote(1200000, 26 * 3600000 + 5 * 60000)).toContain('1200k tokens and sat idle 26 h 5 min,')
+})
+
+// ---- a session another session started ----
+
+test('a side session leads with its own tier: Tier X Sub Agent - X% of budget', async ($, on) => {
+  mock.env(on, { CLAUDE_CODE_CHILD_SESSION: '1' })
+  const status = engine(on)
+  on('process.run', () => ({ value: answer('ahead', 10) }))
+
+  await $.turn.complete(turn('claude-opus-5-5', 9))
+  await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('⚪Tier 2 Sub Agent - 50% of budget, ⚪Tier 2[90%] 🟤Tier 4[10%], (10% Weekly, 40% Fable)')
+})
+
+test('a side session: the per-model meter\'s share when it decides; a model off the ladder is Other', async ($, on) => {
+  mock.env(on, { CLAUDE_CODE_CHILD_SESSION: '1' })
+  const status = engine(on)
+  let next = answer('over', 11, { premium: 22, levelBy: 'premium', premiumOfBudget: 110 })
+  on('process.run', () => ({ value: next }))
+
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await $.session.measure(measure(11))
+  expect(status.at(-1)).toBe('🟡Tier 1 Sub Agent - 110% of Fable budget, 🟡Tier 1[100%], (11% Weekly, 22% Fable)')
+  next = answer('ahead', 12)
+  await $.turn.complete({ ...turn('claude-fable-5-2', 1), usage: { model: 'claude-opus-4-8', input_tokens: 0, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } })
+  await $.session.measure(measure(12))
+  expect(status.at(-1)).toBe('⚫Other Sub Agent - 60% of budget, 🟡Tier 1[100%], (12% Weekly, 40% Fable)')
+})
+
+test('a session of its own keeps the plain line', async ($, on) => {
+  mock.env(on, { CLAUDE_CODE_CHILD_SESSION: '0' })
+  const status = engine(on)
+  on('process.run', () => ({ value: answer('ahead', 10) }))
+
+  await $.turn.complete(turn('claude-opus-5-5', 1))
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('50% of budget, ⚪Tier 2[100%], (10% Weekly, 40% Fable)')
+})
+
+test('a side session before its first turn keeps the plain line', async ($, on) => {
+  mock.env(on, { CLAUDE_CODE_CHILD_SESSION: '1' })
+  const status = engine(on)
+  on('process.run', () => ({ value: answer('ahead', 10) }))
+
+  await $.turn.complete(turn('claude-opus-5-5', 1, 'a1'))
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('50% of budget, ⚪Tier 2[100%], (10% Weekly, 40% Fable)')
 })

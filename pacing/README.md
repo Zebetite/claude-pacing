@@ -13,21 +13,24 @@ what model and effort should be on every tier.
 The default tiers are Fable 5.2 high for the session, Opus 5.5 medium and
 Sonnet 5.5 medium for subagents; while Fable's own meter is full, Opus
 5.5 high takes the top place. The budget line is drawn against the
-**Weekly · all models** meter. `skills/pacing/GUIDE.md` explains the
-rules; `skills/pacing/SKILL.md` is what Claude follows.
+**Weekly · all models** meter, and against Fable's own meter while Fable
+runs the session. `skills/pacing/GUIDE.md` explains the
+rules; `skills/pacing/SKILL.md` (reports and settings) and
+`skills/route/SKILL.md` (delegating work) are what Claude follows.
 
 ## What is in the plugin
 
 | path | what |
 |---|---|
 | `.claude-plugin/plugin.json` | the manifest: name `pacing`, the version |
-| `skills/pacing/SKILL.md` | the skill, invoked as `/pacing:pacing` (or by typing "usage") |
+| `skills/pacing/SKILL.md` | the skill for reports and settings, invoked as `/pacing:pacing` (or by typing "usage") |
+| `skills/route/SKILL.md` | the rules for delegating work, which Claude loads once per session before its first delegation (`/pacing:route`) |
 | `skills/pacing/GUIDE.md`, `BRIEF.md` | the user guide and the standing brief for subagents |
 | `skills/pacing/SETUP.md`, `HANDOVER.md` | the steps for `setup` and for writing a handover, read only when needed so that `SKILL.md` stays short |
 | `agents/*.md` | the four role agents the session delegates to and keeps for its whole run: `reader`, `verifier`, `implementer`, `researcher` |
 | `skills/pacing/scripts/*.mjs` | `budget.mjs` (the rule), `config.mjs` (the ladder), `hook.mjs` (session start), `models.mjs` (the model table), `paths.mjs` (where a project's notes and handovers live) |
 | `hooks/hooks.json` | a SessionStart hook that shows the last reading and the recommended model |
-| `hooks/readings.json`, `readings.mjs` | automatic readings after a turn, and a status line with the budget and each tier's share, through a hooks module, on a Claude Code version that has them; an older one reads the file's empty `hooks` block and skips the module. `readings.test.ts` tests it (`claude plugin test`) |
+| `hooks/readings.json`, `readings.mjs` | automatic readings after a turn, a status line with the budget and each tier's share, and a notice when a large session resumes after an hour's pause, through a hooks module, on a Claude Code version that has them; an older one reads the file's empty `hooks` block and skips the module. `readings.test.ts` tests it (`claude plugin test`) |
 
 The scripts run with `node` (Node.js 18 or later), which must be on the
 PATH of the shell Claude Code uses.

@@ -90,7 +90,9 @@ describe('the bars and the tier sheet', () => {
     // 10 % fills 2 cells; the line at 20 % marks the 4th
     assert.equal(all.slice(11, 31), '██░│' + '░'.repeat(16));
     assert.ok(lines.some(l => /^5-hour {5}[█░]{20} {2}55 %  resets 15:00$/.test(l)));
-    assert.ok(lines.some(l => /^Fable 5.2 {2}[█░]{20} {2}40 %  not paced$/.test(l)));
+    // the per-model bar carries the same line: 40 % against 20 % marks the 4th cell
+    assert.ok(lines.some(l => /^Fable 5.2 {2}[█░│]{20} {2}40 % \/ 20 % pace$/.test(l)), lines.join('\n'));
+    assert.equal(lines.find(l => l.startsWith('Fable')).slice(11, 31), '███│████' + '░'.repeat(12));
     assert.ok(lines.some(l => /^Context {4}[█░]{20} {2}12 %  120k tokens$/.test(l)));
   });
   test('the sheet says what each tier takes at each level', () => {
@@ -110,10 +112,11 @@ describe('the bars and the tier sheet', () => {
 
 describe('the premium meter', () => {
   const now = '2026-11-13T12:00:00Z';
-  test('below 100 % it is shown, not paced', () => {
-    const out = dry(now, 10, '--premium', '99').out;
+  test('below 100 % it is paced on the same line; under it, all models decide', () => {
+    const out = dry(now, 10, '--premium', '12').out;
     assert.equal(levelOf(out), 'ahead');
-    assert.match(out, /Fable 5.2 99 % -> ahead$/m);
+    assert.match(out, /Fable 5.2 12 % -> ahead$/m);
+    assert.match(out, /^Fable 5.2 used 12 %, delta -8 -> ahead$/m);
     assert.doesNotMatch(out, /out until the reset/);
   });
   test('at 100 % Fable leaves the ladder and the fallback takes tier 1', () => {
@@ -141,7 +144,8 @@ describe('the premium meter', () => {
     try {
       const out = dry(now, 10, '--premium', '100').out;
       assert.equal(routeOf(out, 'judgment'), 'tier 1 Fable 5.2 high (the session)');
-      assert.doesNotMatch(out, /not paced|out until/);
+      assert.doesNotMatch(out, /out until|^Fable 5.2 used/m);
+      assert.equal(block(out).filter(l => l.startsWith('Fable')).length, 0);
     } finally { sb.config(['premium', 'fable']); }
   });
   test('every tier on the premium model, no fallback, meter full: wrap up, no crash', () => {
@@ -158,8 +162,28 @@ describe('the context line', () => {
   const now = '2026-11-13T12:00:00Z';
   const ctx = (...f) => dry(now, 10, ...f).out.split(/\r?\n/).find(l => l.startsWith('context ')) || '';
   test('by tokens: nothing under 300 000', () => assert.equal(ctx('--context-tokens', '299999'), 'context 300k tokens'));
-  test('by tokens: from 300 000 unrelated tasks go to a new session', () => assert.match(ctx('--context-tokens', '300000'), /-> a task unrelated to this session's work starts in a new session/));
-  test('by tokens: from 500 000 say so and offer a handover', () => assert.match(ctx('--context-tokens', '500000'), /-> this session is the expensive part now.*offer a handover/));
+  test('by tokens: from 300 000 compact at a natural break, unrelated tasks go to a new session', () => {
+    const l = ctx('--context-tokens', '300000');
+    assert.match(l, /-> for work that continues, suggest compacting the conversation at a natural break \(\/compact\), the cheaper step/);
+    assert.match(l, /a task unrelated to this session's work starts in a new session$/);
+  });
+  test('by tokens: from 500 000 a handover, not compacting', () => assert.doesNotMatch(ctx('--context-tokens', '500000'), /\/compact/));
+  test('by tokens: from 500 000 the next task goes whole to one agent; a new session only for steering, many questions or unrelated work', () => {
+    const l = ctx('--context-tokens', '500000');
+    assert.match(l, /-> this session is the expensive part now: a next task with a clear outcome goes WHOLE to one fresh agent, without asking/);
+    assert.match(l, /read only its report\. Offer a new session, with a handover \(\/pacing handover\), only for a task that needs the user's steering, many rounds of questions, or has nothing to do with this session's work$/);
+  });
+  test('the whole-task agent: never below tier 2, judgment on the fallback', () => {
+    const whole = all => (dry(now, all, '--context-tokens', '520000').out.match(/without asking \((.*?)\)/) || [])[1];
+    // ahead: every class routes to tier 1, but a whole task goes no lower than tier 2 and judgment to the fallback
+    assert.equal(whole(10), 'judgment on Opus 5.5 high, medium on Opus 5.5 medium, routine on Opus 5.5 medium');
+    assert.equal(whole(30), 'judgment on Opus 5.5 high, medium on Opus 5.5 medium, routine on Opus 5.5 medium');
+    // with no fallback, judgment goes to tier 1
+    sb.config(['fallback', 'none']);
+    try { assert.match(whole(10), /^judgment on Fable 5\.2 high,/); } finally { sb.config(['reset']); }
+    // at stop nothing is handed out, only wrapped up
+    assert.equal(whole(96), undefined);
+  });
   test('tokens win over the percentage', () => {
     assert.equal(ctx('--context', '60', '--context-tokens', '100000'), 'context 100k tokens (60 % of the window)');
   });
@@ -170,8 +194,9 @@ describe('the context line', () => {
   });
   test('the context bar names the advice', () => {
     const bars = c => block(dry(now, 10, '--context', '40', '--context-tokens', c).out).find(l => l.startsWith('Context'));
-    assert.match(bars('320000'), /unrelated tasks: new session$/);
-    assert.match(bars('520000'), /new session for the next task$/);
+    assert.match(bars('320000'), / {2}compact \(\/compact\) at a break$/);
+    assert.match(bars('520000'), / {2}next task whole to an agent$/);
+    for (const c of ['320000', '520000']) assert.ok(bars(c).length <= 68, bars(c));
   });
   test('a token count that is not a number is refused', () => {
     const r = dry(now, 10, '--context-tokens', 'lots');
@@ -286,12 +311,12 @@ describe('the reader agent', () => {
       const out = dry(now, all).out;
       assert.equal(readerLine(out), 'Haiku 5.5 medium (pacing:reader) at any level: logs, searches, unfamiliar code');
       assert.match(sheetRows(out).join('\n'), /^r +Haiku 5.5 medium +the reader agent: bulky reading/m);
-      assert.match(out, /^ {2}bulky {4}-> tier 3 Sonnet 5.5 medium \(subagent\) at any level: test runs, builds, checks;/m);
+      assert.match(out, /^ {2}bulky {4}-> tier 3 Sonnet 5.5 medium \(subagent\) at any level: checks to judge against the task;/m);
     }
     assert.equal(readerLine(dry(now, 96).out), undefined);
   });
   test('reader ladder follows the lowest tier', () => {
-    sb.config(['reader', 'ladder']);
+    sb.config(['reader', 'ladder']); sb.config(['verifier', 'ladder']);
     try {
       const out = dry(now, 10).out;
       assert.equal(readerLine(out), 'tier 3 Sonnet 5.5 medium (pacing:reader), the lowest tier');
@@ -366,5 +391,174 @@ describe('the week in sum', () => {
   test('week with no readings', () => {
     sb.write('log.jsonl', '');
     assert.equal(sb.budget(['week']).out.trim(), 'no readings yet');
+  });
+});
+
+describe('the per-model meter, paced on the same line', () => {
+  // the line is 20 % at Friday noon
+  const now = '2026-11-13T12:00:00Z';
+  const effort = out => (out.split(/\r?\n/).find(l => l.startsWith('effort: ')) || null);
+  const premLine = out => out.split(/\r?\n/).find(l => l.startsWith('Fable 5.2 used ')) || null;
+  test('worse than all models while Fable is tier 1: its level decides, and the report says so', () => {
+    const out = dry(now, 10, '--premium', '22').out;
+    assert.equal(levelOf(out), 'over');
+    assert.match(out, /-> over \(set by the Fable 5.2 meter\)$/m);
+    assert.equal(premLine(out), 'Fable 5.2 used 22 %, delta +2 -> over: sets the level');
+    assert.match(out.replace(/\s+/g, ' '), /Fable 5\.2's own meter at 22 % is 2 points over the same line: "over", worse than all models alone \("ahead", 10 points under\), and Fable 5\.2 runs tier 1, so that meter sets the level/);
+    assert.equal(routeOf(out, 'medium'), 'tier 2 Opus 5.5 medium (subagent)');
+    assert.equal(routeOf(out, 'judgment'), 'tier 1 Fable 5.2 high (the session)');
+    // at its "over", one step less effort first, as at the all-models one
+    assert.match(effort(out), /Fable 5.2 high -> medium/);
+    assert.equal(levelOf(dry(now, 10, '--premium', '17').out), 'on pace');
+  });
+  test('better than all models: all models decide', () => {
+    const out = dry(now, 22, '--premium', '10').out;
+    assert.equal(levelOf(out), 'over');
+    assert.doesNotMatch(out, /set by the/);
+    assert.equal(premLine(out), 'Fable 5.2 used 10 %, delta -10 -> ahead');
+  });
+  test('at its throttle the session moves to the fallback and keeps Fable for judgment work', () => {
+    const out = dry(now, 10, '--premium', '30', '--session', 'claude-fable-5-2').out;
+    assert.equal(levelOf(out), 'ahead');
+    assert.match(out, /-> ahead, Fable 5.2 held$/m);
+    assert.equal(premLine(out), 'Fable 5.2 used 30 %, delta +10 -> throttle: the session moves off it');
+    assert.equal(routeOf(out, 'judgment'), 'tier 1 Opus 5.5 high (the session)');
+    assert.match(sheetRows(out).join('\n'), /^- +Fable 5.2 high +kept for judgment: one contained hard task at a time, as a subagent$/m);
+    assert.match(out, /^do: Fable 5\.2's own meter is at throttle: SWITCH the session to Opus 5\.5 high now \(model menu: Opus 5\.5, effort high\) and keep Fable 5\.2 for judgment work\./m);
+    assert.match(out, /^upward: Fable 5\.2 is kept for judgment work: one contained hard task with a clear deliverable may go to a Fable 5\.2 high subagent/m);
+    assert.match(out, /^next session: Opus 5.5 high$/m);
+    assert.equal(effort(out), null);
+    // the all-models level still routes on the new ladder
+    const over = dry(now, 22, '--premium', '30').out;
+    assert.equal(levelOf(over), 'over');
+    assert.equal(routeOf(over, 'medium'), 'tier 2 Opus 5.5 medium (subagent)');
+    assert.equal(effort(over), null);
+  });
+  test('a reader on that model follows the lowest tier while it is held', () => {
+    sb.config(['reader', 'fable', 'low']);
+    try { assert.equal(routeOf(dry(now, 10, '--premium', '30').out, 'reader'), 'tier 3 Sonnet 5.5 medium (pacing:reader), the lowest tier'); } finally { sb.config(['reset']); }
+  });
+  test('with no other model to take tier 1, its throttle routes like any other', () => {
+    sb.config(['set', '2', 'fable', 'medium']); sb.config(['remove', '3']); sb.config(['fallback', 'none']);
+    try {
+      const out = dry(now, 10, '--premium', '30').out;
+      assert.equal(levelOf(out), 'throttle');
+      assert.match(out, /set by the Fable 5.2 meter/);
+      assert.doesNotMatch(out, /held/);
+    } finally { sb.config(['reset']); }
+  });
+  test('shown only when tier 1 is another model', () => {
+    sb.config(['set', '1', 'opus', 'high']);
+    try {
+      const out = dry(now, 10, '--premium', '30').out;
+      assert.equal(levelOf(out), 'ahead');
+      assert.equal(premLine(out), 'Fable 5.2 used 30 %, delta +10 -> throttle: not tier 1, shown only');
+      assert.equal(routeOf(out, 'judgment'), 'tier 1 Opus 5.5 high (the session)');
+    } finally { sb.config(['reset']); }
+  });
+  test('its own trend, from the readings that read it in full', () => {
+    // Sunday noon, line 46.7 %: 40 % is under it, but 10 % a day earlier projects 160 %
+    const sun = '2026-11-15T12:00:00Z';
+    const entry = (hoursBefore, all, premium, extra = {}) => JSON.stringify({ t: new Date(Date.parse(sun) - hoursBefore * 3600000).toISOString(),
+      all, premium, premiumModel: 'fable', line: 33.3, level: 'ahead', reset: RESET, ...extra });
+    sb.write('log.jsonl', entry(24, 30, 10) + '\n');
+    const out = dry(sun, 35, '--premium', '40').out;
+    assert.match(out, /^Fable 5\.2 trend: \+30 %\/day over 24 h, projected 160 % at reset, reaches 100 % 2026-11-17 12:00$/m);
+    assert.match(premLine(out), /-> throttle \(raised by its trend\): the session moves off it$/);
+    assert.match(out, /Fable 5.2 held$/m);
+    // a carried figure is not a reading of the meter: no trend from it
+    sb.write('log.jsonl', entry(24, 30, 10, { premiumAt: '2026-11-13T12:00:00.000Z', source: 'hook' }) + '\n');
+    assert.doesNotMatch(dry(sun, 35, '--premium', '40').out, /^Fable 5\.2 trend/m);
+    sb.write('log.jsonl', '');
+  });
+  test('the log marks the meter that set the level, and a held model', () => {
+    const s = sandbox();
+    try {
+      s.budget(['--all', '10', '--reset', RESET, '--premium', '22', '--now', now]);
+      s.budget(['--all', '10', '--reset', RESET, '--premium', '30', '--now', '2026-11-13T12:05:00Z']);
+      const log = s.read('log.jsonl').trim().split('\n').map(l => JSON.parse(l));
+      assert.deepEqual([log[0].levelBy, log[0].premiumLevel, log[0].premiumHeld], ['premium', 'over', undefined]);
+      assert.deepEqual([log[1].levelBy, log[1].premiumLevel, log[1].premiumHeld], [undefined, 'throttle', true]);
+      const rows = s.budget(['log']).out.trim().split(/\r?\n/);
+      assert.match(rows[0], /over \(Fable 5\.2\)$/);
+      assert.match(rows[1], /ahead, Fable 5\.2 held$/);
+      // the next session starts on the fallback
+      assert.equal(JSON.parse(s.read('state.json')).next.label, 'Opus 5.5');
+    } finally { s.cleanup(); }
+  });
+});
+
+describe('the fixed overhead', () => {
+  const now = '2026-11-15T13:40:00Z';
+  // the categories a real session reported
+  const REAL = 'Messages=303307,System tools=25759,MCP tools=13768,System prompt=11164,Skills=5760,Custom agents=410';
+  const fixedLine = out => out.split(/\r?\n/).find(l => l.startsWith('fixed overhead ')) || null;
+  test('everything but the messages, in tokens and as a share of the session', () => {
+    const out = dry(now, 43, '--context', '36', '--context-tokens', '360672', '--categories', REAL).out;
+    assert.equal(fixedLine(out), 'fixed overhead 57k tokens on every turn (15.8 % of the session): System tools 26k, MCP tools 14k, System prompt 11k, Skills 6k');
+    const b = block(out);
+    assert.ok(b.includes('Fixed      ███░░░░░░░░░░░░░░░░░  16 %  57k every turn'), b.join('\n'));
+  });
+  test('large MCP tools: what switching off unneeded connectors saves, no connector named', () => {
+    const out = dry(now, 43, '--context-tokens', '160000', '--categories', 'Messages=90000,System tools=25000,MCP tools=40000,System prompt=5000').out;
+    assert.match(fixedLine(out), / -> MCP tools are 40k of it: switching off connectors the user does not need saves up to that many tokens on every turn$/);
+    assert.match(block(out).find(l => l.startsWith('Fixed')), /70k every turn, MCP 40k$/);
+    // a quarter of the fixed part, but under 10 000 tokens: not worth a word
+    assert.doesNotMatch(fixedLine(dry(now, 43, '--categories', 'Messages=9000,System tools=6000,MCP tools=4000').out), /connectors/);
+  });
+  test('without the context tokens, the share is of the categories\' sum', () => {
+    assert.match(fixedLine(dry(now, 43, '--categories', 'Messages=60000,System tools=40000').out), /\(40 % of the session\)/);
+  });
+  test('missing: no row and no line; malformed: refused', () => {
+    const out = dry(now, 43, '--context-tokens', '160000').out;
+    assert.equal(fixedLine(out), null);
+    assert.ok(!block(out).some(l => l.startsWith('Fixed')));
+    const r = dry(now, 43, '--categories', 'Messages=lots');
+    assert.equal(r.code, 1);
+    assert.match(r.out, /--categories is/);
+  });
+  test('the bar block stays within 68 columns with every row', () => {
+    for (const t of ['160000', '520000']) {
+      const out = dry(now, 43, '--premium', '79', '--five', '14', '--five-reset', '2026-11-15T16:40:00Z', '--context', '52', '--context-tokens', t,
+        '--categories', 'Messages=90000,System tools=25000,MCP tools=400000,System prompt=5000').out;
+      for (const l of block(out)) assert.ok(l.length <= 68, l.length + ': ' + l);
+    }
+  });
+});
+
+describe('the verifier agent', () => {
+  const now = '2026-11-13T12:00:00Z';
+  const line = out => routeOf(out, 'verifier');
+  test('plain runs on Haiku 5.5 medium by default; checks to judge on the lowest tier', () => {
+    for (const all of [10, 22, 30]) {
+      const out = dry(now, all).out;
+      assert.equal(line(out), 'Haiku 5.5 medium (pacing:verifier) for a plain run: run it, quote what failed; a check with points to judge: tier 3 Sonnet 5.5 medium');
+      assert.match(sheetRows(out).join('\n'), /^v +Haiku 5\.5 medium +the verifier: plain runs of tests, builds, checks$/m);
+    }
+    assert.equal(line(dry(now, 96).out), undefined);
+  });
+  test('verifier ladder: every run on the lowest tier; another model', () => {
+    sb.config(['verifier', 'ladder']);
+    try {
+      const out = dry(now, 10).out;
+      assert.equal(line(out), 'tier 3 Sonnet 5.5 medium (pacing:verifier), the lowest tier');
+      assert.doesNotMatch(sheetRows(out).join('\n'), /^v /m);
+      assert.match(out, /at any level: test runs, builds, checks;/);
+    } finally { sb.config(['reset']); }
+    sb.config(['verifier', 'sonnet', 'low']);
+    try { assert.match(line(dry(now, 10).out), /^Sonnet 5\.5 low \(pacing:verifier\)/); } finally { sb.config(['reset']); }
+  });
+  test('a verifier on the premium model follows the lowest tier while that meter is out', () => {
+    sb.config(['verifier', 'fable', 'low']);
+    try { assert.equal(line(dry(now, 10, '--premium', '100').out), 'tier 3 Sonnet 5.5 medium (pacing:verifier), the lowest tier'); } finally { sb.config(['reset']); }
+  });
+  test('its own model counts as a tier of its own in the status line', () => {
+    const s = sandbox();
+    try {
+      s.config(['verifier', 'sonnet', 'low']);
+      s.config(['set', '3', 'opus', 'low']);
+      const j = JSON.parse(s.budget(['--all', '10', '--reset', RESET, '--now', now, '--source', 'hook', '--dry']).out.trim());
+      assert.equal(j.tierOf['claude-sonnet-5-5'], 5);
+    } finally { s.cleanup(); }
   });
 });

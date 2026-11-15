@@ -29,7 +29,9 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 - **A budget line for every day.** The weekly meter is compared with a
   line that steps up at midnight. Ahead of it, the top model does nearly
   everything; past it, more work moves down the tiers. The logged trend
-  can raise the level before the meter gets there.
+  can raise the level before the meter gets there. Fable's own meter is
+  paced on the same line while Fable runs the session, so a long session
+  cannot drain it unseen.
 - **A status line after every turn** (new in 0.8):
 
   ```
@@ -47,6 +49,9 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   Each leaves notes per project for the next agent of its role.
 - **Handover between sessions.** A session that has grown long writes
   what the next one needs; the next session's start line names the file.
+  From 300 000 tokens the skill suggests compacting at a natural break,
+  and a prompt sent after an hour's pause in such a session gets one
+  notice that the cache has lapsed.
 - **A start line in every new session** with the last reading and the
   recommended model, which can also become the default for new sessions.
 - **Weekly summaries** (`/pacing week`), and at "over" a suggestion to

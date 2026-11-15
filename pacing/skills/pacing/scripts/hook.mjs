@@ -44,7 +44,11 @@ const next = s.next ? s.next.label + ' ' + s.next.effort : 'unknown';
 const menu = s.next ? s.next.label + ', effort ' + s.next.effort : 'unknown';
 const trend = s.trend ? ', trend ' + (s.trend.rate >= 0 ? '+' : '') + s.trend.rate + ' %/day, projected ' + s.trend.projected + ' % at reset' : '';
 const premLabel = s.premiumModel && MODELS[s.premiumModel] ? MODELS[s.premiumModel].label : 'Fable';
-const facts = 'all models ' + s.all + ' % used, budget line ' + s.line + ' %, level ' + s.level + (s.premiumOut || s.fableOut ? ', ' + premLabel + ' out' : '') + trend;
+// the per-model meter, paced on the same line, may have set the level or
+// moved the session off its model
+const facts = 'all models ' + s.all + ' % used, budget line ' + s.line + ' %, level ' + s.level
+  + (s.levelBy === 'premium' ? ' (set by the ' + premLabel + ' meter at ' + s.premium + ' %)' : '')
+  + (s.premiumOut || s.fableOut ? ', ' + premLabel + ' out' : s.premiumHeld ? ', ' + premLabel + ' at ' + s.premium + ' % is over its line: kept for judgment work' : '') + trend;
 // a reading the hooks module took after a turn, not one the session asked for
 const auto = s.source === 'hook' ? ', automatic' : '';
 const visible = stale
@@ -52,8 +56,8 @@ const visible = stale
   : 'Pacing (' + ageH + ' h ago' + auto + '): ' + facts + '. Recommended session model: ' + next + '. Check the model menu shows ' + menu + '.';
 const context = stale
   ? 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago, STALE: the budget line has moved since): ' + facts + '. Last recommendation: ' + next
-    + '. Do not tell the user to switch models on this reading. Run the `pacing` skill (section 1, Measure) before the first big task and follow its do: line; read BRIEF.md before delegating.'
+    + '. Do not tell the user to switch models on this reading. Run the `pacing` skill with `usage now` before the first big task and follow its do: line; load the `pacing:route` skill once before the first delegation.'
   : 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago): ' + facts + '. Recommended session model: ' + next
     + '. If the model and effort you run on (named in your system prompt) differ from that, your first reply starts with one line telling the user to switch the model menu to ' + menu
-    + ' (only the user can). This reading is fresh: use it, do not measure again until the first big task is done. Read BRIEF.md before delegating.';
+    + ' (only the user can). This reading is fresh: use it, do not measure again until the first big task is done. Load the `pacing:route` skill once before the first delegation.';
 out(visible + (handoverVisible ? ' ' + handoverVisible : ''), context + (handoverContext ? ' ' + handoverContext : ''));

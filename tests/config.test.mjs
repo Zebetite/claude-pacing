@@ -263,3 +263,15 @@ describe('the reader setting', () => {
     assert.deepEqual(cfgOf(s).reader, { model: 'haiku', effort: 'medium' });
   }));
 });
+
+test('verifier: a model of its own for plain runs, or the ladder', () => {
+  const s = sandbox();
+  try {
+    assert.match(s.config(['show']).out, /^verifier agent: Haiku 5\.5 medium \(plain test runs; checks to judge: the lowest tier\)$/m);
+    assert.match(s.config(['verifier', 'sonnet', 'low']).out, /^verifier agent: Sonnet 5\.5 low/m);
+    assert.deepEqual(JSON.parse(s.read('config.json')).verifier, { model: 'sonnet', effort: 'low' });
+    assert.match(s.config(['verifier', 'ladder']).out, /^verifier agent: the lowest tier/m);
+    assert.equal(s.config(['verifier', 'gpt', 'low']).code, 1);
+    assert.match(s.config(['reset']).out, /^verifier agent: Haiku 5\.5 medium/m);
+  } finally { s.cleanup(); }
+});

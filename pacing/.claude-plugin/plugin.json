@@ -1,11 +1,11 @@
 {
   "name": "pacing",
-  "version": "0.8.5-beta",
+  "version": "0.9.0-beta",
   "icon": "./.claude-plugin/icon.png",
   "license": "MIT",
   "homepage": "https://github.com/Zebetite/claude-pacing",
   "repository": "https://github.com/Zebetite/claude-pacing",
-  "description": "Use better models and still save tokens: top tier model does the hardest work, cheaper models take easier work as subagents. 4 agent roles (reader, verifier, implementer and researcher) each stay with the session and keep notes per project, and a long session hands its work over to a new one. A status line shows the budget and each tier’s share.",
+  "description": "Use better models and still save tokens: top tier model does the hardest work, cheaper models take easier work as subagents. One day-by-day budget paces both the weekly meter and the top model's own meter. 4 agent roles (reader, verifier, implementer and researcher) each stay with the session and keep notes per project; bulky reading and plain test runs go to a cheap model. A long session is told when to compact, hands whole tasks to one agent, warns after a pause, and hands its work over to a new one. A status line shows the budget and each tier’s share.",
   "author": {
     "name": "Daniel Rönnelin",
     "email": "daniel.ronnelin@cloudbackend.com"

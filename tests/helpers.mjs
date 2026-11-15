@@ -54,9 +54,11 @@ export const sandbox = () => {
 // A week that resets on Thursday 2026-11-19 at 12:00 UTC: it starts Thursday
 // 2026-11-12 at 12:00 and touches 8 calendar days.
 export const RESET = '2026-11-19T12:00:00.000Z';
-// the level budget.mjs printed: "All models used ... -> <level>"
+// the level budget.mjs printed: "All models used ... -> <level>", with the marks
+// that may follow it: raised by the trend, set by the per-model meter, that
+// model out or held
 export const levelOf = out => {
-  const m = out.match(/^All models used .* -> ([a-z ]+?)(?: \(raised by the trend\))?(?:, \S+ \S+ out)?$/m);
+  const m = out.match(/^All models used .* -> ([a-z ]+?)(?: \(raised by the trend\))?(?: \(set by the .+? meter\))?(?:, \S+ \S+ (?:out|held))?$/m);
   return m ? m[1] : null;
 };
 export const lineOf = out => Number((out.match(/budget line now ([\d.]+) %/) || [])[1]);

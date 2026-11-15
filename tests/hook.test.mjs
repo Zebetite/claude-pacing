@@ -80,3 +80,11 @@ test('a handover filed away is no longer named', withHome(s => {
   s.config(['handover', 'done']);
   assert.equal(s.hook().out, '');
 }));
+
+test('the per-model meter that set the level, or holds its model back, is named', withHome(s => {
+  state(s, { level: 'over', levelBy: 'premium', premium: 52 });
+  assert.match(parse(s.hook()).systemMessage, /level over \(set by the Fable 5\.2 meter at 52 %\)\./);
+  state(s, { premiumHeld: true, premium: 60, next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
+  const j = parse(s.hook());
+  assert.match(j.systemMessage, /level ahead, Fable 5\.2 at 60 % is over its line: kept for judgment work\. Recommended session model: Opus 5\.5 high\./);
+}));

@@ -17,9 +17,12 @@
 //                                   the premium model's meter is full (opus high by default)
 //   node config.mjs reader <model> <effort>|ladder   the model the reader agent reads at
 //                                   (haiku medium by default); ladder: the lowest tier
-//   node config.mjs reset           back to the defaults (the ladder, the weight, the reader)
+//   node config.mjs verifier <model> <effort>|ladder   the model the verifier runs plain test
+//                                   runs at (haiku medium by default); ladder: the lowest tier
+//   node config.mjs reset           back to the defaults (the ladder, the weight, the reader, the verifier)
 //   node config.mjs json            the config as JSON (for scripts)
 //   node config.mjs version         the plugin's version, from .claude-plugin/plugin.json
+//   node config.mjs help [full]     the short help cut from GUIDE.md, or the whole guide
 //   node config.mjs where           the data folder
 //   node config.mjs handover new [--project <folder>]    the file a session leaving its work
 //                                   writes for the next one, and the headings it holds
@@ -63,6 +66,7 @@ const defaults = () => ({
   premium: 'fable',
   fallback: { model: 'opus', effort: 'high' },
   reader: { model: 'haiku', effort: 'medium' },
+  verifier: { model: 'haiku', effort: 'medium' },
   installed: new Date().toLocaleDateString('sv-SE'),
 });
 const premiumText = c => (c.premium === undefined ? MODELS.fable.label + ' (default)' : c.premium === null ? 'none' : MODELS[c.premium] ? MODELS[c.premium].label : c.premium);
@@ -74,6 +78,14 @@ const fallbackText = c => {
 const readerText = c => {
   const r = c.reader === undefined ? { model: 'haiku', effort: 'medium' } : c.reader;
   return r === 'ladder' ? 'the lowest tier' : (MODELS[r.model] ? MODELS[r.model].label : r.model) + ' ' + r.effort;
+};
+
+// a plain run (run the suite, quote what failed) asks little judgment: the
+// verifier runs it on a model of its own, like the reader. A check with
+// acceptance points to judge stays on the lowest tier.
+const verifierText = c => {
+  const v = c.verifier === undefined ? { model: 'haiku', effort: 'medium' } : c.verifier;
+  return v === 'ladder' ? 'the lowest tier' : (MODELS[v.model] ? MODELS[v.model].label : v.model) + ' ' + v.effort;
 };
 
 const write = c => { fs.mkdirSync(dataDir, { recursive: true }); fs.writeFileSync(file, JSON.stringify(c, null, 2) + '\n'); };
@@ -100,6 +112,7 @@ const show = c => {
   console.log('last day weight: ' + c.lastDayWeight + '  (installed ' + c.installed + ', plugin ' + version() + ')');
   console.log('per-model weekly meter: ' + premiumText(c) + '; when it is full: ' + fallbackText(c));
   console.log('reader agent: ' + readerText(c) + ' (bulky reading)');
+  console.log('verifier agent: ' + verifierText(c) + ' (plain test runs; checks to judge: the lowest tier)');
   console.log('next-session model switch: ' + (c.setNextModel === false ? 'off' : 'on'));
   console.log('data folder: ' + dataDir);
 };
@@ -154,6 +167,29 @@ switch (cmd || 'show') {
   case 'version':
     console.log(version());
     break;
+  case 'help': {
+    // One source: the short help is cut from GUIDE.md, the parts between
+    // <!-- help --> and <!-- /help -->, and the commands from its command
+    // table, so the two cannot drift. Printed text costs output tokens, so
+    // the whole guide (about 2 600 words) only on `help full`.
+    const guide = fs.readFileSync(path.join(here, '..', 'GUIDE.md'), 'utf8');
+    if (a === 'full') { console.log(guide.replace(/<!-- \/?help -->/g, '')); break; }
+    // blank lines trimmed, not spaces: an indented line is a code line
+    const parts = [...guide.matchAll(/<!-- help -->([\s\S]*?)<!-- \/help -->/g)].map(m => m[1].replace(/^\s*\n|\s+$/g, ''));
+    const table = guide.slice(guide.indexOf('## Commands'));
+    const KEYWORDS = ['now', 'full', 'done'];
+    const words = [];
+    for (const m of table.matchAll(/^\| (.*?) \|/gm)) {
+      for (const c of m[1].matchAll(/`\/pacing ([^`]+)`/g)) {
+        const w = c[1].split(' ');
+        const name = KEYWORDS.includes(w[1]) ? w[0] + ' ' + w[1] : w[0];
+        if (!words.includes(name)) words.push(name);
+      }
+    }
+    console.log(['Pacing, the short help (`/pacing help full` shows the whole guide).', ...parts,
+      'Commands, each after `/pacing`: ' + words.join(' · ') + '.'].join('\n\n'));
+    break;
+  }
   case 'where':
     console.log(dataDir);
     break;
@@ -373,6 +409,13 @@ switch (cmd || 'show') {
     write(cfg); show(cfg);
     break;
   }
+  case 'verifier': {
+    if (!cfg) cfg = defaults();
+    if (a === 'ladder') cfg.verifier = 'ladder';
+    else { checkModel(a); checkEffort(b); cfg.verifier = { model: a, effort: b }; }
+    write(cfg); show(cfg);
+    break;
+  }
   case 'reset': {
     // the ladder and the weight go back to the defaults; the install date, the
     // per-model meter and the user's choice about the next-session switch stay
@@ -385,5 +428,5 @@ switch (cmd || 'show') {
     break;
   }
   default:
-    fail('commands: show | json | init | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | premium <model>|none | fallback <model> <effort>|none | reader <model> <effort>|ladder | reset | version | where | notes | note <role> <fact> | agent <role> <id> <model> <effort> <tokens> | agents | handover [new|done]');
+    fail('commands: show | json | init | help [full] | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | premium <model>|none | fallback <model> <effort>|none | reader <model> <effort>|ladder | verifier <model> <effort>|ladder | reset | version | where | notes | note <role> <fact> | agent <role> <id> <model> <effort> <tokens> | agents | handover [new|done]');
 }

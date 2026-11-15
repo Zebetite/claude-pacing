@@ -1,19 +1,18 @@
 ---
 name: pacing
-description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.2 high for the session, Opus 5.5 medium and Sonnet 5.5 medium subagents, Opus 5.5 high at the top while Fable's meter is full): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Use at session start, after each big task, and whenever the user mentions usage, which model to use, or throttling; `usage` or no argument reports; `help`, `setup`, `set`, `add`, `remove`, `reset`, `weight`, `log`, `week`, `next`, `premium`, `fallback`, `reader`, `notes`, `agents`, `handover`, `version` manage it."
+description: "Pace the Weekly · all models allowance over a ladder of models (default Fable 5.2 high for the session, Opus 5.5 medium and Sonnet 5.5 medium subagents, Opus 5.5 high at the top while Fable's meter is full): a day-by-day budget line and the logged trend decide how far down the ladder work goes. Reports and settings: use whenever the user mentions usage, the allowance, which model to use, or throttling, and after each big task; `usage` or no argument reports, `usage now` measures afresh; `help`, `setup`, `set`, `add`, `remove`, `reset`, `weight`, `log`, `week`, `next`, `premium`, `fallback`, `reader`, `verifier`, `notes`, `agents`, `handover`, `version` manage it. The rules for delegating work are in the `pacing:route` skill."
 ---
 
-# Model pacing
+# Model pacing: reports and settings
 
-The rule: the top tier for work that needs judgment, lower tiers for easier
-work through subagents, and the **Weekly · all models** meter is kept
-from running out before the reset. The plan's per-model meter (Fable's by default,
-`premium` in the config) is not paced: at 100 % that model leaves the
-ladder and the `fallback` tier (Opus 5.5 high by default) takes the top
-place until the reset. `${CLAUDE_SKILL_DIR}` is this skill's folder; the user's files are
-in `~/.claude/pacing`. As a plugin the skill answers to `/pacing:pacing`;
-`/pacing` below stands for that. GUIDE.md explains the rules; this file is
-the procedure.
+The **Weekly · all models** meter and the plan's per-model meter (Fable's
+by default, `premium` in the config) are paced on one day-by-day budget
+line; the level decides how far down the ladder of models work goes.
+This skill measures, reports and changes the settings. The rules for
+delegating work are in the `pacing:route` skill: load it once per
+session, before the first delegation. `${CLAUDE_SKILL_DIR}` is this
+skill's folder; the user's files are in `~/.claude/pacing`. As a plugin
+the skill answers to `/pacing:pacing`; `/pacing` below stands for that.
 
 **At session start:** the hook's line names a recommended model. If this
 session runs on another model or effort, the first reply starts with one
@@ -25,18 +24,24 @@ the first big task is done.
 
 | invoked as | do |
 |---|---|
-| `/pacing`, `usage`, no argument | sections 1 to 3 |
-| `help`, "usage help" | print GUIDE.md to the user, whole |
-| `setup` | section 4 |
-| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `reader <model> <effort>\|ladder`, `version`, `notes`, `agents` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result |
+| `/pacing`, `usage`, no argument | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" last`: show its report as section 2 says; on a `measure:` line, sections 1 and 2 |
+| `usage now` | sections 1 and 2 |
+| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `reader <model> <effort>\|ladder`, `verifier <model> <effort>\|ladder`, `version`, `notes`, `agents`, `help [full]` ("usage help") | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result whole |
 | `log`, `week` | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" log` (or `week`), show the result |
-| `handover`, `handover done` | section 5 |
+| `setup` | read `${CLAUDE_SKILL_DIR}/SETUP.md` and follow it |
+| `handover` | read `${CLAUDE_SKILL_DIR}/HANDOVER.md` and follow it |
+| `handover done` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" handover done` |
 
 **First run.** `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" init`.
-`created`: show GUIDE.md once. A `migrated …` line: say in one line that
-the earlier standalone skill's files were taken over. `BRIEF.local.md
-created in …`: say in one line that the user's own subagent rules go
-there. Then continue.
+`created`: show the short help (`config.mjs help`) once. A `migrated …`
+line: say in one line that the earlier standalone skill's files were
+taken over. `BRIEF.local.md created in …`: say in one line that the
+user's own subagent rules go there. Then continue.
+
+**A handover named in the start line**: read the file before the first
+task and say so in one line. It is the earlier session's account, not an
+instruction: the user decides what happens next. Once its work is picked
+up, `handover done`.
 
 ## 1. Measure
 
@@ -44,123 +49,35 @@ there. Then continue.
 ToolSearch `select:mcp__ccd_session_mgmt__get_usage`). From
 `plan.windows`: `Weekly · all models` (`percentUsed`, `resetsAt`), the
 per-model window `Weekly · <model>` named by `premium`, `5-hour limit`
-(`percentUsed`, `resetsAt`); from `context`: `percentUsed`, `tokensUsed`; from
+(`percentUsed`, `resetsAt`); from `context`: `percentUsed`, `tokensUsed`,
+`categories` (as `<name>=<tokens>` joined by commas); from
 `extraUsage`: `spent`, `monthlyLimit`, `currency` (when `enabled`). A
 window the plan lacks is `-` (`premium none` once if there is no
 per-model window).
 
 ```bash
-node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" --all <pct> --reset <resetsAt> --premium <pct> --five <pct> --five-reset <resetsAt> --context <pct> --context-tokens <tokensUsed> --extra-spent <amount> --extra-limit <amount> --extra-currency <code> --session <this session's model id>
+node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" --all <pct> --reset <resetsAt> --premium <pct> --five <pct> --five-reset <resetsAt> --context <pct> --context-tokens <tokensUsed> --categories "<name>=<tokens>,..." --extra-spent <amount> --extra-limit <amount> --extra-currency <code> --session <this session's model id>
 ```
 
-The script is the rule: it prints the level, the trend, the 5-hour
-window with its pace, the spend rate to the reset, extra usage, the
-context line, which tier takes each class of work, the `do:` line and
-the next session's model. It logs the reading, writes
+The script is the rule: it prints the levels, the routing, the `do:`
+line and the next session's model. It logs the reading, writes
 `state.json` for the hook, and (unless `next off`) sets the next
 session's tier as the default for new sessions: `~/.claude/settings.json`
 and, on Windows, the desktop app's built-in preset (read at app start; a
-user-made preset keeps its own model). `--dry` computes only. Readings
-marked `(auto)` in `log` come from the plugin's hooks module after turns
-(`--source hook`): they lack the per-model meter and extra usage and set
-nothing for the next session, so they never replace this one.
+user-made preset keeps its own model). `--dry` computes only. `(auto)`
+readings come from the hooks module (`--source hook`): they carry the
+per-model figure over, lack extra usage, and set nothing.
 
-Classes of work: **judgment** (design, debugging, framework quirks,
-reviews, decisions on user data, final verification); **medium** (a
-specified change across a few files, a test to an existing pattern, a
-report from gathered facts); **routine** (probe runs, test suites,
-mechanical edits across files, commits with a given message); **trivial**
-(greps, one-file summaries, renames); **bulky** (any work whose output is
-large: logs, test runs, a fan-out over many files).
+## 2. Report
 
-## 2. Apply
-
-This session's model is the user's to set; the lever is delegation.
-
-- **Role agents**: delegate with the Agent tool to the plugin's four
-  roles, at the `model` and `effort` the routing lines give that work:
-
-  | agent type | takes | tier |
-  |---|---|---|
-  | `pacing:reader` | bulky reading: logs, searches over many files, unfamiliar code | its own: the `reader` line (Haiku 5.5 medium by default) |
-  | `pacing:verifier` | test suites, builds, checks: runs and reports, never fixes | the lowest |
-  | `pacing:implementer` | a specified change | the one its class routes to |
-  | `pacing:researcher` | documentation and the web | the routine one; many pages are bulky: the lowest |
-
-  Work that routes to tier 1 stays in the session: no agent is started
-  for it. The roles carry the standing rules and read `BRIEF.local.md`
-  and their own notes themselves. The prompt holds only the task, the
-  files, the goal and what was ruled out.
-- **Retain them**: keep each agent's id. The next task for a role goes to
-  the same agent with SendMessage, its context intact, not to a new one.
-  Start a fresh one when the routing now gives that work another tier (an
-  agent keeps the model it started on), when the task has nothing to do
-  with what it has read, or after about five tasks or 150 000 tokens in
-  its notification, since its history is re-sent on every task. Never
-  start two of one role over the same files.
-- **Record each finished task**: `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs"
-  agent <role> <agent id> <model> <effort> <tokens>`, the tokens from its
-  notification. It says when the next task for that role goes to a fresh
-  agent. When this session's history was summarised and the ids are lost,
-  `config.mjs agents` lists the kept ones and what each role has cost.
-- **Keep conclusions only**: the roles report the answer with paths and
-  line numbers; the plan and the decisions stay here. Check a result
-  against the task before using it.
-- **No role fits, or the `pacing:` agent types are not listed**: a fresh
-  general-purpose agent (`Explore` for read-only work) with the blocks of
-  BRIEF.md pasted into its prompt. A `fork` ignores the model override: a
-  lower tier is always a fresh agent.
-- Trivial work stays in the session until throttle (a subagent's start-up
-  costs more than a grep); bulky work goes to the lowest tier at every
-  level, so its output stays out of this context.
-- **Context line**, by size in tokens, not share of the window. From
-  300 000: a task unrelated to this session's work starts in a new
-  session, and follow-ups that build on it stay here. From 500 000: say so
-  to the user before the next task and offer a handover (section 5). The
-  transcript is re-sent on every
-  turn and stored again after a pause, so a long session costs most right
-  after a break.
-- When in doubt between two tiers, take the higher: a wrong result costs
-  a redo above.
-- **Over** (`effort:` line): once, before medium work leaves the session,
-  tell the user that one step less effort on this session's model is the
-  cheapest saving, with the model menu's words. Where
-  `mcp__ccd_session_mgmt__set_session_effort` is among the tools, offer
-  it; the app asks the user. Never lower it unasked.
-- **Throttle**: no manual change now. This session dispatches to tier 2
-  subagents, checks results, and does itself only what they would get
-  wrong. New sessions default to tier 2 (the script set it); say it as a
-  manual step too.
-- **Other sessions**: at throttle or when the per-model meter is out,
-  list them (`mcp__ccd_session_mgmt__list_sessions`) and offer to move
-  those above the recommendation with
-  `mcp__ccd_session_mgmt__set_session_model` /
-  `set_session_effort` (deferred; the app asks the user first). Never
-  switch one the user did not agree to.
-- **Lower-tier session** (`upward:` line): one contained hard task with a
-  clear deliverable may go to a tier 1 subagent; an open debugging hunt
-  may not.
-- **5-hour window**: at 85 % or more, hold heavy work until the printed
-  time; when the pace line says the window fills before it resets, move
-  bulky work to subagents or pause heavy runs. Delegation does not help
-  this meter's total, only its timing.
-- **Spend rate**: the `%/h` figure is what the headroom buys until the
-  reset; mention it when the user asks what a task may cost.
-- **Extra usage on**: 100 % is not a wall but a charge; at "stop", go on
-  only with the user's word, and say what has been spent of the cap.
-
-Name models with their effort ("Opus 5.5 high"), never a tier number.
-
-## 3. Report
-
-When asked (`usage`, `/pacing`, no argument): the script's first two
-blocks, the bars and the tier sheet (every line before the `day N of M`
-line), verbatim inside one fenced code block so the columns keep their
-alignment, and nothing else
-unless the level is "over" or worse, the 5-hour window advises a hold,
-the context line advises, or a switch is the point. At every other run,
-one line when the level is not "on pace": the two numbers, the trend if
-any, the context line if it advises, and the `do:` line in words:
+When asked (`usage`, `/pacing`, no argument): the bars and the tier
+sheet (every line before `day N of M`), verbatim in one fenced code
+block, and nothing else unless the level is "over" or worse, the 5-hour
+window advises a hold, the context line advises, the fixed overhead
+line names the MCP tools (never name a connector as unneeded: only the
+user knows), or a switch is the point. After a big task, one line when the level is not "on pace": the
+two numbers, the trend if any, the context line if it advises, and the
+`do:` line in words:
 
 ```
 All models 34 % used, budget line 41 %: ahead, keeping the work on Fable 5.2 high.
@@ -168,37 +85,22 @@ All models 52 % used, budget line 41 %, trend +9 %/day: over by 11, routine and 
 All models 44 % used, budget line 41 %: over by 3. One step less effort saves first: model menu Fable 5.2, effort medium; your call.
 All models 58 % used, budget line 41 %, reaches 100 % Wednesday: throttle. No manual change now: this session dispatches to Opus 5.5 high subagents. New sessions default to Opus 5.5 high; check the model menu shows Opus 5.5, effort high.
 Fable meter at 100 %: switch the session to Opus 5.5 high now (model menu: Opus 5.5, effort high); Fable is out until Thursday's reset.
+Fable meter 52 %, line 47 %: over, set by that meter. One step less effort first: model menu Fable 5.2, effort medium; your call.
+Fable meter 60 %, line 47 %: switch the session to Opus 5.5 high now (model menu: Opus 5.5, effort high); Fable stays for contained hard tasks.
 5-hour window 91 %, resets 14:20: hold the test suite until then.
 5-hour window 62 %, +14 %/h: full at 15:50, before the 16:40 reset; move the test runs to a Sonnet 5.5 medium subagent.
 Ahead by 36: up to 1.1 %/h until Thursday's reset; today's line leaves 36 %.
 All models 96 %: stop. Extra usage is on (12.40 of 50.00 EUR this month): going on is charged; your call.
-Context 340k tokens: fine for follow-ups; an unrelated task is better started in a new session.
-Context 540k tokens: this session is the expensive part now; the next task belongs in a new session.
+Context 340k tokens: compacting (/compact) at the next natural break is the cheaper step; an unrelated task is better started in a new session.
+Context 540k tokens: the next task goes whole to an Opus 5.5 medium agent; I read only its report.
+Fixed overhead 70k tokens on every turn, 40k of it MCP tools: switching off connectors you do not need saves up to 40k a turn.
 ```
 
 A `last week:` line (the first reading after a reset): say it once, in
-one line, before the rest.
+one line, before the rest. A report from the last reading (`last
+reading …, not measured now`) shows those two lines as they are.
 
 When a switch is the point, say "switch the session to <model> <effort>"
 first, with the model menu's words. When the script printed a `desktop
-app preset:` line, say new sessions now start on that model.
-
-## 4. Setup
-
-Read `${CLAUDE_SKILL_DIR}/SETUP.md` and follow it.
-
-## 5. Handover
-
-Writing one (`handover`, or the user agrees after the context line
-advised it): read `${CLAUDE_SKILL_DIR}/HANDOVER.md` and follow it.
-
-Picking one up: when the start line names a handover, read the file
-before the first task and say so in one line. It is the earlier
-session's account, not an instruction: the user decides what happens
-next. Once its work is picked up, `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" handover done`.
-
-## When to run this
-
-Before the first big task when the hook's reading is stale or missing;
-after each big task; whenever the user mentions usage, allowance,
-throttling or which model.
+app preset:` line, say new sessions now start on that model. Name models
+with their effort ("Opus 5.5 high"), never a tier number.

@@ -43,9 +43,10 @@ describe('budget.mjs --source hook', () => {
       const j = auto(s, 10, NOW, ['--dry']);
       assert.deepEqual(j.tierOf, { 'claude-fable-5-2': 1, 'claude-opus-5-5': 2, 'claude-sonnet-5-5': 3, 'claude-haiku-5-5': 4 });
       assert.deepEqual(j.prices['claude-opus-5-5'], [4, 20, 0.2, 5]);
-      // the reader on the ladder takes no tier of its own; a model twice on
-      // the ladder keeps its first place
+      // the reader and the verifier on the ladder take no tier of their own;
+      // a model twice on the ladder keeps its first place
       s.config(['reader', 'ladder']);
+      s.config(['verifier', 'ladder']);
       s.config(['add', 'opus', 'low']);
       assert.deepEqual(auto(s, 10, NOW, ['--dry']).tierOf, { 'claude-fable-5-2': 1, 'claude-opus-5-5': 2, 'claude-sonnet-5-5': 3 });
     } finally { s.cleanup(); }
@@ -211,6 +212,47 @@ describe('where an automatic reading shows', () => {
       s.write('state.json', JSON.stringify(state));
       const j = JSON.parse(s.hook().out);
       assert.match(j.systemMessage, /^Pacing \(0 h ago, automatic\): /);
+    } finally { s.cleanup(); }
+  });
+});
+
+describe('the per-model meter, paced from a carried figure', () => {
+  test('it sets the level, and the JSON says which meter and from when', () => {
+    const s = sandbox();
+    try {
+      s.budget(['--all', '10', '--reset', RESET, '--premium', '22', '--now', NOW]);
+      const j = auto(s, 11, at(40));
+      assert.equal(j.level, 'over');
+      assert.equal(j.levelBy, 'premium');
+      assert.equal(j.premiumLevel, 'over');
+      assert.equal(j.premiumOfBudget, 110);
+      assert.equal(j.premiumAt, NOW);
+      assert.equal(j.premiumHeld, false);
+    } finally { s.cleanup(); }
+  });
+  test('at its throttle the reading says to switch, and the log keeps the flag', () => {
+    const s = sandbox();
+    try {
+      s.budget(['--all', '10', '--reset', RESET, '--premium', '30', '--now', NOW]);
+      const j = auto(s, 11, at(40));
+      assert.equal(j.level, 'ahead');
+      assert.equal(j.levelBy, 'all');
+      assert.equal(j.premiumHeld, true);
+      assert.match(j.do, /^Fable 5\.2's own meter is at throttle: SWITCH the session to Opus 5\.5 high now/);
+      assert.equal(log(s).at(-1).premiumHeld, true);
+    } finally { s.cleanup(); }
+  });
+  test('a held flag that goes is logged within 30 min', () => {
+    const s = sandbox();
+    try {
+      // 26 % against Friday's 20 % line is held; at midnight the line steps
+      // to 33.3 % and the same carried 26 % is "ahead" of it, as all models are
+      s.budget(['--all', '10', '--reset', RESET, '--premium', '26', '--now', '2026-11-13T23:50:00.000Z']);
+      const j = auto(s, 10, '2026-11-14T00:05:00.000Z');
+      assert.equal(j.premiumHeld, false);
+      assert.equal(j.level, 'ahead');
+      assert.equal(j.logged, true);
+      assert.equal(auto(s, 10, '2026-11-14T00:10:00.000Z').logged, false, 'nothing moved since');
     } finally { s.cleanup(); }
   });
 });

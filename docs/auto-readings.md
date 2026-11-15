@@ -72,6 +72,57 @@ level in the status line.
    from the night's reading. The desktop app showed the module's
    `$.ui.status` line (confirmed by the user).
 
+## The per-model meter and the pause warning (after 0.8.5-beta, not released)
+
+- **A side session's status line.** A session another session started
+  leads with its own tier: `⚪Tier 2 Sub Agent - 77% of budget, ...`.
+  The tier is that of the model its main thread's last turn ran on
+  (`⚫Other` off the ladder); before its first turn the line is the plain
+  one. The module tells such a session by `CLAUDE_CODE_CHILD_SESSION=1`,
+  which the desktop app sets in a side session's environment (seen in a
+  live side session on 2026-11-15). That variable is not part of the
+  documented hooks API: if it changes or goes, the line falls back to the
+  plain one. Tested under the kit with `mock.env`.
+
+- **The per-model meter, paced.** `budget.mjs` now draws the same line
+  against the per-model meter and gives it a level by the same
+  thresholds and its own trend (from readings that read it in full; a
+  carried figure is left out of the slope). While tier 1 is that model,
+  the worse level decides; at its "throttle" the session is told to move
+  to the fallback tier ("held"). An automatic reading carries the figure
+  over, as before: it is a lower bound, since a meter only rises, so its
+  level can be too mild but never too strict. The JSON line adds
+  `premiumLevel`, `premiumHeld`, `levelBy` and `premiumOfBudget`; the
+  status line names the time of a carried figure (`40% Fable at 09:40`)
+  and, when that meter decides, starts with its share
+  (`110% of Fable budget`). A toast also marks a change of the held flag.
+- **A warning after a pause.** `prompt.submit` fires before the turn
+  starts. When the main thread's last turn (`turn.complete` without an
+  `agentId`) ended an hour or more ago on `$.clock`, the last
+  `session.measure` showed 300 000 tokens or more, and the prompt was
+  typed (no `turnId`, not meta, not a slash command, not from a
+  notification, schedule, peer or a plugin's own prompt), one
+  `$.ui.toast` says the size, the idle time and that compacting or a
+  handover first is cheaper. Once per pause: the pause is keyed by the
+  end time of the last turn. The hook always returns `next(e)` with the
+  prompt unchanged, and any error is swallowed.
+- **What the API allows.** The toast shows before the request goes out,
+  but nothing short of holding the prompt (`{ drop }`, which the task
+  ruled out) keeps that turn from storing the session again. So the
+  notice is honest about it: "this turn stores it all again. After a
+  break, /compact or a handover first is cheaper." The cache lifetime is
+  not told to a module (`cache_ttl` reaches only model-switch hooks, and
+  `prompt_cache_likely_expired` only a resumed session's SessionStart), so
+  one hour is assumed. After a module reload or a resume the module has
+  no last turn, so the first prompt is not warned.
+- **Tests.** `readings.test.ts` under the kit's mocked clock: the toast
+  before the turn and the prompt unchanged, once per pause, a new pause
+  warned again, none under an hour or 300 000 tokens or before any turn,
+  a subagent's turn not ending the pause, `/compact` not warned, a
+  failing toast not stopping the prompt; the origin filter and the line
+  as plain functions, since the kit raises a test's prompt with no
+  origin. Not run live in a real session.
+
 ## Still open
 
 - **Installed plugins:** 2.1.325's debug log says installed plugins'
