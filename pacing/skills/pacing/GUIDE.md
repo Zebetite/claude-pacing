@@ -7,8 +7,8 @@ delegating easier work to subagents with cheaper models. This skill
 spends your weekly plan allowance on purpose. It uses tiers of models,
 the top tier is used for the most difficult work; the lower tiers do
 easier work through subagents. A day-by-day budget and the logged trend
-decide how far down the tiers work goes, so the week never runs out
-before the reset. That means it uses better models automatically when
+decide how far down the tiers work goes, so the week doesn't run out
+of tokens as easily before the reset. That means it uses better models automatically when
 you have more usage left. You can custom set how many tiers you want and
 what model and effort should be on every tier.
 

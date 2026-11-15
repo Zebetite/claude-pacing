@@ -6,8 +6,8 @@ description: "Pace the Weekly · all models allowance over a ladder of models (d
 # Model pacing
 
 The rule: the top tier for work that needs judgment, lower tiers for easier
-work through subagents, and the **Weekly · all models** meter never runs
-out before the reset. The plan's per-model meter (Fable's by default,
+work through subagents, and the **Weekly · all models** meter is kept
+from running out before the reset. The plan's per-model meter (Fable's by default,
 `premium` in the config) is not paced: at 100 % that model leaves the
 ladder and the `fallback` tier (Opus 5.5 high by default) takes the top
 place until the reset. `${CLAUDE_SKILL_DIR}` is this skill's folder; the user's files are
