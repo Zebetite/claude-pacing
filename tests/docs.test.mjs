@@ -109,3 +109,10 @@ test('the route skill tells a plain run from a check, and batches small tasks', 
   assert.match(route, /Several small tasks for one role go to the kept agent in\s+one message, never one start each/);
   assert.match(route, /a task too small for a start waits\s+for the next batch or stays in the session/);
 });
+
+test('the plugin description fits the library: 500 characters at most, the same in the marketplace', () => {
+  const manifest = JSON.parse(fs.readFileSync(path.join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'));
+  const market = JSON.parse(fs.readFileSync(path.join(plugin, '..', '.claude-plugin', 'marketplace.json'), 'utf8'));
+  assert.ok(manifest.description.length <= 500, manifest.description.length + ' characters');
+  assert.equal(market.plugins.find(p => p.name === 'pacing').description, manifest.description);
+});
