@@ -9,7 +9,7 @@
     {
       "name": "pacing",
       "source": "./pacing",
-      "description": "Use better models and still save tokens: top tier model does the hardest work, cheaper models take easier work as subagents. One day-by-day budget paces the weekly meter and the top model's own. 4 agent roles (reader, verifier, implementer, researcher) stay with the session and keep notes per project. A long session is told when to compact, hands whole tasks to one agent, warns after a pause, and hands over to a new one. A status line shows the budget and each tier’s share.",
+      "description": "Use better models and still save tokens: the top tier does the hardest work, cheaper models take easier work as subagents. One budget paces the weekly meters. 4 different agent roles, each stays with the session and keeps notes per project, and a long session hands its work over to a new one. A status line shows the budget and each tier's share.",
       "category": "productivity",
       "tags": ["usage", "pacing", "models", "budget", "subagents"]
     }
