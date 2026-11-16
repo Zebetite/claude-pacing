@@ -35,11 +35,12 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 - **A status line after every turn** (new in 0.8):
 
   ```
-  77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)
+  ahead 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · wk 36% Fable 40%
   ```
 
-  The weekly meter as a share of today's line, how this session's own
-  use splits over the tiers (subagents included), and the weekly meters.
+  The level and the weekly meter as a share of today's line, how this
+  session's own use splits over the tiers (subagents included), and the
+  weekly meters. `/pacing-status` shows the whole line when the app cuts it.
   It comes from readings the plugin takes by itself after a turn, on a
   Claude Code version with hooks modules; older versions run the rest of
   the plugin as before.

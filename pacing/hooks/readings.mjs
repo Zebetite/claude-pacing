@@ -119,7 +119,41 @@ export const fullReadingAsk = j => (j && j.needFull
 //   ⚪Tier 2 Sub Agent - 77% of budget, ⚪Tier 2[90%] 🟤Tier 4[10%], (36% Weekly, 40% Fable)
 // `self` is that tier ('Other' off the ladder), or null for any other session.
 // `now` (ms) dates a carried per-model figure: "71% Fable 15h ago, est. 90%".
+// The status line, compact. The desktop app gives it what is left of the
+// composer's footer beside the model and mode pickers, and cuts the rest with
+// an ellipsis: about 32 characters while a turn runs. So what matters comes
+// first and a cut takes only the tail:
+//   a side session's own tier   🟡T1 sub
+//   the level and budget share  over 107%   Fable held 158%   stop 120% wrap up
+//   the session's tier split    🟡T1 45% ⚪T2 55%
+//   the meters                  wk 48% Fable 71% (2h old est 80%)
+// `/pacing-status` shows the whole line in the long form (fullText).
+export const HEAD_MAX = 32;
 export const statusText = (j, mix, self = null, now = Date.now()) => {
+  const name = j.premiumLabel ? j.premiumLabel.split(' ')[0] : null;
+  // the per-model meter speaks when it set the level, holds the model, or is out
+  const byPrem = !!name && j.premiumOfBudget != null && (j.levelBy === 'premium' || !!j.premiumHeld || !!j.premiumOut);
+  const stop = j.level === 'stop';
+  const word = stop ? 'stop'
+    : byPrem ? name + ' ' + (j.premiumOut ? 'out' : j.premiumHeld ? 'held' : j.level)
+    : j.level || '';
+  const pct = byPrem ? j.premiumOfBudget : j.ofBudget;
+  const head = [word + (pct != null ? ' ' + pct + '%' : '') + (stop ? ' wrap up' : '')];
+  if (self !== null) head.unshift(square(self) + (self === 'Other' ? 'Other' : 'T' + self) + ' sub');
+  const parts = [head.join(' · ')];
+  if (mix.length) parts.push(mix.map(x => square(x.tier) + (x.tier === 'Other' ? 'Other' : 'T' + x.tier) + ' ' + x.share + '%').join(' '));
+  const meters = ['wk ' + Math.round(j.all) + '%'];
+  if (j.premium != null && name) {
+    const age = j.premiumAt ? now - Date.parse(j.premiumAt) : 0;
+    const est = j.premiumEstimate != null && Math.round(j.premiumEstimate) > Math.round(j.premium) ? ' est ' + Math.round(j.premiumEstimate) + '%' : '';
+    meters.push(name + ' ' + Math.round(j.premium) + '%' + (age > CARRIED_CURRENT ? ' (' + ageText(age) + ' old' + est + ')' : ''));
+  }
+  parts.push(meters.join(' '));
+  return parts.join(' · ');
+};
+
+// the long form, as the line read before 0.9.5: for /pacing-status
+export const fullText = (j, mix, self = null, now = Date.now()) => {
   const meters = [Math.round(j.all) + '% Weekly'];
   // the engine never hands a plugin the per-model meter: its figure is carried
   // over from the last full reading, and is never shown as current once old
@@ -144,12 +178,12 @@ export const statusText = (j, mix, self = null, now = Date.now()) => {
 
 // the status line from a reading. A side session leads with its own tier, by
 // the model its main thread runs on; a model off the ladder is Other.
-export const lineOf = (j, model, tokens, agentTokens, now) => {
+export const lineOf = (j, model, tokens, agentTokens, now, full = false) => {
   const prices = j.prices || {}, tierOf = j.tierOf || {};
   const child = j.spawned === true && typeof model === 'string' && model !== '';
   const id = child ? idOf(model, prices) : null;
   const self = child ? (id && tierOf[id]) || 'Other' : null;
-  return statusText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now);
+  return (full ? fullText : statusText)(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now);
 };
 
 /** @type {import('claude-code').Register} */
@@ -175,6 +209,19 @@ export const register = on => {
   // the desktop app's own record of the session). The model it runs on: its
   // main thread's last turn.
   let sessionModel = null;
+
+  // the whole line, which the footer cuts: /pacing-status, at any time
+  on('session.start', async ($, e, next) => {
+    try {
+      await $.command.register({ name: 'pacing-status', description: 'Pacing: the whole status line, and what to do now.', immediate: true });
+    } catch { /* an engine without commands: the line alone */ }
+    return next(e);
+  });
+  on('command.run', { command: 'pacing-status' }, async () => {
+    if (!reading) return { text: 'Pacing: no automatic reading yet in this session. /pacing usage reads now.' };
+    const text = lineOf(reading, sessionModel, tokens, agentTokens, lastTurnAt ?? Date.now(), true);
+    return { text: 'Pacing: ' + text + (reading.do ? '\nNow: ' + reading.do : '') };
+  });
 
   on('prompt.submit', async ($, e, next) => {
     try {

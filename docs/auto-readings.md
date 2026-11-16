@@ -22,7 +22,8 @@ level in the status line.
   `node <$.plugin.root>/skills/pacing/scripts/budget.mjs --all .. --reset ..
   --source hook --five .. --five-reset ..`, and shows one toast when the
   level changes. The status line shows
-  `77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)`:
+  `ahead 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · wk 36% Fable 40%`
+  (before 0.9.5: `77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)`):
   the meter as a share of the line; the session's own use by tier, from
   every turn's tokens (`turn.complete`, subagents included) priced per
   model, in shares that add up to 100; the two meters. The status line is
@@ -75,7 +76,8 @@ level in the status line.
 ## The per-model meter and the pause warning (after 0.8.5-beta, not released)
 
 - **A side session's status line.** A session another session started
-  leads with its own tier: `⚪Tier 2 Sub Agent - 77% of budget, ...`.
+  leads with its own tier: `⚪T2 sub · ahead 77% · ...` (before 0.9.5:
+  `⚪Tier 2 Sub Agent - 77% of budget, ...`).
   The tier is that of the model its main thread's last turn ran on
   (`⚫Other` off the ladder); before its first turn the line is the plain
   one. `budget.mjs --source hook` tells the module (`spawned` in its JSON
@@ -192,3 +194,23 @@ level in the status line.
   on any turn; the session takes the reading with the skill.
 - **Not run live:** the context block in a real session. It rests on the
   engine attaching `context` after the prompt as its types document.
+
+## A status line that fits the footer (0.9.5-beta)
+
+- **The case.** A side session's line read `Tier 1 Sub Agent - 158% of
+  Fable ...`: the desktop app draws the plugin's status in the composer's
+  footer, beside the model and mode pickers and the turn's spinner, and
+  cuts what does not fit with an ellipsis. About 32 characters were drawn
+  there; a line of about 75 had fitted another time. `$.ui.status` takes
+  text alone (its first 2 000 characters): it neither says the width nor
+  takes a tooltip, so the line cannot choose a form by the room it gets.
+- **Essentials first, short labels.** `🟡T1 sub · Fable held 158% · 🟡T1
+  100% · wk 50% Fable 90%`: a side session's tier, then the level with
+  the budget share of the meter that decides it (`over 103%`, `Fable held
+  158%`, `stop 120% wrap up`), then the tier split, then the meters, a
+  carried figure with its age (`Fable 71% (15h old est 90%)`). The lead
+  stays within 32 characters for every level, three-digit shares and
+  `⚫Other`; the tests hold it there.
+- **The whole line.** `/pacing-status`, a command the hooks module
+  registers (it runs mid-turn too), prints the long form and what to do
+  now. The `usage` report has the meters, the level and the advice.

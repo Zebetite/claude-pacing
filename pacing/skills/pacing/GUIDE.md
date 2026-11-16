@@ -125,11 +125,13 @@ fresh for the next session and shows it in the status line, with one
 notice when the level changes:
 
 <!-- help -->
-    77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)
+    ahead 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · wk 36% Fable 40%
 
-That is the weekly meter as a share of today's budget line (over 100 %
-means over the line), how this session's own use splits over the tiers,
-subagents included, and the two meters.<!-- /help --> The split is an estimate: each
+That is the level and the weekly meter as a share of today's budget
+line (over 100 % means over the line), how this session's own use
+splits over the tiers (T1 is tier 1), subagents included, and the two
+meters. The desktop app may cut the end of the line; `/pacing-status`
+shows it whole, in words.<!-- /help --> The split is an estimate: each
 model's tokens priced at its API rates, which is how the weekly meter
 weighs the models too. The tiers are those in force at the reading:
 while Fable's meter is out or held, the fallback (Opus 5.5 high) is tier
@@ -143,7 +145,7 @@ then 🟣 🔴 🔵 🟢 for a longer ladder; ⚫ is a model the ladder does not
 hold. A session that another session started (a side session in the
 desktop app) leads with the tier of the model it runs on:
 
-    ⚪Tier 2 Sub Agent - 77% of budget, ⚪Tier 2[90%] 🟤Tier 4[10%], (36% Weekly, 40% Fable)
+    ⚪T2 sub · ahead 77% · ⚪T2 90% 🟤T4 10% · wk 36% Fable 40%
 
 Claude Code hands a plugin only the all-models and 5-hour meters,
 so such a reading carries the per-model figure (Fable's by default) over
@@ -151,14 +153,14 @@ from the last full reading of the week. The figure can only have risen
 since, so a carried level may be too mild, never too strict, and it is
 never shown as current once it is half an hour old: the status line
 gives its age and, where the readings allow, an estimate of where the
-meter is now (`71% Fable 15h ago, est. 90%`). The estimate is only
+meter is now (`Fable 71% (15h old est 90%)`). The estimate is only
 shown; the level never rests on it. Once the figure is an hour old, or
 the all-models meter has moved 2 points since it was read, Claude is
 told beside your next prompt to take a full reading, once, and again an
 hour later if none came; the next session's start line says so too.
 `/pacing log` marks such a figure with its age. When Fable's meter
-sets the level, the first figure is its share of the line instead
-(`110% of Fable budget`). An automatic reading never changes the next
+sets the level, holds the model or is out, the line leads with its
+share of the line instead (`Fable over 110%`, `Fable held 158%`). An automatic reading never changes the next
 session's model: that stays with the readings the session takes.
 `/pacing log` marks them `(auto)`. On an older Claude Code the plugin
 works as before, without them.

@@ -26,7 +26,8 @@ test('every part of it is the guide\'s own words, and the parts it needs are mar
   assert.match(short, /delegating easier work to subagents/);
   assert.match(short, /\*\*1\.\*\* Type `\/pacing setup`/);
   assert.match(short, /\*\*2\.\*\* In the model menu/);
-  assert.match(short, /^ {4}77% of budget, /m);
+  assert.match(short, /^ {4}ahead 77% · /m);
+  assert.match(short, /\/pacing-status/);
   assert.doesNotMatch(short, /<!--/);
 });
 
