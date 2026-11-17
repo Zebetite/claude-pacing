@@ -214,3 +214,14 @@ level in the status line.
 - **The whole line.** `/pacing-status`, a command the hooks module
   registers (it runs mid-turn too), prints the long form and what to do
   now. The `usage` report has the meters, the level and the advice.
+
+## The per-model meter in the status line (after 0.9.5-beta, not released)
+
+- The lead is the weekly meter's level and share (`over 103%`); the
+  per-model meter shows only as its week's usage among the meters
+  (`Fable 99%`). "Fable held 158%" was a share of its line and read as
+  usage over 100 %. When that meter set the level, the lead is the share
+  alone, without the level's word. `/pacing-status` follows the same rule.
+- A side session shows no per-model meter at all: its line reads as its
+  own use, and the figure is the session's that started it. This
+  replaces the lead described in the section above.

@@ -156,7 +156,7 @@ test('a failed run changes nothing and never throws into the session', async ($,
 
 // ---- the per-model meter in the status line ----
 
-test('a carried per-model figure is current for half an hour; the meter that set the level shows its own budget share', async ($, on) => {
+test('a carried per-model figure is current for half an hour; when that meter set the level, the head is the weekly share alone', async ($, on) => {
   const status = engine(on)
   const toasts: string[] = []
   const NOW = Date.parse('2026-11-13T10:00:00.000Z')
@@ -170,7 +170,8 @@ test('a carried per-model figure is current for half an hour; the meter that set
   expect(status.at(-1)).toBe('ahead 50% · wk 10% Fable 18%')
   next = answer('over', 11, { premium: 22, premiumAt: null, premiumLevel: 'over', levelBy: 'premium', premiumOfBudget: 110, do: 'medium tasks leave the session model too' })
   await $.session.measure(measure(11))
-  expect(status.at(-1)).toBe('Fable over 110% · wk 11% Fable 22%')
+  // no "Fable over 110%": the per-model meter shows as its usage only
+  expect(status.at(-1)).toBe('55% · wk 11% Fable 22%')
   expect(toasts).toEqual(['Pacing: ahead -> over (Fable meter). medium tasks leave the session model too'])
 })
 
@@ -308,21 +309,23 @@ test('a side session leads with its own tier: Tier X Sub Agent - X% of budget', 
   await $.turn.complete(turn('claude-opus-5-5', 9))
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('⚪T2 sub · ahead 50% · ⚪T2 90% 🟤T4 10% · wk 10% Fable 40%')
+  expect(status.at(-1)).toBe('⚪T2 sub · ahead 50% · ⚪T2 90% 🟤T4 10% · wk 10%')
 })
 
-test('a side session: the per-model meter\'s share when it decides; a model off the ladder is Other', async ($, on) => {
+test('a side session shows no per-model meter, even when it set the level; a model off the ladder is Other', async ($, on) => {
   const status = engine(on)
   let next = answer('over', 11, { premium: 22, levelBy: 'premium', premiumOfBudget: 110, spawned: true })
   on('process.run', () => ({ value: next }))
 
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await $.session.measure(measure(11))
-  expect(status.at(-1)).toBe('🟡T1 sub · Fable over 110% · 🟡T1 100% · wk 11% Fable 22%')
+  // no per-model meter in a side session: the weekly share alone, without the
+  // level's word, since that meter set the level
+  expect(status.at(-1)).toBe('🟡T1 sub · 55% · 🟡T1 100% · wk 11%')
   next = answer('ahead', 12, { spawned: true })
   await $.turn.complete({ ...turn('claude-fable-5-2', 1), usage: { model: 'claude-opus-4-8', input_tokens: 0, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } })
   await $.session.measure(measure(12))
-  expect(status.at(-1)).toBe('⚫Other sub · ahead 60% · 🟡T1 100% · wk 12% Fable 40%')
+  expect(status.at(-1)).toBe('⚫Other sub · ahead 60% · 🟡T1 100% · wk 12%')
 })
 
 test('a session of its own, or one whose start is not known, keeps the plain line', async ($, on) => {
@@ -354,17 +357,17 @@ test('a side session before its first turn ends takes the model it is set to', a
 
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('⚪T2 sub · ahead 50% · 🟤T4 100% · wk 10% Fable 40%')
+  expect(status.at(-1)).toBe('⚪T2 sub · ahead 50% · 🟤T4 100% · wk 10%')
 })
 
-test('a side session whose model is not known yet keeps the plain line', async ($, on) => {
+test('a side session whose model is not known yet keeps the plain line, and shows no per-model meter', async ($, on) => {
   const status = engine(on)
   on('session.model', () => ({ value: 'opus' }))
   on('process.run', () => ({ value: answer('ahead', 10, { spawned: true }) }))
 
   await $.turn.complete(turn('claude-opus-5-5', 1, 'a1'))
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('ahead 50% · ⚪T2 100% · wk 10% Fable 40%')
+  expect(status.at(-1)).toBe('ahead 50% · ⚪T2 100% · wk 10%')
 })
 
 test('the line is redrawn when the main thread\'s turn ends', async ($, on) => {
@@ -375,7 +378,7 @@ test('the line is redrawn when the main thread\'s turn ends', async ($, on) => {
   const before = status.length
   await $.turn.complete(turn('claude-opus-5-5', 1))
   expect(status.length).toBe(before + 1)
-  expect(status.at(-1)).toBe('⚪T2 sub · ahead 50% · ⚪T2 100% · wk 10% Fable 40%')
+  expect(status.at(-1)).toBe('⚪T2 sub · ahead 50% · ⚪T2 100% · wk 10%')
   // a subagent's turn waits for the next measure
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
   expect(status.length).toBe(before + 1)
@@ -396,7 +399,7 @@ test('a 15-hour-old carried figure is shown with its age and an estimate, never 
   on('process.run', () => ({ value: next }))
 
   await $.session.measure(measure(49))
-  expect(status.at(-1)).toBe('Fable held 152% · wk 49% Fable 71% (15h old est 90%)')
+  expect(status.at(-1)).toBe('over 245% · wk 49% Fable 71% (15h old est 90%)')
   // the line is redrawn every turn: the age moves on without a new reading
   await clock.advance(20 * 60000)
   await $.session.measure(measure(49))
@@ -477,7 +480,7 @@ test('the session on the fallback is tier 1; its subagents on the same model are
   await $.turn.complete(turn('claude-opus-5-5', 3, 'a1'))
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'a2'))
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('🟡T1 sub · ahead 50% · 🟡T1 60% ⚪T2 30% 🟤T4 10% · wk 10% Fable 40%')
+  expect(status.at(-1)).toBe('🟡T1 sub · ahead 50% · 🟡T1 60% ⚪T2 30% 🟤T4 10% · wk 10%')
 })
 
 test('an older budget.mjs without agentTierOf: every turn counts by tierOf, as before', async ($, on) => {
@@ -520,8 +523,9 @@ test('the lead, a side session\'s tier and the level with its budget share, fits
     expect(chars(head(s))).toBeLessThanOrEqual(HEAD_MAX)
   }
   // the case reported, now: the lead within the narrow room, the split after it
-  const reported = statusText({ ...BASE, all: 50, premium: 90, level: 'over', premiumHeld: true, premiumOfBudget: 158 }, [{ tier: 1, share: 100 }], 1, now)
-  expect(reported).toBe('🟡T1 sub · Fable held 158% · 🟡T1 100% · wk 50% Fable 90%')
+  const reported = statusText({ ...BASE, all: 50, premium: 90, level: 'over', ofBudget: 107, premiumHeld: true, premiumOfBudget: 158 }, [{ tier: 1, share: 100 }], 1, now)
+  // a side session shows no per-model meter
+  expect(reported).toBe('🟡T1 sub · over 107% · 🟡T1 100% · wk 50%')
   expect(chars(head(reported))).toBeLessThanOrEqual(HEAD_MAX)
   // a realistic main session's whole line is shorter than the old form's
   const realistic = statusText({ ...BASE, all: 48, premium: 71, ofBudget: 103, level: 'over' }, [{ tier: 1, share: 45 }, { tier: 2, share: 55 }], null, now)
@@ -532,12 +536,17 @@ test('the lead, a side session\'s tier and the level with its budget share, fits
 test('the order: tier, level and share, then the split, then the meters; a cut takes the tail', async () => {
   const now = Date.parse('2026-11-16T12:00:00.000Z')
   const s = statusText({ ...BASE, level: 'throttle', premiumHeld: true, premiumOfBudget: 158, premiumAt: '2026-11-16T09:00:00.000Z', premiumEstimate: 104 },
-    [{ tier: 1, share: 60 }, { tier: 2, share: 40 }], 2, now)
+    [{ tier: 1, share: 60 }, { tier: 2, share: 40 }], null, now)
   const parts = s.split(' · ')
-  expect(parts[0]).toBe('⚪T2 sub')
-  expect(parts[1]).toBe('Fable held 158%')
-  expect(parts[2]).toBe('🟡T1 60% ⚪T2 40%')
-  expect(parts[3]).toBe('wk 100% Fable 100% (3h old est 104%)')
+  // the weekly level and share; the per-model meter only as its usage, last
+  expect(parts[0]).toBe('throttle 214%')
+  expect(parts.join(' · ')).not.toContain('held')
+  expect(parts[1]).toBe('🟡T1 60% ⚪T2 40%')
+  expect(parts[2]).toBe('wk 100% Fable 100% (3h old est 104%)')
+  // a side session: its tier first, then the weekly share, no per-model meter
+  const side = statusText({ ...BASE, level: 'throttle', premiumHeld: true, premiumOfBudget: 158, premiumAt: '2026-11-16T09:00:00.000Z', premiumEstimate: 104 },
+    [{ tier: 1, share: 60 }, { tier: 2, share: 40 }], 2, now).split(' · ')
+  expect(side).toEqual(['⚪T2 sub', 'throttle 214%', '🟡T1 60% ⚪T2 40%', 'wk 100%'])
   // no newline: a footer shows one line
   for (const { j, self } of WORST) expect(statusText(j, LONG_MIX, self, now)).not.toContain('\n')
 })
@@ -551,5 +560,6 @@ test('/pacing-status shows the whole line in the long form, and what to do now',
   await $.turn.complete(turn('claude-opus-5-5', 1))
   await $.session.measure(measure(21))
   const r = await $.command.run({ command: 'pacing-status', args: '' } as any)
-  expect(r.text).toBe('Pacing: ⚪Tier 2 Sub Agent - 158% of Fable budget, ⚪Tier 2[100%], (21% Weekly, 90% Fable)\nNow: Fable 5.2 held: Opus 5.5 high')
+  // a side session's long form shows no per-model meter either
+  expect(r.text).toBe('Pacing: ⚪Tier 2 Sub Agent - 105% of budget, ⚪Tier 2[100%], (21% Weekly)\nNow: Fable 5.2 held: Opus 5.5 high')
 })

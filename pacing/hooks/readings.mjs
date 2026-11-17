@@ -124,21 +124,28 @@ export const fullReadingAsk = j => (j && j.needFull
 // an ellipsis: about 32 characters while a turn runs. So what matters comes
 // first and a cut takes only the tail:
 //   a side session's own tier   🟡T1 sub
-//   the level and budget share  over 107%   Fable held 158%   stop 120% wrap up
+//   the level and budget share  over 107%   stop 120% wrap up
 //   the session's tier split    🟡T1 45% ⚪T2 55%
 //   the meters                  wk 48% Fable 71% (2h old est 80%)
 // `/pacing-status` shows the whole line in the long form (fullText).
 export const HEAD_MAX = 32;
+// The head is the weekly meter's level and share. The per-model meter shows
+// as its week's usage among the meters and nowhere else: a share of its line
+// ("Fable held 158%") read as usage over 100 %. When that meter set the
+// level, the head has the share alone, without the level's word, which
+// would not match the weekly share beside it.
+// A side session (one another session started, `spawned`) shows no per-model
+// meter at all: the figure is the account's, its session on the per-model
+// model is the one that started it, and in a side session's narrow line it
+// read as the side session's own use.
+const sideOf = (j, self) => self !== null || j.spawned === true;
 export const statusText = (j, mix, self = null, now = Date.now()) => {
-  const name = j.premiumLabel ? j.premiumLabel.split(' ')[0] : null;
-  // the per-model meter speaks when it set the level, holds the model, or is out
-  const byPrem = !!name && j.premiumOfBudget != null && (j.levelBy === 'premium' || !!j.premiumHeld || !!j.premiumOut);
+  const side = sideOf(j, self);
+  const name = j.premiumLabel && !side ? j.premiumLabel.split(' ')[0] : null;
   const stop = j.level === 'stop';
-  const word = stop ? 'stop'
-    : byPrem ? name + ' ' + (j.premiumOut ? 'out' : j.premiumHeld ? 'held' : j.level)
-    : j.level || '';
-  const pct = byPrem ? j.premiumOfBudget : j.ofBudget;
-  const head = [word + (pct != null ? ' ' + pct + '%' : '') + (stop ? ' wrap up' : '')];
+  const word = stop ? 'stop' : j.levelBy === 'premium' ? '' : j.level || '';
+  const pct = j.ofBudget;
+  const head = [[word, pct != null ? pct + '%' : ''].filter(Boolean).join(' ') + (stop ? ' wrap up' : '')];
   if (self !== null) head.unshift(square(self) + (self === 'Other' ? 'Other' : 'T' + self) + ' sub');
   const parts = [head.join(' · ')];
   if (mix.length) parts.push(mix.map(x => square(x.tier) + (x.tier === 'Other' ? 'Other' : 'T' + x.tier) + ' ' + x.share + '%').join(' '));
@@ -154,21 +161,21 @@ export const statusText = (j, mix, self = null, now = Date.now()) => {
 
 // the long form, as the line read before 0.9.5: for /pacing-status
 export const fullText = (j, mix, self = null, now = Date.now()) => {
+  const side = sideOf(j, self);
   const meters = [Math.round(j.all) + '% Weekly'];
   // the engine never hands a plugin the per-model meter: its figure is carried
-  // over from the last full reading, and is never shown as current once old
-  if (j.premium != null && j.premiumLabel) {
+  // over from the last full reading, and is never shown as current once old.
+  // A side session shows none (sideOf).
+  if (j.premium != null && j.premiumLabel && !side) {
     const age = j.premiumAt ? now - Date.parse(j.premiumAt) : 0;
     const old = age > CARRIED_CURRENT;
     meters.push(Math.round(j.premium) + '% ' + j.premiumLabel.split(' ')[0]
       + (old ? ' ' + ageText(age) + ' ago' + (j.premiumEstimate != null && Math.round(j.premiumEstimate) > Math.round(j.premium) ? ', est. ' + Math.round(j.premiumEstimate) + '%' : '') : ''));
   }
   const parts = [];
-  // the budget share of the meter that decides: the per-model one when it set
-  // the level or moved the session off its model
-  const share = (j.levelBy === 'premium' || j.premiumHeld) && j.premiumOfBudget != null && j.premiumLabel
-    ? j.premiumOfBudget + '% of ' + j.premiumLabel.split(' ')[0] + ' budget'
-    : j.ofBudget != null ? j.ofBudget + '% of budget' : null;
+  // the weekly meter's share of its line; the per-model meter shows as its
+  // usage among the meters only (see statusText)
+  const share = j.ofBudget != null ? j.ofBudget + '% of budget' : null;
   if (self !== null) parts.push(square(self) + (self === 'Other' ? 'Other' : 'Tier ' + self) + ' Sub Agent' + (share ? ' - ' + share : ''));
   else if (share) parts.push(share);
   if (mix.length) parts.push(mix.map(x => square(x.tier) + (x.tier === 'Other' ? 'Other' : 'Tier ' + x.tier) + '[' + x.share + '%]').join(' '));

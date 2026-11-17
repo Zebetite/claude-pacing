@@ -143,9 +143,10 @@ three tiers). The
 circles are gold, silver, bronze and brown for tiers 1 to 4 (🟡 ⚪ 🟠 🟤),
 then 🟣 🔴 🔵 🟢 for a longer ladder; ⚫ is a model the ladder does not
 hold. A session that another session started (a side session in the
-desktop app) leads with the tier of the model it runs on:
+desktop app) leads with the tier of the model it runs on, and shows the
+weekly meter only, not Fable's, which the session that started it shows:
 
-    ⚪T2 sub · ahead 77% · ⚪T2 90% 🟤T4 10% · wk 36% Fable 40%
+    ⚪T2 sub · ahead 77% · ⚪T2 90% 🟤T4 10% · wk 36%
 
 Claude Code hands a plugin only the all-models and 5-hour meters,
 so such a reading carries the per-model figure (Fable's by default) over
@@ -158,9 +159,11 @@ shown; the level never rests on it. Once the figure is an hour old, or
 the all-models meter has moved 2 points since it was read, Claude is
 told beside your next prompt to take a full reading, once, and again an
 hour later if none came; the next session's start line says so too.
-`/pacing log` marks such a figure with its age. When Fable's meter
-sets the level, holds the model or is out, the line leads with its
-share of the line instead (`Fable over 110%`, `Fable held 158%`). An automatic reading never changes the next
+`/pacing log` marks such a figure with its age. The line leads with the
+weekly meter's level and share; Fable shows only as its week's usage
+among the meters (`Fable 99%`), even when it sets the level or holds the
+model (the share alone then, without the level's word). An automatic
+reading never changes the next
 session's model: that stays with the readings the session takes.
 `/pacing log` marks them `(auto)`. On an older Claude Code the plugin
 works as before, without them.
