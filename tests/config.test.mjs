@@ -86,6 +86,19 @@ describe('the ladder', () => {
     s.writeConfig({ ...cfgOf(s), compactAsk: 'sometimes' });
     assert.match(s.config([]).out, /the offers to compact are not on or off: the default is used/);
   }));
+  test('the notices about running subagents: on by default, off and on again, kept by reset', withHome(s => {
+    s.config(['init']);
+    assert.match(s.config([]).out, /^notices about running subagents: on$/m);
+    s.config(['notify', 'off']);
+    assert.equal(cfgOf(s).agentNotices, false);
+    s.config(['reset']);
+    assert.equal(cfgOf(s).agentNotices, false);
+    s.config(['apply', 'notify', 'on']);
+    assert.equal(cfgOf(s).agentNotices, true);
+    const r = s.config(['notify', 'maybe']);
+    assert.equal(r.code, 1);
+    assert.match(r.out, /notify on \| notify off/);
+  }));
   test('reset keeps the install date, the meter and the switch', withHome(s => {
     s.writeConfig({ tiers: [{ model: 'haiku', effort: 'low' }, { model: 'haiku', effort: 'max' }], lastDayWeight: 3, setNextModel: false, premium: null, installed: '2025-01-01' });
     s.config(['reset']);
@@ -291,4 +304,23 @@ test('verifier: a model of its own for plain runs, or the ladder', () => {
     assert.equal(s.config(['verifier', 'gpt', 'low']).code, 1);
     assert.match(s.config(['reset']).out, /^verifier agent: Haiku 5\.5 medium/m);
   } finally { s.cleanup(); }
+});
+
+describe('the offer to switch', () => {
+  test('on by default, off and on again, kept by reset, a bad value refused', () => {
+    const s = sandbox();
+    try {
+      s.config(['init']);
+      assert.match(s.config([]).out, /^offers to switch this session to the recommended model or effort: on$/m);
+      s.config(['switch', 'off']);
+      assert.equal(JSON.parse(s.read('config.json')).switchAsk, false);
+      s.config(['reset']);
+      assert.equal(JSON.parse(s.read('config.json')).switchAsk, false);
+      s.config(['apply', 'switch', 'on']);
+      assert.equal(JSON.parse(s.read('config.json')).switchAsk, true);
+      const r = s.config(['switch', 'maybe']);
+      assert.equal(r.code, 1);
+      assert.match(r.out, /switch on \| switch off/);
+    } finally { s.cleanup(); }
+  });
 });

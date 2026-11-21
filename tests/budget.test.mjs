@@ -162,16 +162,21 @@ describe('the context line', () => {
   const now = '2026-11-13T12:00:00Z';
   const ctx = (...f) => dry(now, 10, ...f).out.split(/\r?\n/).find(l => l.startsWith('context ')) || '';
   test('by tokens: nothing under 300 000', () => assert.equal(ctx('--context-tokens', '299999'), 'context 300k tokens'));
-  test('by tokens: from 300 000 compact at a natural break, unrelated tasks go to a new session', () => {
+  // all work stays in this session: compact and go on, never leave for a new one
+  test('by tokens: from 300 000 compact at a natural break and go on here, whatever the next task is', () => {
     const l = ctx('--context-tokens', '300000');
-    assert.match(l, /-> for work that continues, suggest compacting the conversation at a natural break \(\/compact\), the cheaper step/);
-    assert.match(l, /a task unrelated to this session's work starts in a new session$/);
+    assert.match(l, /-> suggest compacting the conversation at the next natural break \(\/compact\), then go on here, whatever the next task is/);
+    assert.match(l, /an unrelated task is a reason to compact first, not to leave$/);
+    assert.doesNotMatch(l, /new session/);
   });
-  test('by tokens: from 500 000 a handover, not compacting', () => assert.doesNotMatch(ctx('--context-tokens', '500000'), /\/compact/));
-  test('by tokens: from 500 000 the next task goes whole to one agent; a new session only for steering, many questions or unrelated work', () => {
+  test('by tokens: from 500 000 compact first, the next task whole to one agent, its outcome given here', () => {
     const l = ctx('--context-tokens', '500000');
-    assert.match(l, /-> this session is the expensive part now: a next task with a clear outcome goes WHOLE to one fresh agent, without asking/);
-    assert.match(l, /read only its report\. Offer a new session, with a handover \(\/pacing handover\), only for a task that needs the user's steering, many rounds of questions, or has nothing to do with this session's work$/);
+    assert.match(l, /-> this session is the expensive part now: compact first if not yet done \(\/compact\)\. A next task with a clear outcome goes WHOLE to one fresh agent, without asking/);
+    assert.match(l, /read only its report and give the user the outcome here\./);
+  });
+  test('by tokens: from 500 000 a new session is never offered, only named as the last resort', () => {
+    const l = ctx('--context-tokens', '500000');
+    assert.match(l, /Never offer a new session: name one only when the session cannot be compacted or the user asks, with a handover \(\/pacing handover\)$/);
   });
   test('the whole-task agent: never below tier 2, judgment on the fallback', () => {
     const whole = all => (dry(now, all, '--context-tokens', '520000').out.match(/without asking \((.*?)\)/) || [])[1];
@@ -189,7 +194,7 @@ describe('the context line', () => {
   });
   test('by percentage alone: 30 % and 50 %', () => {
     assert.equal(ctx('--context', '29'), 'context 29 % of the window');
-    assert.match(ctx('--context', '30'), /unrelated to this session's work/);
+    assert.match(ctx('--context', '30'), /then go on here/);
     assert.match(ctx('--context', '50'), /expensive part now/);
   });
   test('the context bar names the advice', () => {

@@ -270,6 +270,15 @@ describe('a session another session started', () => {
       assert.equal(spawned(s, { CLAUDE_CODE_HOST_SESSION_ID: 'local_top' }), false);
     } finally { s.cleanup(); }
   });
+  test('a session the user detached to the top level is a session of its own; one with spawnedFrom alone is still a side session', () => {
+    const s = sandbox();
+    try {
+      record(s, 'local_detached', { spawnedFrom: { sessionId: 'local_top', sideSession: true }, lineageDetached: true, lineageDetachedBy: 'user' });
+      record(s, 'local_side', { spawnedFrom: { sessionId: 'local_top', sideSession: true } });
+      assert.equal(spawned(s, { CLAUDE_CODE_HOST_SESSION_ID: 'local_detached' }), false);
+      assert.equal(spawned(s, { CLAUDE_CODE_HOST_SESSION_ID: 'local_side' }), true);
+    } finally { s.cleanup(); }
+  });
   test('not known without the id, the record or a readable one; never from CLAUDE_CODE_CHILD_SESSION', () => {
     const s = sandbox();
     try {
@@ -407,6 +416,28 @@ describe('the tier map for the status line follows the ladder in force', () => {
       s.config(['fallback', 'none']);
       const j = auto(s, 10, NOW, ['--dry', '--premium', '100']);
       assert.deepEqual([j.tierOf['claude-opus-5-5'], j.tierOf['claude-sonnet-5-5'], j.agentTierOf['claude-opus-5-5'], j.agentTierOf['claude-sonnet-5-5']], [1, 2, 1, 2]);
+    } finally { s.cleanup(); }
+  });
+});
+
+describe('what the session should run on, for the switch button', () => {
+  test('the recommendation, and at "over" one step less effort on tier 1', () => {
+    const s = sandbox();
+    try {
+      // 10 % on day 1 of 7: ahead, tier 1 for the session
+      const ahead = auto(s, 10);
+      assert.deepEqual(ahead.recommend, { model: 'claude-fable-5-2', label: 'Fable 5.2', effort: 'high' });
+      assert.equal(ahead.effortStep, null);
+      assert.equal(ahead.premiumModelId, 'claude-fable-5-2');
+      // just over the line: over, one step less effort on Fable
+      const over = auto(s, 22, at(1));
+      assert.equal(over.level, 'over');
+      assert.deepEqual(over.effortStep, { model: 'claude-fable-5-2', label: 'Fable 5.2', effort: 'medium' });
+      // far over: throttle, tier 2 for the session, no effort step
+      const throttle = auto(s, 40, at(2));
+      assert.equal(throttle.level, 'throttle');
+      assert.deepEqual(throttle.recommend, { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' });
+      assert.equal(throttle.effortStep, null);
     } finally { s.cleanup(); }
   });
 });

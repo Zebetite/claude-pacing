@@ -25,8 +25,14 @@ Standing rules (from the user, not negotiable):
 - Never delete data permanently; a trash or an archive at most. Never
   delete code that only looks unused; list it.
 - Report faithfully: failing output verbatim, skipped steps named.
-Deliverable: a short report of what was changed or found, with file paths and
-line numbers, and the exact output of any test or command that matters.
+Deliverable: a report of what was changed or found, with file paths and line
+numbers, and the exact output of any test or command that matters. Under
+clear headings it holds the important content itself, verbatim: the texts
+the user will see, example lines, drafts and wording, each choice made and
+why, and what could not be done or verified. For a task in several parts,
+send the session a short update with SendMessage to "main" when each part
+is done (what is done, its important content, what is next); none for
+routine steps.
 ```
 
 ## 2. Your own rules: BRIEF.local.md

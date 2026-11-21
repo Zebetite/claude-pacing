@@ -48,7 +48,7 @@ const span = ms => {
 // the line after a pause, or null when the session is small or the cache warm
 export const pauseNote = (tokens, idleMs) => (tokens >= PAUSE_SIZE && idleMs >= CACHE_TTL
   ? 'Pacing: this session is ' + Math.round(tokens / 1000) + 'k tokens and sat idle ' + span(idleMs)
-    + ', so its cache has lapsed and this turn stores it all again. After a break, /compact or a handover first is cheaper.'
+    + ', so its cache has lapsed and this turn stores it all again. After a break, /compact first is cheaper.'
   : null);
 
 // ---- an offer to compact ----
@@ -187,7 +187,7 @@ export const fullReadingAsk = j => (j && j.needFull
 // an ellipsis: about 33 characters while a turn runs. So what matters comes
 // first and a cut takes only the tail:
 //   a side session's own tier   🟡T1 sub
-//   the level and budget share  over budget 107%   stop 120% wrap up
+//   the budget share            Budget 107%
 //   the session's tier split    🟡T1 45% ⚪T2 55%
 //   the meters                  week 48% Fable 71% (2h old est 80%)
 // `/pacing-status` shows the whole line in the long form (fullText).
@@ -198,6 +198,198 @@ export const HEAD_MAX = 33;
 // "ahead" read as spending ahead of the budget, the opposite of its meaning.
 const PHRASE = { 'ahead': 'under budget', 'on pace': 'on budget', 'over': 'over budget', 'throttle': 'far over budget', 'stop': 'stop' };
 export const levelPhrase = level => PHRASE[level] || level || '';
+
+// ---- subagents at work ----
+// The session's own subagents, from the engine's events: agent.spawn starts
+// one (type, model; its effort from the Agent call), its loop's turn.complete
+// ends it. $.agent.list() settles the count: an agent it lists as neither
+// pending nor running is gone. The main thread's turn ending ends every
+// foreground agent (the turn waited for them); a new or resumed session
+// starts with none. While any run:
+//   the status line leads with them, the whole line within LINE_MAX, in
+//   steps: each agent with its time, then names, then the count and the
+//   longest run, then the count alone; never without the count, and the
+//   level with its share always shows;
+//   a toast when one starts and when one ends, and every 5 minutes while
+//   any runs (`/pacing notify off` quiets the toasts);
+//   a background agent still running after the turn ended gets a row in the
+//   band above the prompt, under the offer to compact, never over it.
+// Toasts and the row are one line each, within MSG_MAX.
+export const LINE_MAX = HEAD_MAX;
+export const MSG_MAX = 80;
+export const REFRESH_EVERY = 30 * 1000;
+export const PROGRESS_EVERY = 5 * 60 * 1000;
+// a background agent the engine cannot vouch for is let go after this long
+const STALE_AGENT = 2 * 60 * 60 * 1000;
+export const chars = s => [...String(s)].length;
+// "reader", "implementer", "general" (general-purpose); a plugin's prefix off; 12 at most
+export const roleOf = type => {
+  let t = String(type || 'agent').replace(/^[\w.-]+:/, '').toLowerCase();
+  if (t === 'general-purpose') t = 'general';
+  return chars(t) > 12 ? [...t].slice(0, 11).join('') + '…' : t;
+};
+// "claude-haiku-5-5" -> "Haiku 5.5"
+export const modelLabel = id => {
+  const m = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(String(id || ''));
+  return m ? m[1][0].toUpperCase() + m[1].slice(1) + ' ' + m[2] + '.' + m[3] : String(id || '');
+};
+// "40s", "3m", "2h"
+export const dur = ms => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + 's' : s < 6000 ? Math.round(s / 60) + 'm' : Math.round(s / 3600) + 'h'; };
+const runOn = a => (a.model ? modelLabel(a.model) + (a.effort ? ' ' + a.effort : '') : '');
+const firstFit = (steps, room) => steps.find(s => chars(s) <= room) || steps[steps.length - 1];
+// ---- an estimate of a running agent's progress ----
+// By time only: the engine gives an agent's tokens when its run ends, not
+// while it runs. How long it has run against the median of that agent
+// type's recent finished runs (kept in $.store, the last RUNS_KEPT per
+// type): shown from RUNS_NEEDED runs on, as "~60%", and never above EST_CAP
+// while it runs, so it never claims to be done. A rough guess from how long
+// that kind of agent usually takes, not a measure of the work done.
+export const RUNS_KEPT = 20;
+export const RUNS_NEEDED = 3;
+export const EST_CAP = 95;
+export const median = xs => {
+  const s = [...xs].sort((a, b) => a - b), n = s.length;
+  return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : null;
+};
+export const estimateOf = (runs, elapsed) => (!Array.isArray(runs) || runs.length < RUNS_NEEDED ? null
+  : Math.min(EST_CAP, Math.max(0, Math.round((100 * elapsed) / Math.max(1000, median(runs))))));
+export const keepRuns = (runs, ms) => [...(Array.isArray(runs) ? runs : []), ms].slice(-RUNS_KEPT);
+// what a running agent is doing, from its latest tool call: a word or two
+const STEPS = { Read: 'reading', Grep: 'searching', Glob: 'searching', Bash: 'running', Edit: 'editing', Write: 'editing',
+  NotebookEdit: 'editing', WebFetch: 'on the web', WebSearch: 'on the web', Agent: 'delegating', TodoWrite: 'planning' };
+export const stepOf = tool => STEPS[tool] || (String(tool || '').startsWith('mcp__') ? 'a tool' : String(tool || '').toLowerCase().slice(0, 12));
+const est = (a, now) => estimateOf(a.runs, now - a.startedAt);
+const estText = (a, now) => (est(a, now) == null ? '' : '~' + est(a, now) + '%');
+// "reader 3m ~60% searching": as much as `parts` asks for
+const detail = (a, now, parts) => [roleOf(a.type), parts.time ? dur(now - a.startedAt) : '', parts.est ? estText(a, now) : '', parts.step && a.step ? a.step : '']
+  .filter(Boolean).join(' ');
+// the status line's agent part, the first step that fits `room`. An
+// estimate takes the time's place before it goes; the count never goes.
+export const agentPart = (agents, now, room) => {
+  const n = agents.length;
+  if (!n) return '';
+  const longest = dur(now - Math.min(...agents.map(a => a.startedAt)));
+  if (n === 1) {
+    const a = agents[0], on = runOn(a), e = estText(a, now);
+    return firstFit([
+      '⏳ ' + detail(a, now, { time: 1, est: 1 }) + (on ? ' (' + on + ')' : ''),
+      '⏳ ' + detail(a, now, { time: 1, est: 1 }),
+      ...(e ? ['⏳ ' + roleOf(a.type) + ' ' + e] : []),
+      '⏳ ' + detail(a, now, { time: 1 }),
+      '⏳ ' + roleOf(a.type), '⏳1'], room);
+  }
+  const anyEst = agents.some(a => estText(a, now));
+  return firstFit([
+    '⏳ ' + n + ' agents · ' + agents.map(a => detail(a, now, { time: 1, est: 1 })).join(' · '),
+    ...(anyEst ? ['⏳ ' + n + ' agents · ' + agents.map(a => estText(a, now) ? roleOf(a.type) + ' ' + estText(a, now) : detail(a, now, { time: 1 })).join(' · ')] : []),
+    '⏳ ' + n + ' agents · ' + agents.map(a => detail(a, now, { time: 1 })).join(' · '),
+    '⏳ ' + n + ' agents · ' + agents.map(a => roleOf(a.type)).join(' · '),
+    '⏳ ' + n + ' agents ' + longest,
+    '⏳ ' + n + ' agents',
+    '⏳' + n,
+  ], room);
+};
+const running = n => (n === 0 ? 'no agents running now' : n === 1 ? '1 agent running' : n + ' agents running');
+export const startedText = (a, n) => firstFit([
+  'Pacing: ' + roleOf(a.type) + ' started' + (runOn(a) ? ' on ' + runOn(a) : '') + '; ' + running(n) + '.',
+  'Pacing: ' + roleOf(a.type) + ' started; ' + running(n) + '.',
+], MSG_MAX);
+export const doneText = (a, ms, tokens, n) => firstFit([
+  'Pacing: ' + roleOf(a.type) + ' done in ' + dur(ms) + (tokens ? ', ' + Math.round(tokens / 1000) + 'k tokens' : '') + '; ' + (n ? running(n).replace('running', 'still running') : running(0)) + '.',
+  'Pacing: ' + roleOf(a.type) + ' done in ' + dur(ms) + '; ' + running(n) + '.',
+], MSG_MAX);
+export const progressText = (agents, now) => {
+  const n = agents.length, longest = dur(now - Math.min(...agents.map(a => a.startedAt)));
+  const who = n === 1 ? '1 agent' : n + ' agents';
+  return firstFit([
+    'Pacing: ' + who + ' still working: ' + agents.map(a => detail(a, now, { time: 1, est: 1, step: 1 })).join(', ') + '.',
+    'Pacing: ' + who + ' still working: ' + agents.map(a => detail(a, now, { time: 1, est: 1 })).join(', ') + '.',
+    'Pacing: ' + who + ' still working: ' + agents.map(a => detail(a, now, { time: 1 })).join(', ') + '.',
+    'Pacing: ' + who + ' still working, the longest for ' + longest + '.',
+  ], MSG_MAX);
+};
+export const backgroundText = (agents, now, room = MSG_MAX) => {
+  const n = agents.length, who = n === 1 ? '1 agent' : n + ' agents';
+  const longest = dur(now - Math.min(...agents.map(a => a.startedAt)));
+  return firstFit([
+    '⏳ ' + who + ' still working in the background: ' + agents.map(a => detail(a, now, { time: 1, est: 1, step: 1 })).join(', '),
+    '⏳ ' + who + ' still working in the background: ' + agents.map(a => detail(a, now, { time: 1, est: 1 })).join(', '),
+    '⏳ ' + who + ' still working in the background: ' + agents.map(a => detail(a, now, { time: 1 })).join(', '),
+    '⏳ ' + who + ' still working in the background, the longest for ' + longest,
+    '⏳ ' + who + ' still working, ' + longest,
+    '⏳ ' + who,
+  ], Math.min(room, MSG_MAX));
+};
+// the session's own agents still running, by the engine's list; null where
+// the engine has no list
+async function liveAgents($) {
+  try {
+    const list = await $.agent.list();
+    return new Set(list.filter(a => a.status === 'pending' || a.status === 'running').map(a => a.id));
+  } catch { return null; }
+}
+// drop the agents the engine no longer runs; without its list, those of the
+// background that have run implausibly long
+async function settleAgents($, agents, now) {
+  const live = await liveAgents($);
+  for (const [id, a] of agents) if (live ? !live.has(id) : now - a.startedAt > STALE_AGENT) agents.delete(id);
+}
+// whether the toasts about agents are on (config.json's agentNotices; on unless false)
+async function noticesOn($) {
+  try {
+    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
+    if (!home) return true;
+    return JSON.parse(await $.fs.read(home + '/.claude/pacing/config.json')).agentNotices !== false;
+  } catch { return true; }
+}
+// whether the offer to switch the session's model or effort is on (switchAsk)
+async function switchOn($) {
+  try {
+    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
+    if (!home) return true;
+    return JSON.parse(await $.fs.read(home + '/.claude/pacing/config.json')).switchAsk !== false;
+  } catch { return true; }
+}
+// the effort the session runs at, where the engine says (CLAUDE_EFFORT)
+async function effortNow($) {
+  try { const v = await $.env.get('CLAUDE_EFFORT'); return typeof v === 'string' && v ? v : null; } catch { return null; }
+}
+
+// ---- an offer to switch the session's model or effort ----
+// The reading recommends what the session should run on. Where the session
+// runs on something else, a row above the prompt offers it with Switch and
+// Not now, by urgency:
+//   out     the per-model meter's model is out until the reset: warning colour
+//   held    that meter is over its line: warning colour
+//   model   another model or effort than the reading recommends: calm
+//   effort  at "over", one step less effort on tier 1: calm
+// Switch runs /model and /effort as if typed (a live test: $.command.run
+// with /model answered "Set model to ... for this session only", and
+// $.session.model() agreed); where a run fails, the box is filled with the
+// command for the user to send. Once per suggestion; Not now holds until the
+// recommendation changes. Never switches without the press.
+const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
+const sameModel = (cur, id) => typeof cur === 'string' && typeof id === 'string' && cur.startsWith(id);
+export const switchOffer = (j, curModel, curEffort) => {
+  if (!j || typeof curModel !== 'string' || !curModel) return null;
+  const rec = j.recommend, prem = j.premiumModelId, name = j.premiumLabel || 'The per-model model';
+  const onPrem = sameModel(curModel, prem);
+  const make = (kind, t, text) => ({ kind, model: t.model, label: t.label, effort: t.effort, text, urgent: kind === 'out' || kind === 'held',
+    key: kind + ':' + t.model + ':' + t.effort });
+  if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumOut)
+    return make('out', rec, name + ' is out until the reset. Switch this session to ' + rec.label + ' ' + rec.effort + '.');
+  if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumHeld)
+    return make('held', rec, name + '\'s own meter is over its line. Switch to ' + rec.label + ' ' + rec.effort + '; ' + name.split(' ')[0] + ' stays for hard tasks.');
+  if (rec && (!sameModel(curModel, rec.model) || (curEffort && curEffort !== rec.effort && !j.effortStep)))
+    return make('model', rec, 'This week\'s budget suggests ' + rec.label + ' ' + rec.effort + ' for this session.');
+  const step = j.effortStep;
+  if (step && sameModel(curModel, step.model) && (!curEffort || EFFORT_ORDER.indexOf(curEffort) > EFFORT_ORDER.indexOf(step.effort)))
+    return make('effort', step, 'Over budget: one step less effort saves the most. Switch to ' + step.label + ' ' + step.effort + '.');
+  return null;
+};
+export const switchedText = (target, nowModel, nowEffort) => (sameModel(nowModel, target.model)
+  ? 'Pacing: this session now runs on ' + modelLabel(nowModel) + (nowEffort ? ' ' + nowEffort : target.effort ? ' ' + target.effort : '') + '.'
+  : 'Pacing: the switch did not take; the session still runs on ' + modelLabel(nowModel) + '. The model menu does it: ' + target.label + ', effort ' + target.effort + '.');
 // The head is the weekly meter's level and share. The per-model meter shows
 // as its week's usage among the meters and nowhere else: a share of its line
 // ("Fable held 158%") read as usage over 100 %. When that meter set the
@@ -208,22 +400,37 @@ export const levelPhrase = level => PHRASE[level] || level || '';
 // model is the one that started it, and in a side session's narrow line it
 // read as the side session's own use.
 const sideOf = (j, self) => self !== null || j.spawned === true;
-export const statusText = (j, mix, self = null, now = Date.now()) => {
+// While subagents run (`agents`, see "subagents at work"), the line leads
+// with them and the whole line stays within LINE_MAX: a side session's tier
+// if there is room, the agents (shrunk in steps, never without their count),
+// the level with its share (always), then the tier split and the meters only
+// as far as they fit whole.
+export const statusText = (j, mix, self = null, now = Date.now(), agents = []) => {
   const side = sideOf(j, self);
   const name = j.premiumLabel && !side ? j.premiumLabel.split(' ')[0] : null;
-  const stop = j.level === 'stop';
-  const word = stop ? 'stop' : j.levelBy === 'premium' ? '' : levelPhrase(j.level);
-  const pct = j.ofBudget;
-  const head = [[word, pct != null ? pct + '%' : ''].filter(Boolean).join(' ') + (stop ? ' wrap up' : '')];
-  if (self !== null) head.unshift(square(self) + (self === 'Other' ? 'Other' : 'T' + self) + ' sub');
-  const parts = [head.join(' · ')];
-  if (mix.length) parts.push(mix.map(x => square(x.tier) + (x.tier === 'Other' ? 'Other' : 'T' + x.tier) + ' ' + x.share + '%').join(' '));
+  // the weekly meter's share of today's budget line, without a word on it:
+  // over 100 % is over. The toast on a change of level says the rest.
+  const level = 'Budget ' + (j.ofBudget != null ? j.ofBudget + '%' : '-');
+  const sub = self !== null ? square(self) + (self === 'Other' ? 'Other' : 'T' + self) + ' sub' : null;
+  const split = mix.length ? mix.map(x => square(x.tier) + (x.tier === 'Other' ? 'Other' : 'T' + x.tier) + ' ' + x.share + '%').join(' ') : null;
   const meters = ['week ' + Math.round(j.all) + '%'];
   if (j.premium != null && name) {
     const age = j.premiumAt ? now - Date.parse(j.premiumAt) : 0;
     const est = j.premiumEstimate != null && Math.round(j.premiumEstimate) > Math.round(j.premium) ? ' est ' + Math.round(j.premiumEstimate) + '%' : '';
     meters.push(name + ' ' + Math.round(j.premium) + '%' + (age > CARRIED_CURRENT ? ' (' + ageText(age) + ' old' + est + ')' : ''));
   }
+  if (agents.length) {
+    // the agents' fixed share: what the level leaves. A side session's tier
+    // goes first only where it costs the agents no step of their detail.
+    const room = LINE_MAX - chars(level) - 3;
+    const lead = agentPart(agents, now, room);
+    const withSub = sub && agentPart(agents, now, room - chars(sub) - 3) === lead;
+    let line = [withSub ? sub : null, lead, level].filter(Boolean).join(' · ');
+    for (const more of [split, meters.join(' ')]) if (more && chars(line + ' · ' + more) <= LINE_MAX) line += ' · ' + more;
+    return line;
+  }
+  const parts = [[sub, level].filter(Boolean).join(' · ')];
+  if (split) parts.push(split);
   parts.push(meters.join(' '));
   return parts.join(' · ');
 };
@@ -244,22 +451,26 @@ export const fullText = (j, mix, self = null, now = Date.now()) => {
   const parts = [];
   // the weekly meter's share of its line; the per-model meter shows as its
   // usage among the meters only (see statusText)
-  const share = j.ofBudget != null ? j.ofBudget + '% of budget' + (j.levelBy !== 'premium' && j.level && j.level !== 'stop' ? ' (' + levelPhrase(j.level) + ')' : '') : null;
+  // (the "Now:" line /pacing-status adds says what to do about it)
+  const share = j.ofBudget != null ? 'Budget ' + j.ofBudget + '%' : null;
   if (self !== null) parts.push(square(self) + (self === 'Other' ? 'Other' : 'Tier ' + self) + ' Sub Agent' + (share ? ' - ' + share : ''));
   else if (share) parts.push(share);
   if (mix.length) parts.push(mix.map(x => square(x.tier) + (x.tier === 'Other' ? 'Other' : 'Tier ' + x.tier) + '[' + x.share + '%]').join(' '));
   parts.push('(' + meters.join(', ') + ')');
-  return parts.join(', ') + (j.level === 'stop' ? ', wrap up' : '');
+  return parts.join(', ');
 };
 
 // the status line from a reading. A side session leads with its own tier, by
 // the model its main thread runs on; a model off the ladder is Other.
-export const lineOf = (j, model, tokens, agentTokens, now, full = false) => {
+export const lineOf = (j, model, tokens, agentTokens, now, full = false, agents = []) => {
   const prices = j.prices || {}, tierOf = j.tierOf || {};
   const child = j.spawned === true && typeof model === 'string' && model !== '';
   const id = child ? idOf(model, prices) : null;
   const self = child ? (id && tierOf[id]) || 'Other' : null;
-  return (full ? fullText : statusText)(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now);
+  if (full) return fullText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now)
+    + (agents.length ? '\nAgents running: ' + agents.map(a => detail(a, now, { time: 1, est: 1, step: 1 }) + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.description ? ', ' + a.description : '')).join('; ')
+      + (agents.some(a => estText(a, now)) ? '\n~ is a rough estimate from how long that kind of agent usually takes, not a measure of the work done.' : '') : '');
+  return statusText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now, agents);
 };
 
 /** @type {import('claude-code').Register} */
@@ -295,19 +506,123 @@ export const register = on => {
   let nowFor = null;
   const clearTimers = () => { for (const t of timers) { try { t.cancel(); } catch { /* gone */ } } timers = []; };
   const forget = () => { offer = null; offered = {}; };
+  // the switch the band offers now, and every suggestion offered already
+  let sw = null;
+  const switchSeen = new Set();
+  // the session's own subagents now running, by id; the effort each Agent
+  // call asked for, by its tool call; the refresh timer while any run; when
+  // the last progress toast went out
+  const agents = new Map();
+  const efforts = new Map();
+  let agentTick = null;
+  let progressAt = 0;
+  const runningAgents = () => [...agents.values()].sort((a, b) => a.startedAt - b.startedAt);
+  const stopTick = () => { if (agentTick) { try { agentTick.cancel(); } catch { /* gone */ } agentTick = null; } };
+  // the status line as it stands, with the agents when any run
+  const lineNow = now => {
+    const list = runningAgents();
+    if (reading) return lineOf(reading, sessionModel, tokens, agentTokens, now, false, list);
+    return list.length ? agentPart(list, now, LINE_MAX) : undefined;
+  };
 
-  // the band above the prompt: the suggest, urge and now offers. Hidden
-  // while a turn runs, under a survey, and over a subagent's transcript.
+  // an Agent call's effort, which agent.spawn does not carry
+  on('tool.call', { tool: 'Agent' }, ($, e, next) => {
+    try { if (e.effort && e.tool_use_id) efforts.set(e.tool_use_id, e.effort); } catch { /* no effort known */ }
+    return next(e);
+  });
+
+  // what a running agent is doing: its latest tool call
+  on('tool.call', ($, e, next) => {
+    try { if (e.agentId && agents.has(e.agentId)) agents.get(e.agentId).step = stepOf(e.tool); } catch { /* no step known */ }
+    return next(e);
+  });
+
+  // a subagent of the main thread starts (or a kept one is sent its next task)
+  on('agent.spawn', async ($, e, next) => {
+    const r = await next(e);
+    try {
+      if (r && r.agentId && !e.parentAgentId && !e.isTeammate) {
+        const now = await $.clock.now();
+        const type = e.subagentType || 'general-purpose';
+        // the type's recent finished runs, for the estimate; none on an engine without a store
+        let runs = [];
+        try { const all = await $.store.get('agentRuns'); if (all && typeof all === 'object' && Array.isArray(all[type])) runs = all[type]; } catch { /* no history */ }
+        const a = { id: r.agentId, type, description: e.description, model: r.model || e.model || e.parentModel,
+          effort: efforts.get(e.tool_use_id), background: !!e.background, startedAt: now, runs, step: null };
+        efforts.delete(e.tool_use_id);
+        if (!agents.size) progressAt = now;
+        agents.set(a.id, a);
+        if (!agentTick) {
+          agentTick = $.clock.every(REFRESH_EVERY, () => {
+            (async () => {
+              const t = await $.clock.now();
+              await settleAgents($, agents, t);
+              if (!agents.size) stopTick();
+              $.ui.status(lineNow(t));
+              redraw($);
+              if (agents.size && t - progressAt >= PROGRESS_EVERY) {
+                progressAt = t;
+                if (await noticesOn($)) $.ui.toast(progressText(runningAgents(), t));
+              }
+            })().catch(() => { /* a refresh never disturbs the session */ });
+          });
+        }
+        $.ui.status(lineNow(now));
+        if (await noticesOn($)) $.ui.toast(startedText(a, agents.size));
+      }
+    } catch { /* an engine without timers or toasts: the count alone */ }
+    return r;
+  });
+
+  // the band above the prompt: the suggest, urge and now offers, and under
+  // them a row for background agents still at work. Hidden while a turn
+  // runs, under a survey, and over a subagent's transcript.
+  // One action row at a time, by urgency: a switch away from a model that is
+  // out or held, then the offer to compact, then a calm switch (another
+  // model, or one step less effort). The background agents' row goes under it.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const p = e.props || {};
-    if (!offer || p.hasSurvey || p.isWorking || (p.view && p.view.agentId) || (e.plugin && e.plugin !== 'pacing')) return next(e);
+    const background = runningAgents().filter(a => a.background);
+    if ((!offer && !sw && !background.length) || p.hasSurvey || p.isWorking || (p.view && p.view.agentId) || (e.plugin && e.plugin !== 'pacing')) return next(e);
     const { Box, Text, Button } = $.ui.resolve(e);
+    let now = Date.now();
+    if (background.length) { try { now = await $.clock.now(); } catch { /* the system's clock */ } }
+    const agentRow = background.length
+      ? Text({ dimColor: true, children: backgroundText(background, now, typeof p.bodyColumns === 'number' ? p.bodyColumns : MSG_MAX) })
+      : null;
+    const stack = row => (agentRow ? Box({ flexDirection: 'column', children: [row, agentRow] }) : row);
+    if (sw && (sw.urgent || !offer)) {
+      const target = sw;
+      const switchRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
+        Text(target.urgent ? { color: 'warning', children: target.text } : { dimColor: true, children: target.text }),
+        Button({ key: 'pacing-switch', label: 'Switch', variant: target.urgent ? 'primary' : 'secondary', onPress: async () => {
+          sw = null;
+          redraw($);
+          let ran = true;
+          try {
+            const was = await $.session.model();
+            if (!sameModel(was, target.model)) await $.command.run({ command: 'model', args: target.model });
+            if (target.effort && (await effortNow($)) !== target.effort) await $.command.run({ command: 'effort', args: target.effort });
+          } catch { ran = false; }
+          if (!ran) {
+            // the command as text in the box, for the user to send
+            try { await $.prompt.fill({ text: '/model ' + target.model, mode: 'replace' }); } catch { /* the menu alone */ }
+            $.ui.toast('Pacing: press Enter to switch to ' + target.label + (target.effort ? '; then set effort ' + target.effort + ' in the model menu' : '') + '.');
+            return;
+          }
+          try { $.ui.toast(switchedText(target, await $.session.model(), await effortNow($))); } catch { /* no read-back */ }
+        } }),
+        Button({ key: 'pacing-switch-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { sw = null; redraw($); } }),
+      ] });
+      return stack(switchRow);
+    }
+    if (!offer) return Box({ flexDirection: 'column', children: [agentRow] });
     const shown = offer;
     const urge = shown.level !== 'suggest';
     const words = shown.level === 'now' ? nowText(shown.tokens, shown.lapsed) : offerText(shown.level, shown.tokens);
     // drawn: the notice after this pause need not say it again
     if (shown.level === 'now') nowFor = shown.pause;
-    return Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
+    const offerRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
       Text(urge ? { color: 'warning', children: words } : { dimColor: true, children: words }),
       Button({ key: 'pacing-compact', label: 'Compact now', variant: urge ? 'primary' : 'secondary', onPress: async () => {
         offer = null;
@@ -333,21 +648,32 @@ export const register = on => {
         redraw($);
       } }),
     ] });
+    return agentRow ? Box({ flexDirection: 'column', children: [offerRow, agentRow] }) : offerRow;
   });
 
-  // a compaction the person or the engine ran: the offers start over
+  // a compaction the person or the engine ran: the offers start over, and
+  // the agents are counted again from the engine's list (none without it)
   on('session.compact', async ($, e, next) => {
     const r = await next(e);
     if (!e.agentId && r && r.messages) {
       forget();
       contextTokens = r.tokensAfter || null;
+      try {
+        const live = await liveAgents($);
+        for (const id of [...agents.keys()]) if (!live || !live.has(id)) agents.delete(id);
+        if (!agents.size) stopTick();
+        $.ui.status(lineNow(await $.clock.now()));
+      } catch { /* the line is redrawn at the next measure */ }
       redraw($);
     }
     return r;
   });
 
-  // the whole line, which the footer cuts: /pacing-status, at any time
+  // the whole line, which the footer cuts: /pacing-status, at any time.
+  // A new or resumed session runs no agents of this module's knowing.
   on('session.start', async ($, e, next) => {
+    agents.clear();
+    stopTick();
     try {
       await $.command.register({ name: 'pacing-status', description: 'Pacing: the whole status line, and what to do now.', immediate: true });
     } catch { /* an engine without commands: the line alone */ }
@@ -355,7 +681,7 @@ export const register = on => {
   });
   on('command.run', { command: 'pacing-status' }, async () => {
     if (!reading) return { text: 'Pacing: no automatic reading yet in this session. /pacing usage reads now.' };
-    const text = lineOf(reading, sessionModel, tokens, agentTokens, lastTurnAt ?? Date.now(), true);
+    const text = lineOf(reading, sessionModel, tokens, agentTokens, lastTurnAt ?? Date.now(), true, runningAgents());
     return { text: 'Pacing: ' + text + (reading.do ? '\nNow: ' + reading.do : '') };
   });
 
@@ -419,12 +745,56 @@ export const register = on => {
       t.read += u.cache_read_input_tokens || 0;
       t.write += u.cache_creation_input_tokens || 0;
     }
-    // the turn's tokens are in: the line shows them now, not at the next turn
-    if (!e.agentId && reading && !running) {
-      try { $.ui.status(lineOf(reading, sessionModel, tokens, agentTokens, lastTurnAt ?? Date.now())); } catch { /* never disturbs the turn */ }
+    // a subagent's run ended: one toast, and the line without it
+    if (e.agentId && agents.has(e.agentId)) {
+      try {
+        const a = agents.get(e.agentId);
+        agents.delete(e.agentId);
+        const now = await $.clock.now();
+        if (!agents.size) stopTick();
+        $.ui.status(lineNow(now));
+        redraw($);
+        const spent = u ? (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) : 0;
+        if (await noticesOn($)) $.ui.toast(doneText(a, now - a.startedAt, spent, agents.size));
+        // a run that ended by itself is the type's history for the estimate
+        if (!e.isAborted) {
+          try {
+            const got = await $.store.get('agentRuns');
+            const all = got && typeof got === 'object' ? got : {};
+            all[a.type] = keepRuns(all[a.type], now - a.startedAt);
+            await $.store.set('agentRuns', all);
+          } catch { /* an engine without a store: no estimate */ }
+        }
+      } catch { /* never disturbs the turn */ }
     }
-    // a natural break: the main thread's turn ended. A large session is
-    // offered a compaction in the band, once per level and step of growth.
+    // the main thread's turn ended: its foreground agents with it (it waited
+    // for them); the engine's list settles the rest
+    if (!e.agentId && agents.size) {
+      try {
+        for (const [id, a] of agents) if (!a.background) agents.delete(id);
+        await settleAgents($, agents, await $.clock.now());
+        if (!agents.size) stopTick();
+        redraw($);
+      } catch { /* the count is settled at the next refresh */ }
+    }
+    // the turn's tokens are in: the line shows them now, not at the next turn
+    if (!e.agentId && !running) {
+      try { if (reading || agents.size) $.ui.status(lineNow(lastTurnAt ?? Date.now())); } catch { /* never disturbs the turn */ }
+    }
+    // a natural break: the main thread's turn ended. A session on another
+    // model or effort than the reading recommends is offered the switch,
+    // once per suggestion; one that no longer needs it loses the row.
+    if (!e.agentId && attended && reading) {
+      try {
+        let model = sessionModel;
+        if (!model) { try { model = await $.session.model(); } catch { /* not known */ } }
+        const o = (await switchOn($)) ? switchOffer(reading, model, await effortNow($)) : null;
+        if (!o || (sw && sw.key !== o.key)) { if (sw) { sw = null; redraw($); } }
+        if (o && !switchSeen.has(o.key)) { switchSeen.add(o.key); sw = o; redraw($); }
+      } catch { /* an engine without the band: the start line says it */ }
+    }
+    // A large session is offered a compaction in the band, once per level
+    // and step of growth.
     if (!e.agentId && attended && typeof contextTokens === 'number') {
       try {
         const level = offerLevel(contextTokens);
@@ -496,7 +866,7 @@ export const register = on => {
             if (typeof m === 'string' && idOf(m, reading.prices || {})) model = m;
           } catch { /* not known yet */ }
         }
-        $.ui.status(lineOf(reading, model, tokens, agentTokens, now));
+        $.ui.status(lineOf(reading, model, tokens, agentTokens, now, false, runningAgents()));
       }
     } catch {
       // a reading is a convenience: a missing node, a timeout or a bad line

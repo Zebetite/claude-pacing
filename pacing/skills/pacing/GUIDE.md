@@ -125,11 +125,10 @@ fresh for the next session and shows it in the status line, with one
 notice when the level changes:
 
 <!-- help -->
-    under budget 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · week 36% Fable 40%
+    Budget 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · week 36% Fable 40%
 
-That is where the week stands against today's budget line (under
-budget, on budget, over budget or far over budget) and the weekly meter
-as a share of that line (over 100 % means over it), how this session's own use
+That is the weekly meter as a share of today's budget line (over 100 %
+means over it; a toast says when the level changes), how this session's own use
 splits over the tiers (T1 is tier 1), subagents included, and the two
 meters. The desktop app may cut the end of the line; `/pacing-status`
 shows it whole, in words.<!-- /help --> The split is an estimate: each
@@ -147,7 +146,7 @@ hold. A session that another session started (a side session in the
 desktop app) leads with the tier of the model it runs on, and shows the
 weekly meter only, not Fable's, which the session that started it shows:
 
-    ⚪T2 sub · under budget 77% · ⚪T2 90% 🟤T4 10% · week 36%
+    ⚪T2 sub · Budget 77% · ⚪T2 90% 🟤T4 10% · week 36%
 
 Claude Code hands a plugin only the all-models and 5-hour meters,
 so such a reading carries the per-model figure (Fable's by default) over
@@ -183,6 +182,20 @@ what it lacks (the session's context, extra usage); anything older, or
 
 ## The session's own context
 
+**One session for everything.** You give every prompt in the main
+session, and everything comes back to it: an agent's answer returns to
+the session, which tells you the whole outcome there (what changed, what
+was verified and how, what is open, any decision it needs), so you never
+open an agent's transcript or another session to learn it. A decision an
+agent needs is asked there and passed on to the same agent. The plugin
+keeps that one session affordable: the offer to compact (below), whole
+tasks to one agent from 500 000 tokens, and role agents it keeps and
+re-uses, so their reading never enters the session's context. For work
+in several parts, an agent sends the session a short update when each
+part is done, and the session passes it on to you at once: the texts you
+will see, example lines, drafts and the choices made, word for word, not
+a summary of them.
+
 Every turn re-sends the whole conversation, so a long session makes each
 later turn expensive whatever model runs it. While you keep working, the
 history is read back cheaply; after a pause it has to be stored again in
@@ -194,8 +207,8 @@ window, since a window can be large or small:
 | size | what the skill advises |
 |---|---|
 | under 300 000 tokens | nothing |
-| from 300 000 | for work that continues, compact the conversation at a natural break (`/compact`): the cheaper step, since the work stays and every later turn re-sends less; a task that has nothing to do with this session's work starts in a new session |
-| from 500 000 | a next task with a clear outcome goes whole to one fresh agent, without asking you; a new session, with a handover, only for a task you will want to steer, one with many rounds of questions, or one unrelated to the session's work |
+| from 300 000 | compact the conversation at the next natural break (`/compact`), then go on in this session, whatever the next task is: the work stays and every later turn re-sends less. A task unrelated to the session's work is a reason to compact first, not to leave |
+| from 500 000 | compact first if that has not been done; a next task with a clear outcome goes whole to one fresh agent, without asking you, and its outcome comes back here. A new session is never offered: the session names one only when it cannot be compacted or you ask for one, and writes a handover then |
 
 **A whole task to one agent.** From 500 000 tokens every step the
 session takes itself costs a turn of its full size. So the session
@@ -215,7 +228,7 @@ it works alone, starting no agents of its own.
 plugin also watches for the expensive moment itself. When you send a
 prompt after an hour or more without a turn, and the session holds
 300 000 tokens or more, one notice says how large the session is, how
-long it sat idle, and that compacting or a handover first is cheaper. It
+long it sat idle, and that compacting first is cheaper. It
 comes once per pause and never holds or changes your prompt: Claude Code
 lets no plugin compact while a prompt waits to be sent. So the plugin
 warns earlier instead (below). An hour is assumed for the cache's
@@ -234,11 +247,28 @@ and what was ruled out; one line then gives the size before and after.
 `/pacing compact off` turns the row off; the notice after a pause then
 shows as before.
 
+**An offer to switch.** When the session runs on another model or
+effort than the reading recommends, the same place above the prompt
+offers it, with **Switch** and **Not now**. When Fable's own meter is out
+or over its line, it says so in the warning colour: `Fable 5.2 is out
+until the reset. Switch this session to Opus 5.5 high.` Otherwise it is
+calm: `This week's budget suggests Opus 5.5 medium for this session.`, or
+at over budget `Over budget: one step less effort saves the most. Switch
+to Fable 5.2 medium.` Switch runs `/model` and `/effort` for this session
+only, and a toast says what the session now runs on; where that cannot
+run, the box is filled with the command for you to send. It never
+switches without your press, comes once per suggestion, and Not now holds
+until the recommendation changes. One row shows at a time: a switch away
+from a model that is out or held first, then the offer to compact, then
+a calm switch. `/pacing switch off` turns it off.
+
 Bulky reading (logs, test output, many files) goes to the reader agent
 for the same reason: what the agent reads never enters the session's
 context.
 
-**Leaving a long session.** `/pacing handover` has the session write down
+**When a new session is the only way.** The plugin never offers one: a
+session that cannot be compacted, or your own wish to start afresh, is
+the only reason. `/pacing handover` then has the session write down
 where the work stands: the goal, what is done and what is verified, the
 decisions and their reasons, the open items in order, the files and
 commands that matter, and what was ruled out. The next session you start
@@ -295,6 +325,28 @@ each with its own instructions and tools:
 | verifier | runs tests, builds and checks; reports what passed and failed, never fixes | no |
 | implementer | makes a change the session specified | yes |
 | researcher | documentation and the web, with sources | no |
+
+**Seeing them work.** While agents run, the status line leads with them
+and still shows the budget: `⏳ reader 3m · Budget 77%`, or with more
+at once `⏳ 2 agents 3m · Budget 77%`. It shrinks in steps
+to fit the line (each agent with its time, then the names, then the
+count and the longest run, then the count) and never drops the count.
+It refreshes every 30 seconds and goes back to the plain line when the
+last agent ends. A toast says when an agent starts (its role, model and
+effort, and how many run), when it ends (how long it ran, its tokens,
+how many still run), and every 5 minutes while any runs. An agent that
+works on in the background after the turn ends gets a row above the
+prompt, under the offer to compact. `/pacing-status` lists every running
+agent with what it is doing. `/pacing notify off` turns the toasts off;
+the line and the row stay. The session also says in one line which
+agent it started, on which model and effort, and for what.
+
+Once a kind of agent has finished three runs, its entry shows a
+percentage such as `⏳ reader ~60%`. The percentage is a rough estimate
+from how long that kind of agent usually takes, not a measure of the work
+done, and it stays at 95 % or below until the agent ends. The 5-minute
+toast, the row and `/pacing-status` also name what the agent is doing
+now, from its latest tool call (`reading`, `searching`, `editing`).
 
 The budget still picks the model: each call gets the model and effort of
 the tier that work routes to at the current level. The reader is the
@@ -367,6 +419,8 @@ first hands work to a subagent; a plain report never loads them.
 | `/pacing log` | the last readings |
 | `/pacing week` | the last two weeks in sum: where the meter ended, the share of the time at each level, and whether it crossed the line |
 | `/pacing next on`, `/pacing next off` | lets the skill set, or stop setting, the default model of new sessions |
+| `/pacing switch on`, `/pacing switch off` | turns the offer to switch the session to the recommended model or effort on (the default) or off: a row above the prompt with Switch and Not now |
+| `/pacing notify on`, `/pacing notify off` | turns the toasts about running subagents on (the default) or off: when one starts, when one ends, and every 5 minutes while any runs; the status line and the row above the prompt still show them |
 | `/pacing compact on`, `/pacing compact off` | turns the offers to compact a large session on (the default) or off: a row above the prompt with Compact now from 300 000 tokens, plainer from 500 000, and a warning before the cache of an idle session lapses |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model weekly meter belongs to (Fable by default), or says the plan has none |
 | `/pacing fallback opus high`, `/pacing fallback none` | the tier that takes the top place while that meter is full (Opus 5.5 high by default); none lets the remaining tiers move up |

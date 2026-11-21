@@ -636,14 +636,15 @@ if (context !== null || contextTokens !== null) {
   const wholeOf = cls => (cls === 'judgment' ? strong : ladder[Math.max(2, tierNo(route[cls])) - 1] || ladder[ladder.length - 1]);
   const whole = ladder.length && level !== 'stop'
     ? ['judgment', 'medium', 'routine'].map(cls => cls + ' on ' + name(wholeOf(cls))).join(', ') : null;
+  // All work stays in this session: the user should never have to open
+  // another one. Compacting keeps the work and shrinks what every later
+  // turn re-sends, for the price of one summary; a new session would have to
+  // learn the work again, and is the last resort only.
   console.log('context ' + size
-    + (ctxLevel === 2 ? ' -> this session is the expensive part now: '
-      + (whole ? 'a next task with a clear outcome goes WHOLE to one fresh agent, without asking (' + whole + '), with a handover-style brief; read only its report. ' : '')
-      + 'Offer a new session, with a handover (/pacing handover), only for a task that needs the user\'s steering, many rounds of questions, or has nothing to do with this session\'s work'
-      // compacting keeps the work and shrinks what every later turn re-sends,
-      // for the price of one summary: cheaper than a new session that has to
-      // learn the work again
-      : ctxLevel === 1 ? ' -> for work that continues, suggest compacting the conversation at a natural break (/compact), the cheaper step; a task unrelated to this session\'s work starts in a new session'
+    + (ctxLevel === 2 ? ' -> this session is the expensive part now: compact first if not yet done (/compact). '
+      + (whole ? 'A next task with a clear outcome goes WHOLE to one fresh agent, without asking (' + whole + '), with a handover-style brief; read only its report and give the user the outcome here. ' : '')
+      + 'Never offer a new session: name one only when the session cannot be compacted or the user asks, with a handover (/pacing handover)'
+      : ctxLevel === 1 ? ' -> suggest compacting the conversation at the next natural break (/compact), then go on here, whatever the next task is: every later turn re-sends less, and an unrelated task is a reason to compact first, not to leave'
         : ''));
 }
 if (loaded.missing) console.log('first run: no settings yet, the defaults are used; run config.mjs init once');
@@ -812,6 +813,8 @@ if (opt.brief && !auto) {
 // interface, and seen on Windows only: anything missing or unreadable is
 // "not known" (null), never an error. CLAUDE_CODE_CHILD_SESSION is no such
 // mark: the engine sets it for every command it runs, in every session.
+// A session the user detached to the top level keeps its `spawnedFrom` and
+// gains `lineageDetached: true`: it is a session of its own from then on.
 const spawnedSession = () => {
   try {
     const id = process.env.CLAUDE_CODE_HOST_SESSION_ID;
@@ -820,7 +823,11 @@ const spawnedSession = () => {
     const dirs = d => (fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => path.join(d, e.name)) : []);
     for (const app of dirs(base)) for (const a of dirs(path.join(app, 'claude-code-sessions'))) for (const b of dirs(a)) {
       const f = path.join(b, id + '.json');
-      if (fs.existsSync(f)) { const s = JSON.parse(fs.readFileSync(f, 'utf8')).spawnedFrom; return !!(s && typeof s === 'object' && s.sessionId); }
+      if (fs.existsSync(f)) {
+        const rec = JSON.parse(fs.readFileSync(f, 'utf8'));
+        const s = rec.spawnedFrom;
+        return !!(s && typeof s === 'object' && s.sessionId) && rec.lineageDetached !== true;
+      }
     }
   } catch { /* not known */ }
   return null;
@@ -887,5 +894,11 @@ if (auto) {
     premiumAt: premFrom ? premFrom.at : null, premiumLevel: premLevel, premiumHeld: premHeld, levelBy,
     premiumOfBudget: premLevel && budget > 0 ? Math.round(100 * prem / budget) : null,
     premiumEstimate: premEstimate, needFull,
+    // what the session should run on, and at "over" the effort one step
+    // lower on tier 1: the hooks module offers them as a Switch button
+    recommend: sessionTier ? { model: MODELS[sessionTier.model].id, label: sessionTier.label, effort: sessionTier.effort } : null,
+    effortStep: ladder.length && level === 'over' && !premAway && EFFORTS.indexOf(ladder[0].effort) > 0
+      ? { model: MODELS[ladder[0].model].id, label: ladder[0].label, effort: EFFORTS[EFFORTS.indexOf(ladder[0].effort) - 1] } : null,
+    premiumModelId: premium && MODELS[premium] ? MODELS[premium].id : null,
     spawned: spawnedSession(), logged, do: doLine ? doLine.slice(4) : null }));
 }

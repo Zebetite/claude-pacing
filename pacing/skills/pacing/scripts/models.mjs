@@ -42,5 +42,7 @@ export const checkConfig = raw => {
   drop('verifier', helperOk, 'the verifier\'s model is not a known model and effort');
   drop('setNextModel', v => typeof v === 'boolean', 'the next-session switch is not on or off');
   drop('compactAsk', v => typeof v === 'boolean', 'the offers to compact are not on or off');
+  drop('agentNotices', v => typeof v === 'boolean', 'the notices about running subagents are not on or off');
+  drop('switchAsk', v => typeof v === 'boolean', 'the offers to switch model or effort are not on or off');
   return { cfg: c, problems };
 };

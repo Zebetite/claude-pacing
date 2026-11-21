@@ -174,7 +174,7 @@ describe('fewer calls, fewer lines', () => {
     s.config(['init']);
     const brief = dry(s, '--all', '10', '--premium', '30', '--five', '90', '--five-reset', '2026-11-13T15:00:00Z', '--context-tokens', '340000',
       '--categories', 'Messages=90000,System tools=25000,MCP tools=40000', '--brief').out;
-    for (const re of [/^5-hour window 90 %.*-> HOLD heavy work/m, /^context 340k tokens -> for work that continues/m, /^fixed overhead .* -> MCP tools are 40k of it/m,
+    for (const re of [/^5-hour window 90 %.*-> HOLD heavy work/m, /^context 340k tokens -> suggest compacting/m, /^fixed overhead .* -> MCP tools are 40k of it/m,
       /^All models used .* Fable 5\.2 held$/m, /^do: Fable 5\.2's own meter is at throttle: SWITCH/m, /^upward: /m, /^route: judgment, medium, routine, trivial -> Opus 5\.5 high \(the session\)/m]) assert.match(brief, re);
     // and leaves out what only describes
     assert.doesNotMatch(brief, /^(day \d|allowance today|spend rate|trend:|tier {2}model)/m);

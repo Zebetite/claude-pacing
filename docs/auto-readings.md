@@ -22,7 +22,7 @@ level in the status line.
   `node <$.plugin.root>/skills/pacing/scripts/budget.mjs --all .. --reset ..
   --source hook --five .. --five-reset ..`, and shows one toast when the
   level changes. The status line shows
-  `under budget 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · week 36% Fable 40%`
+  `Budget 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · week 36% Fable 40%`
   (before 0.9.5: `77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)`):
   the meter as a share of the line; the session's own use by tier, from
   every turn's tokens (`turn.complete`, subagents included) priced per
@@ -120,7 +120,7 @@ level in the status line.
   but nothing short of holding the prompt (`{ drop }`, which the task
   ruled out) keeps that turn from storing the session again. So the
   notice is honest about it: "this turn stores it all again. After a
-  break, /compact or a handover first is cheaper." The cache lifetime is
+  break, /compact first is cheaper." (before 0.9.9: "/compact or a handover first") The cache lifetime is
   not told to a module (`cache_ttl` reaches only model-switch hooks, and
   `prompt_cache_likely_expired` only a resumed session's SessionStart), so
   one hour is assumed. After a module reload or a resume the module has
@@ -255,3 +255,39 @@ level in the status line.
 - **Off.** `/pacing compact off` writes `compactAsk: false`; the module
   reads config.json when an offer is due, so it applies at once. An engine
   without the band, the timers or compaction keeps the notice as before.
+
+## One session for everything, running agents in view (0.9.9)
+
+- **One session.** The context rule no longer sends the user to a new
+  session: from 300 000 tokens compact and go on here, whatever the next
+  task is; from 500 000 compact first, a task with a clear outcome goes
+  whole to one fresh agent, and a new session is named only when the
+  session cannot be compacted or the user asks. An agent's outcome is
+  given to the user in the session; a task that needs the user's input
+  stays there.
+- **Running agents.** `agent.spawn` starts one (type, model; effort from
+  the Agent call), its loop's `turn.complete` ends it, `$.agent.list()`
+  settles the count, the main turn's end ends the foreground ones, and a
+  new or resumed session starts with none. While any run the status line
+  leads with them, the whole line within 33 characters in steps that never
+  drop the count or the level; toasts on start, end and every 5 minutes
+  (`/pacing notify off` quiets them); a row above the prompt for
+  background agents. The engine reports an agent's tokens only when its
+  run ends.
+- **Detached sessions.** A side session the user detached to the top
+  level keeps `spawnedFrom` in the app's record and gains
+  `lineageDetached: true`; it now reads as a session of its own.
+- **An estimate of progress.** By time only, since an agent's tokens come
+  when its run ends: how long it has run against the median of that agent
+  type's last 20 finished runs, kept in the plugin's `$.store`
+  (`agentRuns`). Shown from three runs on as `~60%`, at most 95 % while it
+  runs; a type without history shows none. The estimate takes the time's
+  place in the 33-character line before it goes, and goes before the count
+  or the level. What an agent is doing comes from its own latest tool call
+  (`tool.call` with its `agentId`), shown as a word or two in the 5-minute
+  toast, the row and `/pacing-status`.
+- **"Budget 77%".** The line names the weekly meter's share of today's
+  budget line as `Budget 77%` at every level, with no level word and no
+  advice (over 100 % is over); the toast on a change of level keeps the
+  words and the do: line. The characters freed go to the agents.
+  `/pacing-status` reads `Budget 105%` too, its "Now:" line beneath.
