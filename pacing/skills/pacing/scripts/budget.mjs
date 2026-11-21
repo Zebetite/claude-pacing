@@ -900,5 +900,7 @@ if (auto) {
     effortStep: ladder.length && level === 'over' && !premAway && EFFORTS.indexOf(ladder[0].effort) > 0
       ? { model: MODELS[ladder[0].model].id, label: ladder[0].label, effort: EFFORTS[EFFORTS.indexOf(ladder[0].effort) - 1] } : null,
     premiumModelId: premium && MODELS[premium] ? MODELS[premium].id : null,
+    // this session's id, for the hooks module to find the side sessions it started
+    hostSessionId: /^[\w-]+$/.test(process.env.CLAUDE_CODE_HOST_SESSION_ID || '') ? process.env.CLAUDE_CODE_HOST_SESSION_ID : null,
     spawned: spawnedSession(), logged, do: doLine ? doLine.slice(4) : null }));
 }

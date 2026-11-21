@@ -110,6 +110,21 @@ async function compactAskOn($) {
   } catch { return true; }
 }
 
+// what budget.mjs is run with for a reading from the hooks module; `dry`
+// computes from given figures and logs nothing
+export const readingArgv = (root, all, reset, five, fiveReset, dry) => ["node", root + "/skills/pacing/scripts/budget.mjs",
+  "--all", String(all), "--reset", reset, "--source", "hook",
+  ...(typeof five === "number" ? ["--five", String(five), ...(fiveReset ? ["--five-reset", fiveReset] : [])] : []),
+  ...(dry ? ["--dry"] : [])];
+// the last reading budget.mjs stored for the start line (state.json), or null
+async function storedReading($) {
+  try {
+    const home = (await $.env.get("USERPROFILE")) || (await $.env.get("HOME"));
+    if (!home) return null;
+    return JSON.parse(await $.fs.read(home + "/.claude/pacing/state.json"));
+  } catch { return null; }
+}
+
 // a redraw of the band; an engine without it has nothing to redraw
 function redraw($) { try { $.ui.invalidate('ui.render'); } catch { /* no band */ } }
 
@@ -215,9 +230,20 @@ export const levelPhrase = level => PHRASE[level] || level || '';
 //   a background agent still running after the turn ended gets a row in the
 //   band above the prompt, under the offer to compact, never over it.
 // Toasts and the row are one line each, within MSG_MAX.
-export const LINE_MAX = HEAD_MAX;
+// While agents run the whole line keeps within the normal line's own widest,
+// "Budget 999% · usage: Weekly 100% Fable 100%" (43). (33 was what one
+// screenshot showed before the app's ellipsis during a turn; the footer's
+// room varies with the window and what else stands in it.)
+export const LINE_MAX = 43;
 export const MSG_MAX = 80;
-export const REFRESH_EVERY = 30 * 1000;
+// While anything runs the line is redrawn every REFRESH_EVERY from what the
+// module knows (no cost); the agents are settled from the engine's list every
+// SETTLE_EVERY, and side sessions polled every POLL_EVERY while one runs or for
+// WATCH_FOR after one was started or messaged.
+export const REFRESH_EVERY = 5 * 1000;
+export const SETTLE_EVERY = 30 * 1000;
+export const POLL_EVERY = 15 * 1000;
+export const WATCH_FOR = 60 * 1000;
 export const PROGRESS_EVERY = 5 * 60 * 1000;
 // a background agent the engine cannot vouch for is let go after this long
 const STALE_AGENT = 2 * 60 * 60 * 1000;
@@ -231,7 +257,10 @@ export const roleOf = type => {
 // "claude-haiku-5-5" -> "Haiku 5.5"
 export const modelLabel = id => {
   const m = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(String(id || ''));
-  return m ? m[1][0].toUpperCase() + m[1].slice(1) + ' ' + m[2] + '.' + m[3] : String(id || '');
+  if (m) return m[1][0].toUpperCase() + m[1].slice(1) + ' ' + m[2] + '.' + m[3];
+  // an alias the Agent call gave ("haiku"), before the spawn resolves it
+  const t = String(id || '');
+  return /^[a-z]+$/.test(t) ? t[0].toUpperCase() + t.slice(1) : t;
 };
 // "40s", "3m", "2h"
 export const dur = ms => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + 's' : s < 6000 ? Math.round(s / 60) + 'm' : Math.round(s / 3600) + 'h'; };
@@ -260,64 +289,71 @@ const STEPS = { Read: 'reading', Grep: 'searching', Glob: 'searching', Bash: 'ru
 export const stepOf = tool => STEPS[tool] || (String(tool || '').startsWith('mcp__') ? 'a tool' : String(tool || '').toLowerCase().slice(0, 12));
 const est = (a, now) => estimateOf(a.runs, now - a.startedAt);
 const estText = (a, now) => (est(a, now) == null ? '' : '~' + est(a, now) + '%');
-// "reader 3m ~60% searching": as much as `parts` asks for
-const detail = (a, now, parts) => [roleOf(a.type), parts.time ? dur(now - a.startedAt) : '', parts.est ? estText(a, now) : '', parts.step && a.step ? a.step : '']
+// One agent as the user reads it: its name, how long it has run, what it is
+// doing, the estimate, in that order ("reader 3m searching ~60%"); as much as
+// `parts` asks for. A side session's name is its short title.
+const nameOf = a => (a.kind === 'session' ? a.label || 'side session' : roleOf(a.type));
+const detail = (a, now, parts) => [nameOf(a), parts.time ? dur(now - a.startedAt) : '', parts.step && a.step ? a.step : '', parts.est ? estText(a, now) : '']
   .filter(Boolean).join(' ');
-// the status line's agent part, the first step that fits `room`. An
-// estimate takes the time's place before it goes; the count never goes.
+// "2 Agents", "2 Agents are running": the count, only for more than one
+export const countText = list => list.length + (list.length === 1 ? ' Agent' : ' Agents');
+export const runningText = (list, still = false) => countText(list) + (list.length === 1 ? ' is ' : ' are ') + (still ? 'still ' : '') + 'running';
+// the status line's agent part: each agent in full, then, for all of them at
+// each step and from the right: the estimate, the step, the time (the names
+// then stand alone, "⏳ reader, ⏳ researcher"); then, with more than one,
+// the count as a sentence, "⏳ 2 Agents are running", and last the bare
+// count, "⏳ 2 Agents". "Agent" stands for a named single agent only where a
+// lone side session's title does not fit even alone.
 export const agentPart = (agents, now, room) => {
   const n = agents.length;
   if (!n) return '';
-  const longest = dur(now - Math.min(...agents.map(a => a.startedAt)));
-  if (n === 1) {
-    const a = agents[0], on = runOn(a), e = estText(a, now);
-    return firstFit([
-      '⏳ ' + detail(a, now, { time: 1, est: 1 }) + (on ? ' (' + on + ')' : ''),
-      '⏳ ' + detail(a, now, { time: 1, est: 1 }),
-      ...(e ? ['⏳ ' + roleOf(a.type) + ' ' + e] : []),
-      '⏳ ' + detail(a, now, { time: 1 }),
-      '⏳ ' + roleOf(a.type), '⏳1'], room);
-  }
-  const anyEst = agents.some(a => estText(a, now));
+  const each = parts => agents.map(a => '⏳ ' + detail(a, now, parts)).join(', ');
+  const names = agents.map(a => '⏳ ' + nameOf(a)).join(', ');
   return firstFit([
-    '⏳ ' + n + ' agents · ' + agents.map(a => detail(a, now, { time: 1, est: 1 })).join(' · '),
-    ...(anyEst ? ['⏳ ' + n + ' agents · ' + agents.map(a => estText(a, now) ? roleOf(a.type) + ' ' + estText(a, now) : detail(a, now, { time: 1 })).join(' · ')] : []),
-    '⏳ ' + n + ' agents · ' + agents.map(a => detail(a, now, { time: 1 })).join(' · '),
-    '⏳ ' + n + ' agents · ' + agents.map(a => roleOf(a.type)).join(' · '),
-    '⏳ ' + n + ' agents ' + longest,
-    '⏳ ' + n + ' agents',
+    each({ time: 1, step: 1, est: 1 }),
+    each({ time: 1, step: 1 }),
+    each({ time: 1 }),
+    names,
+    ...(n > 1 ? ['⏳ ' + runningText(agents), '⏳ ' + countText(agents)] : agents[0].kind === 'session' ? ['⏳ 1 Agent is running', '⏳ 1 Agent'] : []),
     '⏳' + n,
   ], room);
 };
-const running = n => (n === 0 ? 'no agents running now' : n === 1 ? '1 agent running' : n + ' agents running');
-export const startedText = (a, n) => firstFit([
-  'Pacing: ' + roleOf(a.type) + ' started' + (runOn(a) ? ' on ' + runOn(a) : '') + '; ' + running(n) + '.',
-  'Pacing: ' + roleOf(a.type) + ' started; ' + running(n) + '.',
+// who else runs, for a toast: by name for one or two, a count for more
+const others = (list, still) => (list.length === 0 ? (still ? 'nothing is running now' : 'nothing else is running')
+  : list.length <= 2 ? list.map(nameOf).join(' and ') + (list.length === 1 ? ' is ' : ' are ') + (still ? 'still ' : '') + 'running'
+  : runningText(list, still));
+export const startedText = (a, list) => firstFit([
+  'Pacing: ' + nameOf(a) + ' started' + (runOn(a) ? ' on ' + runOn(a) : '') + '; ' + others(list.filter(x => x !== a && x.id !== a.id), false) + '.',
+  'Pacing: ' + nameOf(a) + ' started; ' + others(list.filter(x => x !== a && x.id !== a.id), false) + '.',
+  'Pacing: ' + nameOf(a) + ' started.',
 ], MSG_MAX);
-export const doneText = (a, ms, tokens, n) => firstFit([
-  'Pacing: ' + roleOf(a.type) + ' done in ' + dur(ms) + (tokens ? ', ' + Math.round(tokens / 1000) + 'k tokens' : '') + '; ' + (n ? running(n).replace('running', 'still running') : running(0)) + '.',
-  'Pacing: ' + roleOf(a.type) + ' done in ' + dur(ms) + '; ' + running(n) + '.',
+export const doneText = (a, ms, tokens, list) => firstFit([
+  'Pacing: ' + nameOf(a) + ' done in ' + dur(ms) + (tokens ? ', ' + Math.round(tokens / 1000) + 'k tokens' : '') + '; ' + others(list, true) + '.',
+  'Pacing: ' + nameOf(a) + ' done in ' + dur(ms) + '; ' + others(list, true) + '.',
+  'Pacing: ' + nameOf(a) + ' done in ' + dur(ms) + '.',
 ], MSG_MAX);
+// the 5-minute toast and the row: one line each, the same order of what goes
 export const progressText = (agents, now) => {
-  const n = agents.length, longest = dur(now - Math.min(...agents.map(a => a.startedAt)));
-  const who = n === 1 ? '1 agent' : n + ' agents';
+  const longest = dur(now - Math.min(...agents.map(a => a.startedAt)));
+  const each = parts => agents.map(a => detail(a, now, parts)).join(', ');
   return firstFit([
-    'Pacing: ' + who + ' still working: ' + agents.map(a => detail(a, now, { time: 1, est: 1, step: 1 })).join(', ') + '.',
-    'Pacing: ' + who + ' still working: ' + agents.map(a => detail(a, now, { time: 1, est: 1 })).join(', ') + '.',
-    'Pacing: ' + who + ' still working: ' + agents.map(a => detail(a, now, { time: 1 })).join(', ') + '.',
-    'Pacing: ' + who + ' still working, the longest for ' + longest + '.',
+    'Pacing: still running: ' + each({ time: 1, step: 1, est: 1 }) + '.',
+    'Pacing: still running: ' + each({ time: 1, step: 1 }) + '.',
+    'Pacing: still running: ' + each({ time: 1 }) + '.',
+    'Pacing: still running: ' + agents.map(nameOf).join(', ') + '.',
+    'Pacing: ' + runningText(agents, true) + ', the longest for ' + longest + '.',
+    'Pacing: ' + runningText(agents, true) + '.',
   ], MSG_MAX);
 };
 export const backgroundText = (agents, now, room = MSG_MAX) => {
-  const n = agents.length, who = n === 1 ? '1 agent' : n + ' agents';
-  const longest = dur(now - Math.min(...agents.map(a => a.startedAt)));
+  const each = parts => agents.map(a => '⏳ ' + detail(a, now, parts)).join(', ');
+  const names = agents.map(a => '⏳ ' + nameOf(a)).join(', ');
   return firstFit([
-    '⏳ ' + who + ' still working in the background: ' + agents.map(a => detail(a, now, { time: 1, est: 1, step: 1 })).join(', '),
-    '⏳ ' + who + ' still working in the background: ' + agents.map(a => detail(a, now, { time: 1, est: 1 })).join(', '),
-    '⏳ ' + who + ' still working in the background: ' + agents.map(a => detail(a, now, { time: 1 })).join(', '),
-    '⏳ ' + who + ' still working in the background, the longest for ' + longest,
-    '⏳ ' + who + ' still working, ' + longest,
-    '⏳ ' + who,
+    'In the background: ' + each({ time: 1, step: 1, est: 1 }),
+    'In the background: ' + each({ time: 1, step: 1 }),
+    'In the background: ' + each({ time: 1 }),
+    'In the background: ' + names,
+    ...(agents.length > 1 ? ['⏳ ' + runningText(agents) + ' in the background', '⏳ ' + runningText(agents), '⏳ ' + countText(agents)] : [names]),
   ], Math.min(room, MSG_MAX));
 };
 // the session's own agents still running, by the engine's list; null where
@@ -332,7 +368,108 @@ async function liveAgents($) {
 // background that have run implausibly long
 async function settleAgents($, agents, now) {
   const live = await liveAgents($);
-  for (const [id, a] of agents) if (live ? !live.has(id) : now - a.startedAt > STALE_AGENT) agents.delete(id);
+  for (const [id, a] of agents) {
+    if (a.kind === 'session' || a.provisional) continue;
+    if (live ? !live.has(id) : now - a.startedAt > STALE_AGENT) agents.delete(id);
+  }
+}
+
+// ---- side sessions this session started ----
+// The engine lists no other sessions. The desktop app's own list_sessions
+// tool does, with `isRunning` and `startedBy`: the module calls it like a
+// tool ($.tool.call, no dialog), only while a side session of this one runs,
+// for a minute after one was started or messaged, once at load and once at a
+// turn's end; never in a session that started none. Not a documented
+// interface, the desktop app's alone: anything missing or unreadable is none.
+export const SESSIONS_TOOL = 'mcp__ccd_session_mgmt__list_sessions';
+// the rows of a list_sessions answer, or [] when it reads as nothing
+// (a live answer: `text`, the rows as JSON, and `result`, the tool's content
+// as an array of { type, text })
+export const sessionRows = res => {
+  const texts = [];
+  if (res && typeof res.text === 'string') texts.push(res.text);
+  const r = res && res.result;
+  const content = Array.isArray(r) ? r : r && Array.isArray(r.content) ? r.content : [];
+  for (const c of content) if (c && typeof c.text === 'string') texts.push(c.text);
+  for (const t of texts) { try { const v = JSON.parse(t); if (Array.isArray(v)) return v; } catch { /* not this one */ } }
+  return [];
+};
+// the side sessions of `host` that are working now, as running entries
+export const workingSessions = (rows, host) => (host ? rows.filter(r => r && r.startedBy === host && r.isRunning === true && !r.isArchived) : []);
+export const startedBy = (rows, host) => (host ? rows.filter(r => r && r.startedBy === host && !r.isArchived).length : 0);
+// a side session's short title: its title cut to 24 characters
+export const shortTitle = row => { const t = String((row && (row.title || row.name)) || 'side session'); return chars(t) > 24 ? [...t].slice(0, 23).join('') + '…' : t; };
+export const sessionStartedText = (row, list) => firstFit([
+  'Pacing: side session ' + shortTitle(row) + ' started; ' + others(list.filter(x => x.id !== row.sessionId), false) + '.',
+  'Pacing: a side session started; ' + others(list.filter(x => x.id !== row.sessionId), false) + '.',
+], MSG_MAX);
+export const sessionDoneText = (a, ms, list) => firstFit([
+  'Pacing: side session ' + (a.label || 'side session') + ' ended its turn after ' + dur(ms) + '; ' + others(list, true) + '.',
+  'Pacing: a side session ended its turn after ' + dur(ms) + '.',
+], MSG_MAX);
+// the refresh while anything runs: every REFRESH_EVERY, the line and the
+// band redrawn from what the module knows; the agents settled every
+// SETTLE_EVERY; side sessions polled every POLL_EVERY while one runs or is
+// watched; the progress toast every PROGRESS_EVERY. Stops when nothing runs
+// and nothing is watched.
+function startTick($, st) {
+  if (st.timer) return;
+  st.timer = $.clock.every(REFRESH_EVERY, () => { tick($, st).catch(() => { /* a refresh never disturbs the session */ }); });
+}
+function stopTickOf(st) { if (st.timer) { try { st.timer.cancel(); } catch { /* gone */ } st.timer = null; } }
+async function tick($, st) {
+  const t = await $.clock.now();
+  if (t - st.settledAt >= SETTLE_EVERY) { st.settledAt = t; await settleAgents($, st.agents, t); }
+  const watching = t < st.watchUntil || [...st.agents.values()].some(a => a.kind === 'session');
+  if (watching && t - st.polledAt >= POLL_EVERY) await pollSessions($, st, t);
+  if (!st.agents.size && t >= st.watchUntil) stopTickOf(st);
+  $.ui.status(st.lineNow(t));
+  redraw($);
+  if (st.agents.size && t - st.progressAt >= PROGRESS_EVERY) {
+    st.progressAt = t;
+    if (await noticesOn($)) $.ui.toast(progressText(st.list(), t));
+  }
+}
+// this session's id, as the app's records and list_sessions name it
+async function hostOf($, st) {
+  if (st.host) return st.host;
+  try { const h = await $.env.get('CLAUDE_CODE_HOST_SESSION_ID'); if (h) st.host = h; } catch { /* not in this environment */ }
+  if (!st.host) { const r = st.reading(); if (r && typeof r.hostSessionId === 'string') st.host = r.hostSessionId; }
+  return st.host;
+}
+// the side sessions this one started that are working now, into st.agents;
+// a toast as one starts and as one ends its turn, but none at a quiet poll
+// (the one at load: what already ran is no news)
+async function pollSessions($, st, t) {
+  st.polledAt = t;
+  let rows;
+  try { rows = sessionRows(await $.tool.call({ tool: SESSIONS_TOOL, linked: true })); } catch { return; }
+  const host = await hostOf($, st);
+  if (!host) return;
+  const live = workingSessions(rows, host);
+  st.children = startedBy(rows, host);
+  const ids = new Set(live.map(r => r.sessionId));
+  const notify = !st.quiet && (await noticesOn($));
+  let changed = false;
+  for (const [id, a] of st.agents) {
+    if (a.kind === 'session' && !ids.has(id)) {
+      st.agents.delete(id);
+      changed = true;
+      if (notify) $.ui.toast(sessionDoneText(a, t - a.startedAt, st.list()));
+    }
+  }
+  for (const r of live) {
+    if (st.agents.has(r.sessionId)) continue;
+    if (!st.agents.size) st.progressAt = t;
+    // one the main thread just started or messaged: its time from then
+    const since = st.watchSince && t - st.watchSince <= WATCH_FOR ? st.watchSince : t;
+    st.agents.set(r.sessionId, { id: r.sessionId, kind: 'session', type: r.name || r.title || 'session', label: shortTitle(r), description: r.title, startedAt: since, background: true, runs: [], step: null });
+    changed = true;
+    if (notify) $.ui.toast(sessionStartedText(r, st.list()));
+  }
+  st.quiet = false;
+  if (st.agents.size) startTick($, st);
+  if (changed) { $.ui.status(st.lineNow(t)); redraw($); }
 }
 // whether the toasts about agents are on (config.json's agentNotices; on unless false)
 async function noticesOn($) {
@@ -400,39 +537,40 @@ export const switchedText = (target, nowModel, nowEffort) => (sameModel(nowModel
 // model is the one that started it, and in a side session's narrow line it
 // read as the side session's own use.
 const sideOf = (j, self) => self !== null || j.spawned === true;
+// The compact line: the budget share, then the usage meters, with no tiers
+// (the tier split is /pacing-status's, in the long form):
+//   Budget 77% · usage: Weekly 36%, Fable 40%
+// A side session leads with a plain "sub" and shows no per-model meter.
 // While subagents run (`agents`, see "subagents at work"), the line leads
-// with them and the whole line stays within LINE_MAX: a side session's tier
-// if there is room, the agents (shrunk in steps, never without their count),
-// the level with its share (always), then the tier split and the meters only
-// as far as they fit whole.
+// with them and the whole line stays within LINE_MAX: "sub" if it costs the
+// agents nothing, the agents (shrunk in steps, never without their count),
+// the budget share (always), then the usage only as far as it fits whole,
+// the per-model figure going before the weekly one.
+// `mix` is no longer drawn here; it stays in the signature for fullText's sake.
 export const statusText = (j, mix, self = null, now = Date.now(), agents = []) => {
   const side = sideOf(j, self);
   const name = j.premiumLabel && !side ? j.premiumLabel.split(' ')[0] : null;
   // the weekly meter's share of today's budget line, without a word on it:
   // over 100 % is over. The toast on a change of level says the rest.
   const level = 'Budget ' + (j.ofBudget != null ? j.ofBudget + '%' : '-');
-  const sub = self !== null ? square(self) + (self === 'Other' ? 'Other' : 'T' + self) + ' sub' : null;
-  const split = mix.length ? mix.map(x => square(x.tier) + (x.tier === 'Other' ? 'Other' : 'T' + x.tier) + ' ' + x.share + '%').join(' ') : null;
-  const meters = ['week ' + Math.round(j.all) + '%'];
-  if (j.premium != null && name) {
-    const age = j.premiumAt ? now - Date.parse(j.premiumAt) : 0;
-    const est = j.premiumEstimate != null && Math.round(j.premiumEstimate) > Math.round(j.premium) ? ' est ' + Math.round(j.premiumEstimate) + '%' : '';
-    meters.push(name + ' ' + Math.round(j.premium) + '%' + (age > CARRIED_CURRENT ? ' (' + ageText(age) + ' old' + est + ')' : ''));
-  }
+  const sub = side ? 'sub' : null;
+  const weekly = 'usage: Weekly ' + Math.round(j.all) + '%';
+  let usage = weekly;
+  // the per-model figure as last read, plainly: its age and the estimate are
+  // /pacing-status's, and a stale one still brings the note asking for a
+  // full reading
+  if (j.premium != null && name) usage += ' ' + name + ' ' + Math.round(j.premium) + '%';
   if (agents.length) {
-    // the agents' fixed share: what the level leaves. A side session's tier
-    // goes first only where it costs the agents no step of their detail.
+    // the agents' fixed share: what the budget share leaves. "sub" goes
+    // first only where it costs the agents no step of their detail.
     const room = LINE_MAX - chars(level) - 3;
     const lead = agentPart(agents, now, room);
     const withSub = sub && agentPart(agents, now, room - chars(sub) - 3) === lead;
-    let line = [withSub ? sub : null, lead, level].filter(Boolean).join(' · ');
-    for (const more of [split, meters.join(' ')]) if (more && chars(line + ' · ' + more) <= LINE_MAX) line += ' · ' + more;
+    const line = [withSub ? sub : null, lead, level].filter(Boolean).join(' · ');
+    for (const more of [usage, weekly]) if (chars(line + ' · ' + more) <= LINE_MAX) return line + ' · ' + more;
     return line;
   }
-  const parts = [[sub, level].filter(Boolean).join(' · ')];
-  if (split) parts.push(split);
-  parts.push(meters.join(' '));
-  return parts.join(' · ');
+  return [sub, level, usage].filter(Boolean).join(' · ');
 };
 
 // the long form, as the line read before 0.9.5: for /pacing-status
@@ -468,7 +606,7 @@ export const lineOf = (j, model, tokens, agentTokens, now, full = false, agents 
   const id = child ? idOf(model, prices) : null;
   const self = child ? (id && tierOf[id]) || 'Other' : null;
   if (full) return fullText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now)
-    + (agents.length ? '\nAgents running: ' + agents.map(a => detail(a, now, { time: 1, est: 1, step: 1 }) + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.description ? ', ' + a.description : '')).join('; ')
+    + (agents.length ? '\nRunning: ' + agents.map(a => (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { time: 1, est: 1, step: 1 }) + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.description ? ', ' + a.description : '')).join('; ')
       + (agents.some(a => estText(a, now)) ? '\n~ is a rough estimate from how long that kind of agent usually takes, not a measure of the work done.' : '') : '');
   return statusText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now, agents);
 };
@@ -509,32 +647,65 @@ export const register = on => {
   // the switch the band offers now, and every suggestion offered already
   let sw = null;
   const switchSeen = new Set();
-  // the session's own subagents now running, by id; the effort each Agent
-  // call asked for, by its tool call; the refresh timer while any run; when
-  // the last progress toast went out
+  // the session's own subagents and side sessions now running, by id; the
+  // effort each Agent call asked for, by its tool call. `st` holds what the
+  // refresh (top-level tick) reads and writes: the timer, when the agents were
+  // last settled and the side sessions polled, how long side sessions are
+  // watched for after one was started or messaged, the last progress toast.
   const agents = new Map();
   const efforts = new Map();
-  let agentTick = null;
-  let progressAt = 0;
-  const runningAgents = () => [...agents.values()].sort((a, b) => a.startedAt - b.startedAt);
-  const stopTick = () => { if (agentTick) { try { agentTick.cancel(); } catch { /* gone */ } agentTick = null; } };
+  const runningAgents = () => [...agents.values()].sort((x, y) => x.startedAt - y.startedAt);
   // the status line as it stands, with the agents when any run
   const lineNow = now => {
     const list = runningAgents();
     if (reading) return lineOf(reading, sessionModel, tokens, agentTokens, now, false, list);
     return list.length ? agentPart(list, now, LINE_MAX) : undefined;
   };
+  const st = { agents, timer: null, settledAt: 0, polledAt: 0, watchUntil: 0, progressAt: 0, host: null, children: 0, quiet: false, watchSince: 0,
+    list: runningAgents, lineNow, reading: () => reading };
+  const stopTick = () => stopTickOf(st);
 
-  // an Agent call's effort, which agent.spawn does not carry
-  on('tool.call', { tool: 'Agent' }, ($, e, next) => {
-    try { if (e.effort && e.tool_use_id) efforts.set(e.tool_use_id, e.effort); } catch { /* no effort known */ }
-    return next(e);
+  // An Agent call: its effort, which agent.spawn does not carry, and the
+  // agent in the line at once, before the engine resolves and spawns it (a
+  // few seconds), as a provisional entry the spawn takes over; dropped when
+  // the call ends with no spawn.
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    const key = 'call:' + (e.tool_use_id || '');
+    try {
+      if (e.effort && e.tool_use_id) efforts.set(e.tool_use_id, e.effort);
+      if (!e.agentId && e.tool_use_id) {
+        const now = await $.clock.now();
+        if (!agents.size) st.progressAt = now;
+        agents.set(key, { id: key, provisional: true, type: e.subagent_type || 'general-purpose', description: e.description,
+          model: e.model, effort: e.effort, background: !!e.run_in_background, startedAt: now, runs: [], step: null });
+        startTick($, st);
+        $.ui.status(lineNow(now));
+      }
+    } catch { /* the spawn shows it */ }
+    try { return await next(e); } finally {
+      if (agents.has(key)) {
+        agents.delete(key);
+        try { $.ui.status(lineNow(await $.clock.now())); } catch { /* the next refresh */ }
+      }
+    }
   });
 
-  // what a running agent is doing: its latest tool call
-  on('tool.call', ($, e, next) => {
+  // what a running agent is doing: its latest tool call. A side session
+  // started or messaged from the main thread: watch the side sessions for a
+  // minute, from the next refresh on.
+  on('tool.call', async ($, e, next) => {
     try { if (e.agentId && agents.has(e.agentId)) agents.get(e.agentId).step = stepOf(e.tool); } catch { /* no step known */ }
-    return next(e);
+    const toSession = !e.agentId && (e.tool === 'mcp__ccd_session__start_session' || e.tool === 'mcp__ccd_session_mgmt__send_message'
+      || (e.tool === 'SendMessage' && /^local_/.test(String(e.to || ''))));
+    if (!toSession) return next(e);
+    const r = await next(e);
+    try {
+      st.watchSince = await $.clock.now();
+      st.watchUntil = st.watchSince + WATCH_FOR;
+      st.polledAt = 0;
+      startTick($, st);
+    } catch { /* no watch */ }
+    return r;
   });
 
   // a subagent of the main thread starts (or a kept one is sent its next task)
@@ -544,31 +715,19 @@ export const register = on => {
       if (r && r.agentId && !e.parentAgentId && !e.isTeammate) {
         const now = await $.clock.now();
         const type = e.subagentType || 'general-purpose';
-        // the type's recent finished runs, for the estimate; none on an engine without a store
-        let runs = [];
-        try { const all = await $.store.get('agentRuns'); if (all && typeof all === 'object' && Array.isArray(all[type])) runs = all[type]; } catch { /* no history */ }
+        // the provisional entry of its Agent call, if any: the time it was first shown
+        const early = agents.get('call:' + (e.tool_use_id || ''));
+        if (early) agents.delete(early.id);
         const a = { id: r.agentId, type, description: e.description, model: r.model || e.model || e.parentModel,
-          effort: efforts.get(e.tool_use_id), background: !!e.background, startedAt: now, runs, step: null };
+          effort: efforts.get(e.tool_use_id), background: !!e.background, startedAt: early ? early.startedAt : now, runs: [], step: null };
         efforts.delete(e.tool_use_id);
-        if (!agents.size) progressAt = now;
+        if (!agents.size) st.progressAt = now;
         agents.set(a.id, a);
-        if (!agentTick) {
-          agentTick = $.clock.every(REFRESH_EVERY, () => {
-            (async () => {
-              const t = await $.clock.now();
-              await settleAgents($, agents, t);
-              if (!agents.size) stopTick();
-              $.ui.status(lineNow(t));
-              redraw($);
-              if (agents.size && t - progressAt >= PROGRESS_EVERY) {
-                progressAt = t;
-                if (await noticesOn($)) $.ui.toast(progressText(runningAgents(), t));
-              }
-            })().catch(() => { /* a refresh never disturbs the session */ });
-          });
-        }
+        startTick($, st);
+        // in the line at once; its history for the estimate after
         $.ui.status(lineNow(now));
-        if (await noticesOn($)) $.ui.toast(startedText(a, agents.size));
+        try { const all = await $.store.get('agentRuns'); if (all && typeof all === 'object' && Array.isArray(all[type])) a.runs = all[type]; } catch { /* no history */ }
+        if (await noticesOn($)) $.ui.toast(startedText(a, runningAgents()));
       }
     } catch { /* an engine without timers or toasts: the count alone */ }
     return r;
@@ -677,11 +836,51 @@ export const register = on => {
     try {
       await $.command.register({ name: 'pacing-status', description: 'Pacing: the whole status line, and what to do now.', immediate: true });
     } catch { /* an engine without commands: the line alone */ }
-    return next(e);
+    const result = await next(e);
+    // A fresh line at load (a new session, a reload, a new version): the
+    // status line kept what the module drew before, which may be old facts
+    // and old code's words for up to half an hour. With the meters the last
+    // response reported, a full reading now; with none yet, a dry run on the
+    // last stored figures, and the first measure takes the full reading at
+    // once (`last` is empty after a load). Started, not awaited: the
+    // session's start never waits on it. Silent on any failure.
+    (async () => {
+      let now;
+      try { now = await $.clock.now(); } catch { now = Date.now(); }
+      let limits = [];
+      try { limits = (await $.session.usage()).rateLimits || []; } catch { /* none yet */ }
+      const week = limits.find(r => r.kind === 'seven_day');
+      const five = limits.find(r => r.kind === 'five_hour');
+      let argv = null;
+      if (week && week.resetsAt) {
+        argv = readingArgv($.plugin.root, week.percentUsed, week.resetsAt, five && five.percentUsed, five && five.resetsAt, false);
+      } else {
+        const st = await storedReading($);
+        if (st && typeof st.all === 'number' && st.reset) argv = readingArgv($.plugin.root, st.all, st.reset, st.five, st.fiveReset, true);
+      }
+      if (!argv || running) return;
+      running = true;
+      try {
+        const r = await $.process.run(argv, { timeoutMs: 20000 });
+        const j = r.exitCode === 0 ? JSON.parse(r.stdout.trim().split('\n').pop()) : null;
+        if (j) {
+          reading = { ...j, fromLoad: true };
+          // a full reading counts as the last one; a dry one leaves the next due
+          if (week && week.resetsAt) last = { pct: week.percentUsed, at: now };
+          $.ui.status(lineNow(now));
+        }
+      } finally { running = false; }
+    })().catch(() => { /* a failure draws nothing new */ });
+    // the side sessions already working (a reload mid-work): in the line, no toast
+    (async () => { st.quiet = true; await pollSessions($, st, await $.clock.now()); })().catch(() => { /* none known */ });
+    return result;
   });
-  on('command.run', { command: 'pacing-status' }, async () => {
+  on('command.run', { command: 'pacing-status' }, async ($) => {
     if (!reading) return { text: 'Pacing: no automatic reading yet in this session. /pacing usage reads now.' };
-    const text = lineOf(reading, sessionModel, tokens, agentTokens, lastTurnAt ?? Date.now(), true, runningAgents());
+    // ages and run times as of now, by the engine's clock where it has one
+    let now;
+    try { now = await $.clock.now(); } catch { now = Date.now(); }
+    const text = lineOf(reading, sessionModel, tokens, agentTokens, now, true, runningAgents());
     return { text: 'Pacing: ' + text + (reading.do ? '\nNow: ' + reading.do : '') };
   });
 
@@ -755,7 +954,7 @@ export const register = on => {
         $.ui.status(lineNow(now));
         redraw($);
         const spent = u ? (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) : 0;
-        if (await noticesOn($)) $.ui.toast(doneText(a, now - a.startedAt, spent, agents.size));
+        if (await noticesOn($)) $.ui.toast(doneText(a, now - a.startedAt, spent, runningAgents()));
         // a run that ended by itself is the type's history for the estimate
         if (!e.isAborted) {
           try {
@@ -766,6 +965,10 @@ export const register = on => {
           } catch { /* an engine without a store: no estimate */ }
         }
       } catch { /* never disturbs the turn */ }
+    }
+    // a natural break in a session that has side sessions: one look at which work
+    if (!e.agentId && st.children > 0) {
+      try { const t = await $.clock.now(); if (t - st.polledAt >= POLL_EVERY) await pollSessions($, st, t); } catch { /* the next look */ }
     }
     // the main thread's turn ended: its foreground agents with it (it waited
     // for them); the engine's list settles the rest
@@ -837,15 +1040,14 @@ export const register = on => {
         running = true;
         last = { pct: week.percentUsed, at: now };
         const five = limits.find(r => r.kind === 'five_hour');
-        const argv = ['node', $.plugin.root + '/skills/pacing/scripts/budget.mjs',
-          '--all', String(week.percentUsed), '--reset', week.resetsAt, '--source', 'hook'];
-        if (five) argv.push('--five', String(five.percentUsed), ...(five.resetsAt ? ['--five-reset', five.resetsAt] : []));
+        const argv = readingArgv($.plugin.root, week.percentUsed, week.resetsAt, five && five.percentUsed, five && five.resetsAt, false);
         const r = await $.process.run(argv, { timeoutMs: 20000 });
         const j = r.exitCode === 0 ? JSON.parse(r.stdout.trim().split('\n').pop()) : null;
         if (j) {
-          if (reading && j.level !== reading.level) {
+          // a reading the module took at load is no level the user was told of
+          if (reading && !reading.fromLoad && j.level !== reading.level) {
             $.ui.toast('Pacing: ' + levelPhrase(reading.level) + ' -> ' + levelPhrase(j.level) + (j.levelBy === 'premium' && j.premiumLabel ? ' (' + j.premiumLabel.split(' ')[0] + ' meter)' : '') + '. ' + (j.do || ''));
-          } else if (reading && !!j.premiumHeld !== !!reading.premiumHeld) {
+          } else if (reading && !reading.fromLoad && !!j.premiumHeld !== !!reading.premiumHeld) {
             // the per-model meter moved the session off its model, or let it back
             $.ui.toast('Pacing: ' + (j.do || ''));
           }

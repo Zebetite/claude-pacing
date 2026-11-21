@@ -22,7 +22,7 @@ level in the status line.
   `node <$.plugin.root>/skills/pacing/scripts/budget.mjs --all .. --reset ..
   --source hook --five .. --five-reset ..`, and shows one toast when the
   level changes. The status line shows
-  `Budget 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · week 36% Fable 40%`
+  `Budget 77% · usage: Weekly 36% Fable 40%`
   (before 0.9.5: `77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)`):
   the meter as a share of the line; the session's own use by tier, from
   every turn's tokens (`turn.complete`, subagents included) priced per
@@ -291,3 +291,77 @@ level in the status line.
   advice (over 100 % is over); the toast on a change of level keeps the
   words and the do: line. The characters freed go to the agents.
   `/pacing-status` reads `Budget 105%` too, its "Now:" line beneath.
+
+## A fresh line at load (0.9.10)
+
+- **The case.** A session detached to the top level, 0.9.9 installed,
+  `/reload-plugins`: the line still said "T1 sub". budget.mjs answered
+  `spawned: false`, but the status line kept what the module drew before
+  until the next automatic reading (a whole point, or 30 minutes).
+- **At load** (session start and every reload; a reload runs `register` and
+  `session.start` again): with the meters the last response reported
+  (`$.session.usage().rateLimits`), a full reading at once, which counts as
+  the last one; with none yet (a new session), a dry run on the figures
+  state.json keeps, which logs nothing, and the first `session.measure`
+  takes the full reading without the wait (`last` is empty after a load).
+  Started, never awaited: the session's start does not wait on it; any
+  failure draws nothing new. A reading taken at load is no change of level
+  for the toast.
+- **No tiers in the compact line.** `Budget 77% · usage: Weekly 36% Fable
+  40%`: the budget share, then the usage, the per-model figure after a
+  comma. A side session leads with a plain `sub` (no tier; no per-model
+  meter, as before). The tier split lives in `/pacing-status`'s long form.
+  With agents running the 33-character rule holds: the count and the budget
+  share always show, the usage only when it fits whole, the per-model
+  figure going before the weekly one.
+- **No age or estimate in the compact line.** The per-model figure shows
+  as last read, `Fable 28%`, however old: a figure read beats a guess in a
+  line with no room to say which it is. Its age and the estimate stay in
+  `/pacing-status`, and a stale figure still brings the note that asks the
+  session for a full reading. The usage reads `usage: Weekly 36% Fable 28%`.
+
+## Faster, and side sessions in view (0.9.10)
+
+- **At once.** An agent shows when the model's Agent call comes, as a
+  provisional entry the spawn takes over (keeping its start time); a call
+  that spawns nothing drops it when it ends. The few seconds seen live
+  before the line showed an agent were the engine resolving and starting
+  the agent before `agent.spawn`.
+- **Every 5 seconds** while anything runs, the line and the band redrawn
+  from what the module knows (no cost); the agents settled from
+  `$.agent.list()` every 30 seconds; the timer stops when nothing runs.
+- **Side sessions.** The engine lists no other sessions; the desktop app's
+  own `list_sessions` tool does, with `isRunning` and `startedBy`. The
+  module calls it like a tool (`$.tool.call`, no dialog): once at load
+  (what already works shows, no toast), at a turn's end when the session
+  has side sessions, every 15 seconds while one works, and for a minute
+  after one was started or messaged. Never otherwise. The session records'
+  own fields (`lastTurnEdgeAt`, `lastActivityAt`, `latestUserFrameAt`)
+  only hint at working or idle, so they are not used. This session's id
+  comes from `CLAUDE_CODE_HOST_SESSION_ID`, else from budget.mjs's JSON
+  (`hostSessionId`). Anything missing or unreadable is none.
+- **One count of Agents.** In-process agents and working side sessions are
+  one count, as a sentence: `⏳ 1 Agent is running · Budget 77%` (33
+  characters), `⏳ 2 Agents are running`, shrinking to `⏳ 2 Agents` and
+  then the bare count; a single in-process agent keeps its role, time and
+  estimate (`⏳ reader 3m ~60%`). The row and the 5-minute toast start the
+  same way ("1 Agent is running in the background: …", "2 Agents are still
+  running: …"). `/pacing-status` marks the side sessions. Checked live: the
+  module reads `CLAUDE_CODE_HOST_SESSION_ID`, and `$.tool.call` reaches
+  `list_sessions`, answering `text` (the rows as JSON) and `result` (an
+  array of `{ type, text }`).
+- **Each agent in full, primarily.** The user's form: name, time, step,
+  estimate, `⏳ reader 3m searching ~60%`, each agent in turn,
+  `⏳ reader 3m searching ~60%, ⏳ researcher 1m on the web`. Without room,
+  for all at each step and from the right: the estimate, the step, the time,
+  leaving the names alone (`⏳ reader, ⏳ researcher`: "are running" there
+  was always longer than the times it replaced, so it could never show);
+  with more than one, the count, `⏳ 2 Agents are running`; last the bare
+  count, `⏳ 2 Agents`. "Agent" only for more than one, or a lone side session
+  whose title does not fit. While agents run the whole line keeps within
+  43 characters, the normal line's own widest
+  (`Budget 999% · usage: Weekly 100% Fable 100%`); the usage gives way
+  first, whole. 33 was what one screenshot showed before the app's
+  ellipsis during a turn; the footer's room varies. Toasts name who else
+  runs ("; reader is running", "; nothing else is running"), a count only
+  for three or more.

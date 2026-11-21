@@ -120,18 +120,20 @@ last two weeks.
 
 On a Claude Code version with hooks modules, the plugin also takes a
 reading by itself after a turn: when the weekly meter has moved a whole
-point, or 30 minutes after the last reading. It keeps the start line
+point, or 30 minutes after the last reading, and once when the plugin
+loads (a session's start, a reload, a new version), so the status line never
+shows old facts until then. It keeps the start line
 fresh for the next session and shows it in the status line, with one
 notice when the level changes:
 
 <!-- help -->
-    Budget 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · week 36% Fable 40%
+    Budget 77% · usage: Weekly 36% Fable 40%
 
 That is the weekly meter as a share of today's budget line (over 100 %
-means over it; a toast says when the level changes), how this session's own use
-splits over the tiers (T1 is tier 1), subagents included, and the two
-meters. The desktop app may cut the end of the line; `/pacing-status`
-shows it whole, in words.<!-- /help --> The split is an estimate: each
+means over it; a toast says when the level changes), then the two
+weekly meters' usage. `/pacing-status` shows the whole line in words,
+with how this session's own use splits over the tiers, subagents
+included.<!-- /help --> The split is an estimate: each
 model's tokens priced at its API rates, which is how the weekly meter
 weighs the models too. The tiers are those in force at the reading:
 while Fable's meter is out or held, the fallback (Opus 5.5 high) is tier
@@ -143,18 +145,19 @@ three tiers). The
 circles are gold, silver, bronze and brown for tiers 1 to 4 (🟡 ⚪ 🟠 🟤),
 then 🟣 🔴 🔵 🟢 for a longer ladder; ⚫ is a model the ladder does not
 hold. A session that another session started (a side session in the
-desktop app) leads with the tier of the model it runs on, and shows the
-weekly meter only, not Fable's, which the session that started it shows:
+desktop app) leads with `sub`, and shows the weekly meter only, not
+Fable's, which the session that started it shows:
 
-    ⚪T2 sub · Budget 77% · ⚪T2 90% 🟤T4 10% · week 36%
+    sub · Budget 77% · usage: Weekly 36%
 
 Claude Code hands a plugin only the all-models and 5-hour meters,
 so such a reading carries the per-model figure (Fable's by default) over
 from the last full reading of the week. The figure can only have risen
 since, so a carried level may be too mild, never too strict, and it is
-never shown as current once it is half an hour old: the status line
+never shown as current once it is half an hour old: `/pacing-status`
 gives its age and, where the readings allow, an estimate of where the
-meter is now (`Fable 71% (15h old est 90%)`). The estimate is only
+meter is now (`71% Fable 15h ago, est. 90%`); the status line shows the
+figure as read. The estimate is only
 shown; the level never rests on it. Once the figure is an hour old, or
 the all-models meter has moved 2 points since it was read, Claude is
 told beside your next prompt to take a full reading, once, and again an
@@ -327,12 +330,18 @@ each with its own instructions and tools:
 | researcher | documentation and the web, with sources | no |
 
 **Seeing them work.** While agents run, the status line leads with them
-and still shows the budget: `⏳ reader 3m · Budget 77%`, or with more
-at once `⏳ 2 agents 3m · Budget 77%`. It shrinks in steps
-to fit the line (each agent with its time, then the names, then the
-count and the longest run, then the count) and never drops the count.
-It refreshes every 30 seconds and goes back to the plain line when the
-last agent ends. A toast says when an agent starts (its role, model and
+and still shows the budget, each agent by its name, how long it has run,
+what it is doing and the estimate: `⏳ reader 3m searching ~60% · Budget
+77%`. Side sessions this session started show by their short title
+while they work (in the desktop app, which says which sessions are
+working). When the line has no room, it drops for every agent, from
+the right: the estimate, then the step, then the time, leaving the
+names, `⏳ reader, ⏳ implementer`; then, with more than one, it gives
+the count, `⏳ 2 Agents are running`, and last `⏳ 2 Agents`. The usage figures make room first. An agent shows the
+moment the session calls it, before Claude Code has started it. The
+line refreshes every 5 seconds while anything runs and goes back to the
+plain line when the last one ends. `/pacing-status` says which of the
+Agents are side sessions. A toast says when an agent starts (its role, model and
 effort, and how many run), when it ends (how long it ran, its tokens,
 how many still run), and every 5 minutes while any runs. An agent that
 works on in the background after the turn ends gets a row above the
