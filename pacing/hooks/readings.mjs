@@ -24,9 +24,10 @@
 // Once the prompt cache has expired, the next turn stores the whole history
 // again at the write price. When the user submits a prompt after such a pause
 // and the session holds 300 000 tokens or more, one toast says so, once per
-// pause. It shows as the prompt is submitted, before the request goes out, but
-// it never holds or changes the prompt: that turn still pays, and the advice
-// is for the breaks after it.
+// pause. It shows as the prompt is submitted, before the request goes out.
+// Where the engine has the question dialog and the offers are on, the dialog
+// takes its place and offers to compact first (see "an offer to compact"):
+// the prompt waits for the answer and then goes on exactly as typed.
 
 const MIN_GAP = 30 * 60 * 1000;
 // The engine tells a module nothing of the cache's lifetime (only a model
@@ -49,6 +50,68 @@ export const pauseNote = (tokens, idleMs) => (tokens >= PAUSE_SIZE && idleMs >= 
   ? 'Pacing: this session is ' + Math.round(tokens / 1000) + 'k tokens and sat idle ' + span(idleMs)
     + ', so its cache has lapsed and this turn stores it all again. After a break, /compact or a handover first is cheaper.'
   : null);
+
+// ---- an offer to compact ----
+// A large session pays for its size on every turn: each turn sends the whole
+// history again (at the cache's read price while it is warm, at the write
+// price once it has lapsed). So the module offers to compact, at three levels:
+//   suggest  from 300 000 tokens, once a turn has ended: one calm line in the
+//            band above the prompt, with Compact now and Not now. It never
+//            interrupts and stays until answered or the next prompt.
+//   urge     from 500 000 tokens: the same band, plainer words, the cost, and
+//            the warning colour.
+//   now      a session of 300 000 tokens or more left idle: the same band in
+//            the warning colour, 10 minutes before the cache lapses and again
+//            once it has, so the person can compact before the next turn pays
+//            to store it all again. Timers set when a turn ends; any prompt
+//            ends them.
+// Why not ask when the prompt is sent: the engine refuses a compaction from a
+// prompt.submit hook ("it would compact under the turn this hook is
+// holding"), so the prompt cannot be held for one, and resending it would
+// lose what came with it. The notice after a pause still shows then, as
+// before, unless the row already said it for that pause. No dialog: the
+// question dialog interrupts, and one raised while nobody is there resolves
+// itself when the person is away.
+// Once per level; again only after the session grew by a further 100 000
+// tokens, or (now) after a new pause. Never while a turn runs, never in a
+// subagent, and only once a person has typed in the session (a side session
+// another session drives has nobody to ask). `/pacing compact off` turns the
+// offers off; the pause notice then shows as it did before them. An engine
+// without the band, the timers or $.session.compact keeps the notice too.
+export const SUGGEST_AT = 300000;
+export const URGE_AT = 500000;
+export const OFFER_STEP = 100000;
+export const COMPACT_INSTRUCTIONS = 'Keep what this session must not lose: the goal; the decisions made and why; '
+  + 'the open items, in order; the files and commands that matter; what was tried and ruled out.';
+const kTok = n => Math.round(n / 1000) + 'k';
+// the band's level for a session of this size, or null
+export const offerLevel = tokens => (tokens >= URGE_AT ? 'urge' : tokens >= SUGGEST_AT ? 'suggest' : null);
+// whether a level may be offered now, given the size at its last offer
+export const offerDue = (level, tokens, offered) => !!level && (offered[level] == null || tokens >= offered[level] + OFFER_STEP);
+export const offerText = (level, tokens) => (level === 'urge'
+  ? 'This session is ' + kTok(tokens) + ' tokens, and every turn sends all ' + kTok(tokens) + ' again. Compact now to cut that.'
+  : 'This session is ' + kTok(tokens) + ' tokens. Compacting now makes every later turn cheaper.');
+// now: the cache lapses LAPSE_LEAD before it does, and once it has
+export const LAPSE_LEAD = 10 * 60 * 1000;
+export const nowText = (tokens, lapsed) => (lapsed
+  ? 'This session is ' + kTok(tokens) + ' tokens and its cache has lapsed, so the next turn stores all of it again. Compacting first is cheaper.'
+  : 'This session is ' + kTok(tokens) + ' tokens, and its cache lapses in about ' + Math.round(LAPSE_LEAD / 60000) + ' minutes. Then the next turn stores all of it again. Compacting now is cheaper.');
+export const compactedText = (before, after) => (before && after
+  ? 'Pacing: compacted from ' + kTok(before) + ' to ' + kTok(after) + ' tokens.'
+  : 'Pacing: compacted. The status line shows the new size after the next turn.');
+// the setting in config.json: on unless it says false
+export const compactAskOf = text => { try { return JSON.parse(text).compactAsk !== false; } catch { return true; } };
+// read when an offer is due, so a change applies at once; any failure: on
+async function compactAskOn($) {
+  try {
+    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
+    if (!home) return true;
+    return compactAskOf(await $.fs.read(home + '/.claude/pacing/config.json'));
+  } catch { return true; }
+}
+
+// a redraw of the band; an engine without it has nothing to redraw
+function redraw($) { try { $.ui.invalidate('ui.render'); } catch { /* no band */ } }
 
 // shares that add up to 100: whole percents by the largest remainder
 const percents = values => {
@@ -216,6 +279,66 @@ export const register = on => {
   // the desktop app's own record of the session). The model it runs on: its
   // main thread's last turn.
   let sessionModel = null;
+  // the offer to compact: the one in the band ({ level, tokens }) or null, the
+  // size at each level's last offer, and whether a person has typed here
+  let offer = null;
+  let offered = {};
+  let attended = false;
+  // the pause's timers, and the pause (its last turn's end) a drawn now row spoke for
+  let timers = [];
+  let nowFor = null;
+  const clearTimers = () => { for (const t of timers) { try { t.cancel(); } catch { /* gone */ } } timers = []; };
+  const forget = () => { offer = null; offered = {}; };
+
+  // the band above the prompt: the suggest, urge and now offers. Hidden
+  // while a turn runs, under a survey, and over a subagent's transcript.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const p = e.props || {};
+    if (!offer || p.hasSurvey || p.isWorking || (p.view && p.view.agentId) || (e.plugin && e.plugin !== 'pacing')) return next(e);
+    const { Box, Text, Button } = $.ui.resolve(e);
+    const shown = offer;
+    const urge = shown.level !== 'suggest';
+    const words = shown.level === 'now' ? nowText(shown.tokens, shown.lapsed) : offerText(shown.level, shown.tokens);
+    // drawn: the notice after this pause need not say it again
+    if (shown.level === 'now') nowFor = shown.pause;
+    return Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
+      Text(urge ? { color: 'warning', children: words } : { dimColor: true, children: words }),
+      Button({ key: 'pacing-compact', label: 'Compact now', variant: urge ? 'primary' : 'secondary', onPress: async () => {
+        offer = null;
+        offered[shown.level] = shown.tokens;
+        clearTimers();
+        redraw($);
+        try {
+          const r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS });
+          if (r && r.skip) $.ui.toast('Pacing: the compaction did not run: ' + r.skip);
+          else {
+            $.ui.toast(compactedText((r && r.tokensBefore) || shown.tokens, r && r.tokensAfter));
+            forget();
+            contextTokens = (r && r.tokensAfter) || null;
+          }
+        } catch {
+          $.ui.toast('Pacing: a compaction cannot start while a turn runs. Type /compact once it ends.');
+        }
+      } }),
+      Button({ key: 'pacing-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => {
+        if (shown.level === 'now') clearTimers();
+        offer = null;
+        offered[shown.level] = shown.tokens;
+        redraw($);
+      } }),
+    ] });
+  });
+
+  // a compaction the person or the engine ran: the offers start over
+  on('session.compact', async ($, e, next) => {
+    const r = await next(e);
+    if (!e.agentId && r && r.messages) {
+      forget();
+      contextTokens = r.tokensAfter || null;
+      redraw($);
+    }
+    return r;
+  });
 
   // the whole line, which the footer cuts: /pacing-status, at any time
   on('session.start', async ($, e, next) => {
@@ -236,12 +359,23 @@ export const register = on => {
       // slash command (/compact, a handover) is the user acting on it already
       const typed = !e.turnId && !e.isMeta && !e.command && !String(e.text || '').trimStart().startsWith('/')
         && !unattended(e.origin);
+      // a person in front of the session: the offers are theirs to answer
+      if (!e.turnId && !e.isMeta) attended = !unattended(e.origin);
+      // the user compacting or handing over already: the band's offer is answered
+      const cmd = e.command ? e.command.name + ' ' + (e.command.args || '') : String(e.text || '').trimStart();
+      if (offer && /^\/?(compact\b|pacing handover\b)/.test(cmd)) {
+        offered[offer.level] = offer.tokens;
+        offer = null;
+        redraw($);
+      }
+      // any prompt starts a turn: the pause is over, and a row it raised goes
+      clearTimers();
+      if (offer && (typed || offer.level === 'now')) { offer = null; redraw($); }
       if (typed && lastTurnAt !== null && warnedFor !== lastTurnAt) {
         const note = pauseNote(contextTokens, (await $.clock.now()) - lastTurnAt);
-        if (note) {
-          warnedFor = lastTurnAt;
-          $.ui.toast(note, { timeoutMs: 15000 });
-        }
+        // the row before and after the lapse said it already: no second notice
+        if (note && nowFor !== lastTurnAt) $.ui.toast(note, { timeoutMs: 15000 });
+        if (note) warnedFor = lastTurnAt;
       }
       // a full reading is due: the session is told beside this prompt, in a
       // block the user does not see; the prompt's own text is never touched
@@ -282,6 +416,31 @@ export const register = on => {
     // the turn's tokens are in: the line shows them now, not at the next turn
     if (!e.agentId && reading && !running) {
       try { $.ui.status(lineOf(reading, sessionModel, tokens, agentTokens, lastTurnAt ?? Date.now())); } catch { /* never disturbs the turn */ }
+    }
+    // a natural break: the main thread's turn ended. A large session is
+    // offered a compaction in the band, once per level and step of growth.
+    if (!e.agentId && attended && typeof contextTokens === 'number') {
+      try {
+        const level = offerLevel(contextTokens);
+        const on_ = level ? await compactAskOn($) : false;
+        if (on_ && offerDue(level, contextTokens, offered) && !(offer && offer.level === level)) {
+          offer = { level, tokens: contextTokens };
+          offered[level] = contextTokens;
+          redraw($);
+        }
+        // now: while it sits idle, before the cache lapses and once it has
+        clearTimers();
+        if (on_) {
+          const pause = lastTurnAt, size = contextTokens;
+          const raise = lapsed => () => {
+            if (lastTurnAt !== pause) return;
+            offer = { level: 'now', tokens: size, lapsed, pause };
+            redraw($);
+          };
+          timers.push($.clock.after(CACHE_TTL - LAPSE_LEAD, raise(false)));
+          timers.push($.clock.after(CACHE_TTL, raise(true)));
+        }
+      } catch { /* an engine without the band: nothing drawn */ }
     }
     return result;
   });

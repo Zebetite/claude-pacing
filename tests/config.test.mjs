@@ -69,6 +69,23 @@ describe('the ladder', () => {
     assert.deepEqual([c.premium, c.fallback], [null, null]);
     assert.match(s.config([]).out, /^per-model weekly meter: none; when it is full: none \(the remaining tiers move up\)$/m);
   }));
+  test('the offers to compact: on by default, off and on again, kept by reset', withHome(s => {
+    s.config(['init']);
+    assert.match(s.config([]).out, /^offers to compact a large session: on$/m);
+    s.config(['compact', 'off']);
+    assert.equal(cfgOf(s).compactAsk, false);
+    assert.match(s.config([]).out, /^offers to compact a large session: off$/m);
+    s.config(['reset']);
+    assert.equal(cfgOf(s).compactAsk, false);
+    s.config(['apply', 'compact', 'on']);
+    assert.equal(cfgOf(s).compactAsk, true);
+    const r = s.config(['compact', 'maybe']);
+    assert.equal(r.code, 1);
+    assert.match(r.out, /compact on \| compact off/);
+    // a value that is no switch is dropped with a note, and the default stands
+    s.writeConfig({ ...cfgOf(s), compactAsk: 'sometimes' });
+    assert.match(s.config([]).out, /the offers to compact are not on or off: the default is used/);
+  }));
   test('reset keeps the install date, the meter and the switch', withHome(s => {
     s.writeConfig({ tiers: [{ model: 'haiku', effort: 'low' }, { model: 'haiku', effort: 'max' }], lastDayWeight: 3, setNextModel: false, premium: null, installed: '2025-01-01' });
     s.config(['reset']);

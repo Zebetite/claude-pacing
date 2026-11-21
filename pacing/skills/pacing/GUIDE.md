@@ -215,10 +215,23 @@ plugin also watches for the expensive moment itself. When you send a
 prompt after an hour or more without a turn, and the session holds
 300 000 tokens or more, one notice says how large the session is, how
 long it sat idle, and that compacting or a handover first is cheaper. It
-comes once per pause and never holds or changes your prompt, so the turn
-you just sent still pays to store the session again; the notice is for
-the breaks after it. An hour is assumed for the cache's lifetime, since
-Claude Code does not tell a plugin.
+comes once per pause and never holds or changes your prompt: Claude Code
+lets no plugin compact while a prompt waits to be sent. So the plugin
+warns earlier instead (below). An hour is assumed for the cache's
+lifetime, since Claude Code does not tell a plugin.
+
+**An offer to compact.** When a turn ends in a session of 300 000
+tokens or more, a row above the prompt says how large it is, with
+**Compact now** and **Not now**. From 500 000 tokens the row says what
+each turn sends again, in the warning colour. It never interrupts, and
+comes again only after the session has grown by another 100 000 tokens.
+Left idle, the row turns to the warning colour 10 minutes before the
+cache lapses, and again once it has: compacting then costs less than the
+next turn storing it all again. Compact now keeps the goal, the
+decisions and why, the open items, the files and commands that matter,
+and what was ruled out; one line then gives the size before and after.
+`/pacing compact off` turns the row off; the notice after a pause then
+shows as before.
 
 Bulky reading (logs, test output, many files) goes to the reader agent
 for the same reason: what the agent reads never enters the session's
@@ -353,6 +366,7 @@ first hands work to a subagent; a plain report never loads them.
 | `/pacing log` | the last readings |
 | `/pacing week` | the last two weeks in sum: where the meter ended, the share of the time at each level, and whether it crossed the line |
 | `/pacing next on`, `/pacing next off` | lets the skill set, or stop setting, the default model of new sessions |
+| `/pacing compact on`, `/pacing compact off` | turns the offers to compact a large session on (the default) or off: a row above the prompt with Compact now from 300 000 tokens, plainer from 500 000, and a warning before the cache of an idle session lapses |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model weekly meter belongs to (Fable by default), or says the plan has none |
 | `/pacing fallback opus high`, `/pacing fallback none` | the tier that takes the top place while that meter is full (Opus 5.5 high by default); none lets the remaining tiers move up |
 | `/pacing reader haiku medium`, `/pacing reader ladder` | the model the reader agent reads on (Haiku 5.5 medium by default), or the lowest tier |

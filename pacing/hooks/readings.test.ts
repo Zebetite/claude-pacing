@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, offerText, nowText, COMPACT_INSTRUCTIONS } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -562,4 +562,221 @@ test('/pacing-status shows the whole line in the long form, and what to do now',
   const r = await $.command.run({ command: 'pacing-status', args: '' } as any)
   // a side session's long form shows no per-model meter either
   expect(r.text).toBe('Pacing: ⚪Tier 2 Sub Agent - 105% of budget, ⚪Tier 2[100%], (21% Weekly)\nNow: Fable 5.2 held: Opus 5.5 high')
+})
+
+// ---- the offer to compact ----
+
+const BAND = {
+  plugin: 'pacing', component: 'AbovePrompt', requestId: 'pacing', surface: 'desktop',
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 10, bodyColumns: 100, scroll: { offset: 0, bodyRows: 10 }, view: {} },
+} as const
+// the engine beneath for the offers: what compacted and with which
+// instructions, the toasts, the order of it all, and
+// the config file the module reads (never the real one)
+const offers = (on: any, opts: { config?: string; compacted?: { tokensBefore?: number; tokensAfter?: number } } = {}) => {
+  const seen = { compacts: [] as string[], toasts: [] as string[], order: [] as string[], entered: [] as string[] }
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  // the path as the engine hands it on (it may resolve it); no config: '{}'
+  on('fs.read', (_: unknown, e: any) => ({ value: opts.config !== undefined && /[\\/]\.claude[\\/]pacing[\\/]config\.json$/.test(String(e.path)) ? opts.config : '{}' }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', (_: unknown, e: any) => (seen.toasts.push(e.text), seen.order.push('toast'), { value: undefined }))
+  on('session.compact', (_: unknown, e: any) => (seen.compacts.push(e.instructions), seen.order.push('compact'),
+    { messages: [{ role: 'assistant', text: 'the summary', toolUses: [] }], tokensBefore: opts.compacted?.tokensBefore, tokensAfter: opts.compacted?.tokensAfter ?? 40000 }))
+  on('prompt.submit', (_: unknown, e: any) => (seen.order.push('turn'), seen.entered.push(e.text), { text: e.text }))
+  return seen
+}
+// the band's text as drawn now, or undefined; mounted and unmounted again
+const bandText = async ($: any) => {
+  const ui = await $.ui.mount(BAND)
+  const t = await ui.find({ type: 'Text', text: /session is/ })
+  await ui.unmount()
+  return { text: t?.text as string | undefined }
+}
+
+test('suggest: from 300 000 tokens, a calm row with Compact now; it compacts with the instructions and says the sizes', async ($, on) => {
+  engine(on)
+  big(on)
+  const seen = offers(on, { compacted: { tokensBefore: 320000, tokensAfter: 38000 } })
+
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 320000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount(BAND)
+  const text = (await ui.find({ type: 'Text', text: /session is/ }))?.text
+  expect(text).toBe('This session is 320k tokens. Compacting now makes every later turn cheaper.')
+  expect(text).toBe(offerText('suggest', 320000))
+  await ui.press({ key: 'pacing-compact' })
+  expect(seen.compacts).toEqual([COMPACT_INSTRUCTIONS])
+  expect(COMPACT_INSTRUCTIONS).toContain('the goal; the decisions made and why; the open items, in order; the files and commands that matter; what was tried and ruled out')
+  expect(seen.toasts).toEqual(['Pacing: compacted from 320k to 38k tokens.'])
+  await ui.unmount()
+  // the row is gone after the press
+  expect((await bandText($)).text).toBe(undefined)
+})
+
+test('urge: from 500 000 tokens, plainer words with what each turn sends again', async ($, on) => {
+  engine(on)
+  big(on)
+  offers(on)
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 540000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const { text } = await bandText($)
+  expect(text).toBe('This session is 540k tokens, and every turn sends all 540k again. Compact now to cut that.')
+})
+
+test('once per level: Not now holds until the session grows by 100 000 more; a new level comes at once', async ($, on) => {
+  engine(on)
+  big(on)
+  const seen = offers(on)
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 320000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const first = await $.ui.mount(BAND)
+  expect((await first.find({ type: 'Text', text: /session is/ }))?.text).toContain('320k')
+  await first.press({ key: 'pacing-not-now' })
+  await first.unmount()
+  expect(seen.compacts).toEqual([])
+
+  for (const size of [330000, 410000]) {
+    await $.session.measure(measure(10, [], size))
+    await $.turn.complete(turn('claude-fable-5-2', 1))
+    expect((await bandText($)).text).toBe(undefined)
+  }
+  await $.session.measure(measure(10, [], 425000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect((await bandText($)).text).toContain('425k')
+  // the user's next prompt answers it: gone, and not back at once
+  await $.prompt.submit({ text: 'go on', asUser: true })
+  expect((await bandText($)).text).toBe(undefined)
+  await $.session.measure(measure(10, [], 505000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect((await bandText($)).text).toContain('every turn sends all 505k again')
+})
+
+test('never while a turn runs, never before a person has typed, gone after the user\'s own /compact', async ($, on) => {
+  engine(on)
+  big(on)
+  offers(on)
+  // a side session another session drives: its prompt is a peer's
+  await $.prompt.submit({ text: 'do the task', origin: { kind: 'peer' } } as any)
+  await $.session.measure(measure(10, [], 350000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect((await bandText($)).text).toBe(undefined)
+  // a subagent's turn is no break of the session's
+  await $.prompt.submit({ text: 'now me', asUser: true })
+  await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
+  expect((await bandText($)).text).toBe(undefined)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, isWorking: true } })
+  expect(await ui.find({ type: 'Text', text: /session is/ })).toBeFalsy()
+  await ui.unmount()
+  expect((await bandText($)).text).toContain('350k')
+  // the user compacts by hand: the row goes, and the offers start over
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'all of it', toolUses: [] }] } as any)
+  expect((await bandText($)).text).toBe(undefined)
+})
+
+test('now: left idle, the row warns 10 minutes before the cache lapses and again once it has; Compact now works between turns', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = offers(on, { compacted: { tokensBefore: 420000, tokensAfter: 41000 } })
+
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 420000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  // the suggest row first; the user lets it be
+  expect((await bandText($)).text).toContain('Compacting now makes every later turn cheaper')
+  await clock.advance(49 * 60000)
+  expect((await bandText($)).text).toContain('Compacting now makes every later turn cheaper')
+  await clock.advance(1 * 60000)
+  expect((await bandText($)).text).toBe('This session is 420k tokens, and its cache lapses in about 10 minutes. Then the next turn stores all of it again. Compacting now is cheaper.')
+  expect((await bandText($)).text).toBe(nowText(420000, false))
+  await clock.advance(10 * 60000)
+  const ui = await $.ui.mount(BAND)
+  expect((await ui.find({ type: 'Text', text: /session is/ }))?.text).toBe('This session is 420k tokens and its cache has lapsed, so the next turn stores all of it again. Compacting first is cheaper.')
+  await ui.press({ key: 'pacing-compact' })
+  await ui.unmount()
+  expect(seen.compacts).toEqual([COMPACT_INSTRUCTIONS])
+  expect(seen.toasts).toEqual(['Pacing: compacted from 420k to 41k tokens.'])
+  // the prompt after it: no second notice of the pause
+  const r = await $.prompt.submit({ text: 'back again', asUser: true })
+  expect(r.text).toBe('back again')
+  expect(seen.toasts.length).toBe(1)
+})
+
+test('now, Not now: the row goes and the lapse does not bring it back; the notice after the pause is not repeated', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = offers(on)
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 420000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(50 * 60000)
+  const ui = await $.ui.mount(BAND)
+  expect((await ui.find({ type: 'Text', text: /session is/ }))?.text).toContain('lapses in about 10 minutes')
+  await ui.press({ key: 'pacing-not-now' })
+  await ui.unmount()
+  await clock.advance(20 * 60000)
+  expect((await bandText($)).text).toBe(undefined)
+  const r = await $.prompt.submit({ text: 'as I typed it', asUser: true })
+  expect(r.text).toBe('as I typed it')
+  expect(seen.compacts).toEqual([])
+  expect(seen.toasts).toEqual([])
+})
+
+test('now: a prompt before the lapse ends the timers; a small session sets none', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  offers(on)
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 420000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(20 * 60000)
+  await $.prompt.submit({ text: 'quick one', asUser: true })
+  await clock.advance(50 * 60000)
+  expect((await bandText($)).text).toBe(undefined)
+
+  await $.session.measure(measure(10, [], 120000))
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'all of it', toolUses: [] }] } as any)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(70 * 60000)
+  expect((await bandText($)).text).toBe(undefined)
+})
+
+test('off: no row, no timers; the notice after a pause shows as before', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = offers(on, { config: JSON.stringify({ compactAsk: false }) })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 540000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect((await bandText($)).text).toBe(undefined)
+  await clock.advance(70 * 60000)
+  expect((await bandText($)).text).toBe(undefined)
+  const r = await $.prompt.submit({ text: 'after lunch', asUser: true })
+  expect(seen.compacts).toEqual([])
+  expect(seen.toasts).toEqual([pauseNote(540000, 70 * 60000)])
+  expect(r.text).toBe('after lunch')
+})
+
+test('an older engine without the band, the timers or compaction: the notice as before, the prompt unchanged', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const order: string[] = []
+  const entered = prompts(on, order)
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 540000))
+  // no ui.invalidate and no session.compact beneath: nothing throws
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(70 * 60000)
+  const r = await $.prompt.submit({ text: 'later', asUser: true })
+  expect(r.text).toBe('later')
+  expect(entered.at(-1)).toBe('later')
+  expect(order.filter(o => o.startsWith('toast')).length).toBe(1)
 })

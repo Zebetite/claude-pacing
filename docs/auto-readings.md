@@ -225,3 +225,33 @@ level in the status line.
 - A side session shows no per-model meter at all: its line reads as its
   own use, and the figure is the session's that started it. This
   replaces the lead described in the section above.
+
+## An offer to compact (0.9.7)
+
+- **Three levels, one surface.** The band above the prompt, with
+  **Compact now** and **Not now**: from 300 000 tokens at the end of a
+  turn, one calm dim line; from 500 000, plainer words with what every
+  turn sends again, in the warning colour; and for a session of 300 000 or
+  more left idle, a warning 10 minutes before the cache lapses and again
+  once it has. The band never interrupts and stays until answered or the
+  next prompt.
+- **Why not ask when the prompt is sent.** The engine refuses
+  `$.session.compact` from a `prompt.submit` hook: "it would compact under
+  the turn this hook is holding". Holding the prompt would mean dropping it
+  and sending it again, which loses what came with it. The question
+  dialog was left out too: it interrupts, and one raised while nobody is
+  there resolves itself when the person is away. So the warning comes
+  before the lapse, from timers (`$.clock.after`) set when a turn ends;
+  any prompt ends them. The notice after a pause still shows when the row
+  was never drawn for that pause.
+- **Not nagging.** Once per level; again after another 100 000 tokens, or
+  after a new pause. Never while a turn runs (`isWorking`), never over a
+  subagent's transcript, and only once a person has typed in the session.
+  A compaction the user or the engine runs starts the offers over.
+- **The compaction.** `$.session.compact` with instructions to keep the
+  goal, the decisions and why, the open items in order, the files and
+  commands that matter, and what was ruled out. A toast gives the size
+  before and after.
+- **Off.** `/pacing compact off` writes `compactAsk: false`; the module
+  reads config.json when an offer is due, so it applies at once. An engine
+  without the band, the timers or compaction keeps the notice as before.
