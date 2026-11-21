@@ -35,7 +35,7 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 - **A status line after every turn** (new in 0.8):
 
   ```
-  ahead 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · wk 36% Fable 40%
+  under budget 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · week 36% Fable 40%
   ```
 
   The level and the weekly meter as a share of today's line, how this

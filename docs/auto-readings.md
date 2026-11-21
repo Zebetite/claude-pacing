@@ -22,7 +22,7 @@ level in the status line.
   `node <$.plugin.root>/skills/pacing/scripts/budget.mjs --all .. --reset ..
   --source hook --five .. --five-reset ..`, and shows one toast when the
   level changes. The status line shows
-  `ahead 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · wk 36% Fable 40%`
+  `under budget 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · week 36% Fable 40%`
   (before 0.9.5: `77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)`):
   the meter as a share of the line; the session's own use by tier, from
   every turn's tokens (`turn.complete`, subagents included) priced per
@@ -76,7 +76,7 @@ level in the status line.
 ## The per-model meter and the pause warning (after 0.8.5-beta, not released)
 
 - **A side session's status line.** A session another session started
-  leads with its own tier: `⚪T2 sub · ahead 77% · ...` (before 0.9.5:
+  leads with its own tier: `⚪T2 sub · under budget 77% · ...` (before 0.9.5:
   `⚪Tier 2 Sub Agent - 77% of budget, ...`).
   The tier is that of the model its main thread's last turn ran on
   (`⚫Other` off the ladder); before its first turn the line is the plain
@@ -205,7 +205,7 @@ level in the status line.
   text alone (its first 2 000 characters): it neither says the width nor
   takes a tooltip, so the line cannot choose a form by the room it gets.
 - **Essentials first, short labels.** `🟡T1 sub · Fable held 158% · 🟡T1
-  100% · wk 50% Fable 90%`: a side session's tier, then the level with
+  100% · week 50% Fable 90%`: a side session's tier, then the level with
   the budget share of the meter that decides it (`over 103%`, `Fable held
   158%`, `stop 120% wrap up`), then the tier split, then the meters, a
   carried figure with its age (`Fable 71% (15h old est 90%)`). The lead

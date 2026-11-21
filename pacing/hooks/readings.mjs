@@ -184,14 +184,20 @@ export const fullReadingAsk = j => (j && j.needFull
 // `now` (ms) dates a carried per-model figure: "71% Fable 15h ago, est. 90%".
 // The status line, compact. The desktop app gives it what is left of the
 // composer's footer beside the model and mode pickers, and cuts the rest with
-// an ellipsis: about 32 characters while a turn runs. So what matters comes
+// an ellipsis: about 33 characters while a turn runs. So what matters comes
 // first and a cut takes only the tail:
 //   a side session's own tier   🟡T1 sub
-//   the level and budget share  over 107%   stop 120% wrap up
+//   the level and budget share  over budget 107%   stop 120% wrap up
 //   the session's tier split    🟡T1 45% ⚪T2 55%
-//   the meters                  wk 48% Fable 71% (2h old est 80%)
+//   the meters                  week 48% Fable 71% (2h old est 80%)
 // `/pacing-status` shows the whole line in the long form (fullText).
-export const HEAD_MAX = 32;
+// The case reported drew 33 characters before the ellipsis
+// ("🟡Tier 1 Sub Agent - 158% of Fable"), the circle counted as one.
+export const HEAD_MAX = 33;
+// The levels in words that say which side of the budget line the week is:
+// "ahead" read as spending ahead of the budget, the opposite of its meaning.
+const PHRASE = { 'ahead': 'under budget', 'on pace': 'on budget', 'over': 'over budget', 'throttle': 'far over budget', 'stop': 'stop' };
+export const levelPhrase = level => PHRASE[level] || level || '';
 // The head is the weekly meter's level and share. The per-model meter shows
 // as its week's usage among the meters and nowhere else: a share of its line
 // ("Fable held 158%") read as usage over 100 %. When that meter set the
@@ -206,13 +212,13 @@ export const statusText = (j, mix, self = null, now = Date.now()) => {
   const side = sideOf(j, self);
   const name = j.premiumLabel && !side ? j.premiumLabel.split(' ')[0] : null;
   const stop = j.level === 'stop';
-  const word = stop ? 'stop' : j.levelBy === 'premium' ? '' : j.level || '';
+  const word = stop ? 'stop' : j.levelBy === 'premium' ? '' : levelPhrase(j.level);
   const pct = j.ofBudget;
   const head = [[word, pct != null ? pct + '%' : ''].filter(Boolean).join(' ') + (stop ? ' wrap up' : '')];
   if (self !== null) head.unshift(square(self) + (self === 'Other' ? 'Other' : 'T' + self) + ' sub');
   const parts = [head.join(' · ')];
   if (mix.length) parts.push(mix.map(x => square(x.tier) + (x.tier === 'Other' ? 'Other' : 'T' + x.tier) + ' ' + x.share + '%').join(' '));
-  const meters = ['wk ' + Math.round(j.all) + '%'];
+  const meters = ['week ' + Math.round(j.all) + '%'];
   if (j.premium != null && name) {
     const age = j.premiumAt ? now - Date.parse(j.premiumAt) : 0;
     const est = j.premiumEstimate != null && Math.round(j.premiumEstimate) > Math.round(j.premium) ? ' est ' + Math.round(j.premiumEstimate) + '%' : '';
@@ -238,7 +244,7 @@ export const fullText = (j, mix, self = null, now = Date.now()) => {
   const parts = [];
   // the weekly meter's share of its line; the per-model meter shows as its
   // usage among the meters only (see statusText)
-  const share = j.ofBudget != null ? j.ofBudget + '% of budget' : null;
+  const share = j.ofBudget != null ? j.ofBudget + '% of budget' + (j.levelBy !== 'premium' && j.level && j.level !== 'stop' ? ' (' + levelPhrase(j.level) + ')' : '') : null;
   if (self !== null) parts.push(square(self) + (self === 'Other' ? 'Other' : 'Tier ' + self) + ' Sub Agent' + (share ? ' - ' + share : ''));
   else if (share) parts.push(share);
   if (mix.length) parts.push(mix.map(x => square(x.tier) + (x.tier === 'Other' ? 'Other' : 'Tier ' + x.tier) + '[' + x.share + '%]').join(' '));
@@ -468,7 +474,7 @@ export const register = on => {
         const j = r.exitCode === 0 ? JSON.parse(r.stdout.trim().split('\n').pop()) : null;
         if (j) {
           if (reading && j.level !== reading.level) {
-            $.ui.toast('Pacing: ' + reading.level + ' -> ' + j.level + (j.levelBy === 'premium' && j.premiumLabel ? ' (' + j.premiumLabel.split(' ')[0] + ' meter)' : '') + '. ' + (j.do || ''));
+            $.ui.toast('Pacing: ' + levelPhrase(reading.level) + ' -> ' + levelPhrase(j.level) + (j.levelBy === 'premium' && j.premiumLabel ? ' (' + j.premiumLabel.split(' ')[0] + ' meter)' : '') + '. ' + (j.do || ''));
           } else if (reading && !!j.premiumHeld !== !!reading.premiumHeld) {
             // the per-model meter moved the session off its model, or let it back
             $.ui.toast('Pacing: ' + (j.do || ''));

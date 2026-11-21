@@ -125,10 +125,11 @@ fresh for the next session and shows it in the status line, with one
 notice when the level changes:
 
 <!-- help -->
-    ahead 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · wk 36% Fable 40%
+    under budget 77% · 🟡T1 80% ⚪T2 15% 🟤T4 5% · week 36% Fable 40%
 
-That is the level and the weekly meter as a share of today's budget
-line (over 100 % means over the line), how this session's own use
+That is where the week stands against today's budget line (under
+budget, on budget, over budget or far over budget) and the weekly meter
+as a share of that line (over 100 % means over it), how this session's own use
 splits over the tiers (T1 is tier 1), subagents included, and the two
 meters. The desktop app may cut the end of the line; `/pacing-status`
 shows it whole, in words.<!-- /help --> The split is an estimate: each
@@ -146,7 +147,7 @@ hold. A session that another session started (a side session in the
 desktop app) leads with the tier of the model it runs on, and shows the
 weekly meter only, not Fable's, which the session that started it shows:
 
-    ⚪T2 sub · ahead 77% · ⚪T2 90% 🟤T4 10% · wk 36%
+    ⚪T2 sub · under budget 77% · ⚪T2 90% 🟤T4 10% · week 36%
 
 Claude Code hands a plugin only the all-models and 5-hour meters,
 so such a reading carries the per-model figure (Fable's by default) over
