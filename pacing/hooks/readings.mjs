@@ -1142,52 +1142,62 @@ export const lineOf = (j, model, tokens, agentTokens, now, full = false, agents 
   return statusText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now, agents, max);
 };
 
-// ---- a new version: the session reloads its plugins by itself ----
+// ---- a new version: the Reload row ----
 // The desktop app syncs installed plugins about every 20 minutes and
-// replaces this plugin's files in place; an open session ran the old code
-// until someone typed /reload-plugins. So the module does it:
+// replaces this plugin's files in place; an open session runs the old code
+// until /reload-plugins. The module offers it:
 //   it knows the version it was loaded as (plugin.json, read at load) and
 //   reads the file again RELOAD_AFTER_TURN after a turn ends and every
 //   RELOAD_CHECK_EVERY: one $.fs.read, no process, no model call;
-//   another version there, in a session a person has typed in, with no turn
-//   running, no survey up and no subagent of its own at work: /reload-plugins
-//   as if typed ($.command.run, from a timer: the engine refuses it inside
-//   a hook the turn waits on), once per version;
-//   the copy the reload brings says so at its load, "🔄 updated to
-//   0.9.11 and reloaded." (a mark the copy that asked left in $.store under
-//   the session's id tells it; the mark goes once it is said);
-//   a run the engine rejects: a row above the prompt, "📦 Pacing 0.9.11 is
-//   installed." with Reload and Not now (see "the Reload row").
+//   another version there, in a session a person has typed in: a row above
+//   the prompt at once, "📦 Pacing 0.9.11 is installed." with Reload and Not
+//   now, once per version (the band hides it during a turn and under a
+//   survey). Nothing runs by itself: run from a timer, the command never
+//   answered live (0.9.11 to 0.9.13).
+// Reload: /reload-plugins as if typed ($.command.run), raced against
+// RELOAD_WAIT; one attempt at a time, a press while one is open does nothing.
+//   it ran: the copy the reload brings says so at its load, "🔄 updated to
+//   0.9.11 and reloaded." (a mark the copy that pressed left in $.store
+//   under the session's id tells it; the mark goes once it is said);
+//   refused over a remote connection (/remote/ in its text or error): a
+//   toast to reload from the computer, and the row again;
+//   any other refusal, or no answer in RELOAD_WAIT: /reload-plugins in the
+//   prompt box and "📦 Press Enter to reload.", so one key is left (the
+//   mark stays for the reload that key runs); where even the box cannot be
+//   filled, the line to type it.
 // A reload starts changed modules only: a version that left this file as it
 // was keeps this copy running. So RELOAD_SETTLE after the command ran, the
-// copy that asked looks once more. Its own file on disk as it was loaded:
+// copy that pressed looks once more. Its own file on disk as it was loaded:
 // it is the new version's code, and says "updated". Its file changed and it
-// still runs: the reload did not take, and the Reload row offers it.
-// Never a second attempt for a version: a fresh copy takes the version on
-// disk as its own, and a copy that stays remembers what it asked for.
+// still runs: the reload did not take, and the row shows again.
+// The row stays until this copy is replaced or Not now is pressed (that
+// version only; the next one shows it again).
 // A manifest that does not read or names no version (half-written during a
 // sync) is no change, and is read again at the next look. A side session
 // nobody types in is left alone: it loads the new version at its next start.
-// `/pacing reload off` turns the attempt by itself off: then the row shows
-// at once, and nothing runs until Reload is pressed.
-// The Reload row: in the band above the prompt, like the Switch row, until
-// this copy is replaced or Not now is pressed (that version only; the next
-// one shows it again). Reload runs /reload-plugins as above; where the
-// engine refuses it, the command goes into the prompt box and a toast says
-// "📦 Press Enter to reload.", so one key is left; where even that fails,
-// the line to type it.
+// `/pacing reload off`: no row, one toast per version to type the command.
 export const RELOAD_CHECK_EVERY = 5 * 60 * 1000;
 export const RELOAD_AFTER_TURN = 2 * 1000;
 export const RELOAD_SETTLE = 10 * 1000;
-// a command that neither ran nor was refused in this long is given up
-export const RELOAD_GIVE_UP = 10 * 60 * 1000;
+// a pressed Reload that has not answered in this long fills the prompt box
+export const RELOAD_WAIT = 3 * 1000;
 // the version a manifest's text names, or null
 export const versionOf = text => { try { const v = JSON.parse(text).version; return typeof v === 'string' && v ? v : null; } catch { return null; } };
 export const reloadedText = version => ICON.updated + ' updated to ' + version + ' and reloaded.';
 export const reloadAskText = version => ICON.waiting + ' Pacing ' + version + ' is installed: type /reload-plugins to load it.';
 export const reloadRowText = version => ICON.waiting + ' Pacing ' + version + ' is installed.';
 export const RELOAD_ENTER = ICON.waiting + ' Press Enter to reload.';
-// whether the reload at a new version is on (config.json's autoReload; on unless false)
+export const RELOAD_REMOTE = ICON.waiting + ' Reload from the computer: /reload-plugins does not run over a remote connection.';
+// whether a command's answer, or the error it threw, says it does not run
+// over a remote connection ("/reload-plugins isn't available over a remote
+// connection in this session.", seen live)
+export const remoteRefused = x => {
+  if (!x) return false;
+  if (typeof x === 'string') return /remote/i.test(x);
+  const err = x.error;
+  return [x.text, x.message, typeof err === 'string' ? err : err && err.message].some(t => typeof t === 'string' && /remote/i.test(t));
+};
+// whether the reload row is on (config.json's autoReload; on unless false)
 async function reloadOn($) {
   try {
     const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
@@ -1217,25 +1227,20 @@ async function fillReload($, version) {
     say($, RELOAD_ENTER);
   } catch { say($, reloadAskText(version)); }
 }
-// /reload-plugins as if typed. Started, never awaited: it is queued until
-// the session is idle, and may never answer the copy it unloads. `pressed`:
-// the person pressed Reload, so a refusal fills the prompt box instead of
-// offering the row again.
-async function runReload($, rl, key, version, pressed = false) {
-  try { await $.command.run({ command: 'reload-plugins' }); } catch {
-    // rejected, or an engine without the call: the row, or the box filled
-    if (rl.asked && rl.asked.version === version) {
-      rl.asked = null;
-      await unmark($, key);
-      if (pressed) await fillReload($, version); else offerReload($, rl, version);
-    }
-    return;
-  }
-  // it ran and this copy still runs: one more look says which it is
-  if (rl.asked && rl.asked.version === version) {
-    rl.asked.ran = true;
-    try { $.clock.after(RELOAD_SETTLE, () => { look($, rl); }); } catch { /* the slow timer looks */ }
-  }
+// /reload-plugins as if typed, raced against RELOAD_WAIT: { result }, { error }
+// or { silent: true }. The run may never answer the copy it unloads.
+function runReload($) {
+  return new Promise(resolve => {
+    let done = false, timer = null;
+    const end = v => {
+      if (done) return;
+      done = true;
+      try { if (timer) timer.cancel(); } catch { /* fired already */ }
+      resolve(v);
+    };
+    try { timer = $.clock.after(RELOAD_WAIT, () => end({ silent: true })); } catch { /* no timer: the answer alone */ }
+    Promise.resolve().then(() => $.command.run({ command: 'reload-plugins' })).then(result => end({ result }), error => end({ error }));
+  });
 }
 // one look at the version on disk; `rl` is the copy's memory (see register).
 // Never throws: a look is a convenience, and the next one tries again.
@@ -1257,41 +1262,56 @@ async function look($, rl) {
       return;
     }
     if (rl.asked) {
-      // this copy asked for a reload and still runs
-      if (!rl.asked.ran && (rl.busy || (await $.clock.now()) - rl.asked.at < RELOAD_GIVE_UP)) return;
-      const { version, ran } = rl.asked;
+      // a pressed Reload ran and this copy still runs (before that: waiting)
+      if (!rl.asked.ran) return;
+      const { version } = rl.asked;
       rl.asked = null;
       // the mark gone: a fresh copy has taken over and said so
       if (key && !mark) return;
       await unmark($, key);
-      if (ran && rl.code !== null && (await codeOnDisk($)) === rl.code) { rl.loaded = version; rl.row = null; redraw($); say($, reloadedText(version)); }
+      if (rl.code !== null && (await codeOnDisk($)) === rl.code) { rl.loaded = version; rl.row = null; redraw($); say($, reloadedText(version)); }
       else offerReload($, rl, version);
       return;
     }
-    if (disk === rl.loaded || disk === rl.acted) return;
-    // off: the row at once, nothing by itself
-    if (!(await reloadOn($))) { if (rl.row !== disk) offerReload($, rl, disk); return; }
-    if (!rl.free()) return;
-    await askReload($, rl, key, disk);
-    runReload($, rl, key, disk).catch(() => { /* said already, or the next look */ });
+    if (disk === rl.loaded || disk === rl.acted || !rl.typed()) return;
+    rl.acted = disk;
+    // off: one toast for this version, no row
+    if (!(await reloadOn($))) { say($, reloadAskText(disk)); return; }
+    offerReload($, rl, disk);
   } catch { /* the next look */ } finally { rl.looking = false; }
 }
-// a reload this copy asks for: once per version, with the mark the copy it
-// brings finds in the store
-async function askReload($, rl, key, version) {
-  rl.acted = version;
-  rl.row = null;
-  let at = Date.now();
-  try { at = await $.clock.now(); } catch { /* the system's clock */ }
-  rl.asked = { version, at, ran: false };
-  if (key) { try { await $.store.set(key, { version, at }); } catch { /* no store: this copy's own memory */ } }
-}
-// Reload pressed in the row: the same run, a refusal filling the prompt box
+// Reload pressed in the row: the mark the copy it brings finds in the store,
+// then the run (see "a new version"). One at a time.
 async function pressReload($, rl, version) {
-  redraw($);
-  const key = await reloadKey($);
-  await askReload($, rl, key, version);
-  await runReload($, rl, key, version, true);
+  if (rl.pressed) return;
+  rl.pressed = true;
+  try {
+    rl.row = null;
+    redraw($);
+    const key = await reloadKey($);
+    let at = Date.now();
+    try { at = await $.clock.now(); } catch { /* the system's clock */ }
+    rl.asked = { version, ran: false };
+    if (key) { try { await $.store.set(key, { version, at }); } catch { /* no store: this copy's own memory */ } }
+    const got = await runReload($);
+    const failed = 'error' in got || commandFailed(got.result);
+    if (!got.silent && !failed && !remoteRefused(got.result)) {
+      // it ran and this copy still runs: one more look says which it is
+      rl.asked.ran = true;
+      try { $.clock.after(RELOAD_SETTLE, () => { look($, rl); }); } catch { /* the slow timer looks */ }
+      return;
+    }
+    rl.asked = null;
+    if (remoteRefused(got.error) || remoteRefused(got.result)) {
+      // nothing will run from here: the row again, for the computer
+      await unmark($, key);
+      say($, RELOAD_REMOTE);
+      offerReload($, rl, version);
+      return;
+    }
+    // refused otherwise, or no answer: one key left
+    await fillReload($, version);
+  } finally { rl.pressed = false; }
 }
 
 /** @type {import('claude-code').Register} */
@@ -1361,20 +1381,14 @@ export const register = on => {
     list: runningAgents, lineNow, reading: () => reading };
   const stopTick = () => stopTickOf(st);
 
-  // the reload at a new version (see "a new version"): what the looks read
-  // and write. The version and the text this copy was loaded as, the version
-  // it asked a reload for and that request while it is open ({ version, at,
-  // ran }), whether a main-thread turn runs, whether the band was last drawn
-  // under a survey, the timers, whether a reload may run now, the version
-  // the Reload row offers (null: none) and the versions Not now dismissed.
-  const rl = { loaded: null, code: null, acted: null, asked: null, busy: false, survey: false, looking: false, timer: null, afterTurn: null, row: null, dismissed: new Set(),
-    free: () => attended && !rl.busy && !rl.survey && !runningAgents().some(a => a.kind !== 'session') };
-
-  // a main-thread turn runs from here to its turn.complete: no reload meanwhile
-  on('turn.start', ($, e, next) => {
-    if (!e.agentId) rl.busy = true;
-    return next(e);
-  });
+  // the Reload row at a new version (see "a new version"): what the looks
+  // read and write. The version and the text this copy was loaded as, the
+  // version last offered (row or toast), a pressed Reload's request while it
+  // is open ({ version, ran }), whether a press is under way, the timers,
+  // the version the row offers (null: none), the versions Not now dismissed
+  // and whether a person has typed in this session.
+  const rl = { loaded: null, code: null, acted: null, asked: null, pressed: false, looking: false, timer: null, afterTurn: null, row: null, dismissed: new Set(),
+    typed: () => attended };
 
   // An Agent call: its effort, which agent.spawn does not carry, and the
   // agent in the line at once, before the engine resolves and spawns it (a
@@ -1468,8 +1482,6 @@ export const register = on => {
   // version"). The background agents' row goes under it.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const p = e.props || {};
-    // for the reload at a new version: never under a survey
-    if (!(p.view && p.view.agentId) && (!e.plugin || e.plugin === 'pacing')) rl.survey = !!p.hasSurvey;
     const background = runningAgents().filter(a => a.background);
     if ((!offer && !sw && !rl.row && !background.length) || p.hasSurvey || p.isWorking || (p.view && p.view.agentId) || (e.plugin && e.plugin !== 'pacing')) return next(e);
     const { Box, Text, Button } = $.ui.resolve(e);
@@ -1534,7 +1546,6 @@ export const register = on => {
       const reloadRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
         Text({ dimColor: true, children: reloadRowText(version) }),
         Button({ key: 'pacing-reload', label: 'Reload', variant: 'secondary', onPress: () => {
-          rl.row = null;
           pressReload($, rl, version).catch(() => { /* said already, or the next look */ });
         } }),
         Button({ key: 'pacing-reload-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { rl.dismissed.add(version); rl.row = null; redraw($); } }),
@@ -1841,9 +1852,7 @@ export const register = on => {
         sessionModel = e.usage.model;
         if (ss.model) { ss.model = null; keepSwitch($, ss); }
       }
-      // a natural break: one look at the version on disk, once the turn is
-      // over (a timer: /reload-plugins cannot run from inside this hook)
-      rl.busy = false;
+      // a natural break: one look at the version on disk, once the turn is over
       if (attended) {
         try {
           if (rl.afterTurn) rl.afterTurn.cancel();

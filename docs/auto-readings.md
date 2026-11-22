@@ -695,3 +695,37 @@ level in the status line.
   the record keeps `spent`, which `saved.mjs` prices exactly. The record's
   `tokens` stays the agent's size at its last request.
 - **`/pacing-status`** is for the person alone too (`isTextDisplayOnly`).
+
+## The Reload row at once, nothing by itself (0.9.14)
+
+- **Seen live:** the reload by itself never worked (0.9.11 to 0.9.12 and
+  0.9.12 to 0.9.13): `$.command.run({ command: 'reload-plugins' })` from a
+  timer neither resolved nor rejected, so nothing showed for the 10
+  minutes RELOAD_GIVE_UP waited. Typed over a remote connection, the
+  command answered `/reload-plugins isn't available over a remote
+  connection in this session.`
+- **The row at once.** The first look that sees another version (after a
+  turn ends or on the 5-minute timer), in a session a person has typed in,
+  shows `📦 Pacing <version> is installed.` with Reload and Not now. The
+  attempt by itself is gone, and with it RELOAD_GIVE_UP and what only it
+  read: the turn flag (and its `turn.start` hook), the survey flag and
+  `rl.free`. The band still hides the row during a turn and under a survey.
+- **Reload** races the command against RELOAD_WAIT (3 s). `/remote/i` in
+  the answer's text or the error's message: `📦 Reload from the computer:
+  /reload-plugins does not run over a remote connection.`, and the row
+  again. Any other error (thrown, or `exitCode` not 0) or no answer:
+  `/reload-plugins` in the prompt box and `📦 Press Enter to reload.`, the
+  store mark kept for the reload that Enter runs. Ran: the settle look as
+  before. One attempt at a time (`rl.pressed`).
+- **`/pacing reload off`** (`autoReload: false`): no row; one toast per
+  version, `📦 Pacing <version> is installed: type /reload-plugins to load
+  it.`
+- **The kit:** a `command.run` answer keeps only `text`, `exitCode` and
+  `isTextDisplayOnly`, and a hook that throws reaches the module as "no
+  implementation for command.run" with its message lost. So the remote
+  refusal is tested in the answer (with and without `exitCode`), and as a
+  thrown error only through `remoteRefused`.
+- **Not checked live:** whether a button's press gets an answer from the
+  command where the timer got none, the form the remote refusal takes for
+  a module (an answer or an error), and whether `$.prompt.fill` reaches the
+  box over a remote connection.

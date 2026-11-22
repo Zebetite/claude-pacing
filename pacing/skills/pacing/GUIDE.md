@@ -537,7 +537,7 @@ so, as in `Pacing: no reading to show (the last reading is 45 min old).
 | `/pacing week` | the last two weeks in sum: where the meter ended, the share of the time at each level, and whether it crossed the budget line |
 | `/pacing next on`, `/pacing next off` | lets the skill set, or stop setting, the default model of new sessions |
 | `/pacing switch on`, `/pacing switch off` | turns the offer to switch the session to the recommended model or effort on (the default) or off: a row above the prompt with Switch and Not now |
-| `/pacing reload on`, `/pacing reload off` | turns the reload at a new version on (the default) or off: when the app has installed a new version of the plugin, an idle session runs `/reload-plugins` by itself and says so in one line; off, the Reload row above the prompt offers it |
+| `/pacing reload on`, `/pacing reload off` | turns the Reload row at a new version on (the default) or off: when the app has installed a new version of the plugin, a row above the prompt offers **Reload**; off, one toast per version says to type `/reload-plugins`. Nothing reloads by itself either way |
 | `/pacing notify on`, `/pacing notify off` | turns the toasts about running subagents on (the default) or off: when one starts, when one ends, and every 5 minutes while any runs; the status line and the row above the prompt still show them |
 | `/pacing compact on`, `/pacing compact off` | turns the offers to compact a large session on (the default) or off: a row above the prompt with Compact now from 300 000 tokens, plainer from 500 000, and a warning before the cache of an idle session lapses |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model meter belongs to (Fable by default), or says the plan has none |
@@ -565,15 +565,17 @@ install of this skill) and shows the short help once.
 **A new version.** The desktop app installs a new version of the plugin
 in the background, and an open session used to keep the old one until
 you typed `/reload-plugins`. On a Claude Code version with hooks modules
-the plugin does that itself: it looks for a new version when a turn ends
-and every 5 minutes, and once the session is idle it runs
-`/reload-plugins` and says so in one line, `🔄 updated to 0.9.12 and
-reloaded.` Never during a turn, and only in a session you have typed in.
-Where that does not take, a row above the prompt says
+the plugin looks for a new version when a turn ends and every 5 minutes,
+and in a session you have typed in, a row above the prompt says at once
 `📦 Pacing 0.9.12 is installed.` with **Reload** and **Not now** (that
-version only). Where Claude Code does not let the button run the command
-either, it puts `/reload-plugins` in the prompt box and says
-`📦 Press Enter to reload.`; where even that fails,
+version only). Nothing reloads by itself. **Reload** runs
+`/reload-plugins`, and the new version says so in one line,
+`🔄 updated to 0.9.12 and reloaded.` Over a remote connection, where
+Claude Code does not run that command, a toast says
+`📦 Reload from the computer: /reload-plugins does not run over a remote connection.`
+and the row stays. Where the command is refused otherwise or does not
+answer within 3 seconds, the plugin puts `/reload-plugins` in the prompt
+box and says `📦 Press Enter to reload.`; where even that fails,
 `📦 Pacing 0.9.12 is installed: type /reload-plugins to load it.`
-`/pacing reload off` turns it off: then the row shows at once, and nothing
-runs until you press Reload.
+`/pacing reload off` turns the row off: then that last line comes once
+per version as a toast instead.

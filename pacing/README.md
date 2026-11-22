@@ -47,8 +47,8 @@ From the marketplace this plugin is published in:
 From an organisation's plugin library on claude.ai: Claude Code sessions
 signed in with the claude.ai account pick the plugin up at start (it shows
 as `pacing@synced` under `/plugin` → Installed); new versions arrive the
-same way, and an idle session reloads by itself (`/pacing reload off`
-turns that off). To try a local copy for one
+same way, and a running session offers to load them with a Reload row
+above the prompt (`/pacing reload off` puts a toast in its place). To try a local copy for one
 session: `claude --plugin-dir <this folder>`.
 
 Then, in a session, type `/pacing:pacing`. The first run creates the data

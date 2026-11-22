@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadedText, reloadAskText, reloadRowText, RELOAD_ENTER, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, RELOAD_SETTLE, RELOAD_GIVE_UP, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, leftOf, leftText, usualText, budgetText, tokensText } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadedText, reloadAskText, reloadRowText, RELOAD_ENTER, RELOAD_REMOTE, remoteRefused, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, RELOAD_SETTLE, RELOAD_WAIT, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, leftOf, leftText, usualText, budgetText, tokensText } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -1779,15 +1779,21 @@ test('the app\'s list_sessions answer as a module gets it: the rows from its tex
   expect(workingSessions(rows, 'local_other')).toEqual([])
 })
 
-// ---- a new version: the session reloads its plugins by itself ----
+// ---- a new version: the Reload row ----
 
 // the engine beneath: the manifest and the module's own file as they stand
 // on disk (a test changes them as the app's sync would), the session's id,
-// the config file, the module's store, the slash commands run and the toasts
+// the config file, the module's store, the slash commands run, what
+// /reload-plugins answers (`reject`: it throws, which the kit hands the
+// module as an error of its own, "no implementation for command.run", the
+// message lost; `answer`: what it resolves with, of which the kit keeps
+// text, exitCode and isTextDisplayOnly; `hang`: never), the prompt box
+// filled and the toasts
 const MARK = 'reload:local_s1'
+const REMOTE = '/reload-plugins isn\'t available over a remote connection in this session.'
 const manifestOf = (version: string) => JSON.stringify({ name: 'pacing', version })
-const reloadEngine = (on: any, opts: { config?: string; reject?: boolean; hang?: boolean; store?: Record<string, unknown> } = {}) => {
-  const seen = { runs: [] as string[], toasts: [] as string[], fills: [] as string[], reject: !!opts.reject, store: { ...(opts.store ?? {}) } as Record<string, unknown>, manifest: manifestOf('0.9.10') as string | null, code: 'the module as it was loaded' }
+const reloadEngine = (on: any, opts: { config?: string; reject?: string; answer?: unknown; hang?: boolean; store?: Record<string, unknown> } = {}) => {
+  const seen = { runs: [] as string[], toasts: [] as string[], fills: [] as string[], reject: opts.reject ?? null as string | null, answer: opts.answer ?? { text: 'Reloaded plugins' } as unknown, hang: !!opts.hang, store: { ...(opts.store ?? {}) } as Record<string, unknown>, manifest: manifestOf('0.9.10') as string | null, code: 'the module as it was loaded' }
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
   on('command.register', () => ({ value: { command: 'pacing-status' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000, tokens: 1000, percent: 0 }, rateLimits: [] } }))
@@ -1804,9 +1810,9 @@ const reloadEngine = (on: any, opts: { config?: string; reject?: boolean; hang?:
   })
   on('command.run', (_: unknown, e: any) => {
     seen.runs.push('/' + e.command + (e.args ? ' ' + e.args : ''))
-    if (seen.reject) throw new Error('a module may not run this command')
-    if (opts.hang) return new Promise(() => {})
-    return { text: 'Reloaded plugins' }
+    if (seen.reject !== null) throw new Error(seen.reject)
+    if (seen.hang) return new Promise(() => {})
+    return seen.answer
   })
   on('store.get', (_: unknown, e: any) => ({ value: seen.store[e.key] }))
   on('store.set', (_: unknown, e: any) => { seen.store[e.key] = e.value; return { value: undefined } })
@@ -1840,18 +1846,34 @@ const loadedAndTyped = async ($: any, clock: any) => {
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(RELOAD_AFTER_TURN)
 }
+// loaded and typed in, and the slow timer has found 0.9.11: the row is up
+const rowUp = async ($: any, clock: any, seen: any) => {
+  await loadedAndTyped($, clock)
+  seen.manifest = manifestOf('0.9.11')
+  await clock.advance(RELOAD_CHECK_EVERY)
+}
 
 test('the reload\'s words, and the version a manifest names', async () => {
   expect(reloadedText('0.9.11')).toBe('🔄 updated to 0.9.11 and reloaded.')
   expect(reloadAskText('0.9.11')).toBe('📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.')
   expect(reloadRowText('0.9.11')).toBe('📦 Pacing 0.9.11 is installed.')
   expect(RELOAD_ENTER).toBe('📦 Press Enter to reload.')
+  expect(RELOAD_REMOTE).toBe('📦 Reload from the computer: /reload-plugins does not run over a remote connection.')
+  expect(RELOAD_WAIT).toBe(3000)
   expect(versionOf(manifestOf('0.9.11'))).toBe('0.9.11')
   // half-written during a sync, or no version in it: none
   expect(versionOf('{ "name": "pacing", "vers')).toBe(null)
   expect(versionOf('')).toBe(null)
   expect(versionOf('{"name":"pacing"}')).toBe(null)
   expect(versionOf('{"version":11}')).toBe(null)
+  // the refusal over a remote connection, in a thrown error or in the answer
+  expect(remoteRefused(new Error(REMOTE))).toBe(true)
+  expect(remoteRefused({ text: REMOTE, isError: true })).toBe(true)
+  expect(remoteRefused({ error: REMOTE })).toBe(true)
+  expect(remoteRefused({ error: new Error(REMOTE) })).toBe(true)
+  expect(remoteRefused({ text: 'Reloaded: 2 plugins · 15 skills' })).toBe(false)
+  expect(remoteRefused(new Error('a module may not run this command'))).toBe(false)
+  expect(remoteRefused(undefined)).toBe(false)
 })
 
 test('the version unchanged: nothing, at a turn\'s end or on the slow timer', async ($, on) => {
@@ -1864,32 +1886,36 @@ test('the version unchanged: nothing, at a turn\'s end or on the slow timer', as
   await clock.advance(RELOAD_AFTER_TURN)
   expect(seen.runs).toEqual([])
   expect(seen.toasts).toEqual([])
+  expect(await reloadRow($)).toBe(undefined)
 })
 
-test('a new version while the session is idle: /reload-plugins once, as if typed; the copy that stays, its own file unchanged, says so once', async ($, on) => {
+test('a new version: the row at the first look that sees it, nothing run by itself', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on)
   await loadedAndTyped($, clock)
+  expect(await reloadRow($)).toBe(undefined)
   // the app's sync puts 0.9.11 in the folder; the slow timer finds it
   seen.manifest = manifestOf('0.9.11')
   await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.runs).toEqual(['/reload-plugins'])
-  // a copy the reload brings says so at its load; this one waits for it
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  expect(seen.runs).toEqual([])
   expect(seen.toasts).toEqual([])
-  expect(seen.store[MARK]).toEqual({ version: '0.9.11', at: T0 + RELOAD_CHECK_EVERY })
-  await clock.advance(RELOAD_SETTLE)
-  expect(seen.toasts).toEqual(['🔄 updated to 0.9.11 and reloaded.'])
   expect(seen.store[MARK]).toBe(undefined)
-  // no loop: this copy now counts as 0.9.11
-  await clock.advance(3 * RELOAD_CHECK_EVERY)
+  // every later look: nothing more, the row stays
+  await clock.advance(6 * RELOAD_CHECK_EVERY)
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(RELOAD_AFTER_TURN)
-  expect(seen.runs.length).toBe(1)
-  expect(seen.toasts.length).toBe(1)
+  expect(seen.runs).toEqual([])
+  expect(seen.toasts).toEqual([])
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  // the next version takes its place
+  seen.manifest = manifestOf('0.9.12')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.12 is installed.')
 })
 
-test('a new version found as a turn ends: the reload comes after the turn, never from inside it', async ($, on) => {
+test('a new version found as a turn ends: the row right after the turn', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on)
@@ -1897,16 +1923,15 @@ test('a new version found as a turn ends: the reload comes after the turn, never
   seen.manifest = manifestOf('0.9.11')
   await $.turn.start({ text: 'next', turnId: 't2' } as any)
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  // the hook itself ran nothing
-  expect(seen.runs).toEqual([])
   await clock.advance(RELOAD_AFTER_TURN)
-  expect(seen.runs).toEqual(['/reload-plugins'])
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  expect(seen.runs).toEqual([])
 })
 
 test('the copy a reload brings finds the mark at its load and says "updated", once', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
-  // what the copy that asked left for this session
+  // what the copy that pressed Reload left for this session
   const seen = reloadEngine(on, { store: { [MARK]: { version: '0.9.11', at: T0 - 1000 } } })
   seen.manifest = manifestOf('0.9.11')
   await start($)
@@ -1919,6 +1944,7 @@ test('the copy a reload brings finds the mark at its load and says "updated", on
   await clock.advance(3 * RELOAD_CHECK_EVERY)
   expect(seen.runs).toEqual([])
   expect(seen.toasts.length).toBe(1)
+  expect(await reloadRow($)).toBe(undefined)
 })
 
 test('a load with no mark says nothing: a new session, or a reload the person typed', async ($, on) => {
@@ -1932,120 +1958,31 @@ test('a load with no mark says nothing: a new session, or a reload the person ty
   expect(seen.store).toEqual({ 'reload:local_other': { version: '0.9.10', at: T0 - 1000 } })
 })
 
-test('during a turn it waits; so it does under a survey and while a subagent of its own runs', async ($, on) => {
+test('Reload: /reload-plugins answers; the copy that stays, its own file unchanged, says "updated" and the row goes', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on)
-  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag1' }))
-  on('agent.list', () => ({ value: [{ id: 'ag1', status: 'running', description: '', type: 'x' }] }))
-  await loadedAndTyped($, clock)
-  seen.manifest = manifestOf('0.9.11')
-  // a turn runs: the slow timer looks and leaves it
-  await $.turn.start({ text: 'a long one', turnId: 't2' } as any)
-  await clock.advance(2 * RELOAD_CHECK_EVERY)
-  expect(seen.runs).toEqual([])
-  // a subagent's turn ending is not the session's
-  await $.turn.complete(turn('claude-haiku-5-5', 1, 'a9'))
-  await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.runs).toEqual([])
-  // the turn ends with a background agent still at work: not yet
-  await spawn($, 'pacing:reader', 'haiku', true)
-  await $.turn.complete(turn('claude-fable-5-2', 1))
-  await clock.advance(RELOAD_AFTER_TURN)
-  expect(seen.runs).toEqual([])
-  await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
-  // a survey is up: not yet
-  const survey = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true } })
-  await survey.unmount()
-  await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.runs).toEqual([])
-  // gone: the next look runs it
-  const band = await $.ui.mount(BAND)
-  await band.unmount()
-  await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.runs).toEqual(['/reload-plugins'])
-})
-
-test('a rejection: the Reload row in place of a toast, and no second attempt by itself', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { reject: true })
-  await loadedAndTyped($, clock)
-  expect(await reloadRow($)).toBe(undefined)
-  seen.manifest = manifestOf('0.9.11')
-  await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.runs).toEqual(['/reload-plugins'])
-  expect(seen.toasts).toEqual([])
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
-  expect(seen.store[MARK]).toBe(undefined)
-  // every later look, at a turn's end or on the timer: nothing more, the row stays
-  await clock.advance(6 * RELOAD_CHECK_EVERY)
-  await $.turn.complete(turn('claude-fable-5-2', 1))
-  await clock.advance(RELOAD_AFTER_TURN)
-  expect(seen.runs.length).toBe(1)
-  expect(seen.toasts).toEqual([])
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
-  // the next version is a new one: one attempt, the row for it
-  seen.manifest = manifestOf('0.9.12')
-  await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.runs.length).toBe(2)
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.12 is installed.')
-})
-
-test('Reload in the row runs /reload-plugins; the copy that stays, its own file unchanged, says "updated" and the row goes', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { reject: true })
-  await loadedAndTyped($, clock)
-  seen.manifest = manifestOf('0.9.11')
-  await clock.advance(RELOAD_CHECK_EVERY)
-  seen.reject = false
+  await rowUp($, clock, seen)
   await pressRow($, clock, 'pacing-reload')
-  expect(seen.runs).toEqual(['/reload-plugins', '/reload-plugins'])
+  expect(seen.runs).toEqual(['/reload-plugins'])
   expect(await reloadRow($)).toBe(undefined)
+  // a copy the reload brings says so at its load; this one waits for it
+  expect(seen.toasts).toEqual([])
   expect(seen.store[MARK]).toEqual({ version: '0.9.11', at: T0 + RELOAD_AFTER_TURN + RELOAD_CHECK_EVERY })
   await clock.advance(RELOAD_SETTLE)
   expect(seen.toasts).toEqual(['🔄 updated to 0.9.11 and reloaded.'])
-  expect(seen.fills).toEqual([])
-})
-
-test('Reload refused: the command goes into the prompt box, one key left', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { reject: true })
-  await loadedAndTyped($, clock)
-  seen.manifest = manifestOf('0.9.11')
-  await clock.advance(RELOAD_CHECK_EVERY)
-  await pressRow($, clock, 'pacing-reload')
-  expect(seen.runs).toEqual(['/reload-plugins', '/reload-plugins'])
-  expect(seen.fills).toEqual(['/reload-plugins'])
-  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
-  expect(await reloadRow($)).toBe(undefined)
   expect(seen.store[MARK]).toBe(undefined)
-})
-
-test('Not now hides the row for that version only', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { reject: true })
-  await loadedAndTyped($, clock)
-  seen.manifest = manifestOf('0.9.11')
-  await clock.advance(RELOAD_CHECK_EVERY)
-  await pressRow($, clock, 'pacing-reload-not-now')
-  expect(await reloadRow($)).toBe(undefined)
+  expect(seen.fills).toEqual([])
+  // no loop: this copy now counts as 0.9.11
   await clock.advance(3 * RELOAD_CHECK_EVERY)
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(RELOAD_AFTER_TURN)
-  expect(await reloadRow($)).toBe(undefined)
   expect(seen.runs.length).toBe(1)
-  expect(seen.toasts).toEqual([])
-  // the next version shows it again
-  seen.manifest = manifestOf('0.9.12')
-  await clock.advance(RELOAD_CHECK_EVERY)
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.12 is installed.')
+  expect(seen.toasts.length).toBe(1)
+  expect(await reloadRow($)).toBe(undefined)
 })
 
-test('a reload that leaves the old code running: one attempt, then the Reload row, and the guard holds', async ($, on) => {
+test('Reload that leaves the old code running: the row again, and nothing by itself', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on)
@@ -2054,9 +1991,10 @@ test('a reload that leaves the old code running: one attempt, then the Reload ro
   seen.manifest = manifestOf('0.9.11')
   seen.code = 'the module of 0.9.11'
   await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.runs).toEqual(['/reload-plugins'])
+  await pressRow($, clock, 'pacing-reload')
   await clock.advance(RELOAD_SETTLE)
   expect(seen.toasts).toEqual([])
+  expect(seen.store[MARK]).toBe(undefined)
   expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
   await clock.advance(6 * RELOAD_CHECK_EVERY)
   await $.turn.complete(turn('claude-fable-5-2', 1))
@@ -2065,22 +2003,120 @@ test('a reload that leaves the old code running: one attempt, then the Reload ro
   expect(seen.toasts).toEqual([])
 })
 
-test('a command that never answers is given up after 10 minutes: the Reload row', async ($, on) => {
+test('Reload over a remote connection: the toast to reload from the computer, and the row stays', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { answer: { text: REMOTE, exitCode: 1 } })
+  await rowUp($, clock, seen)
+  await pressRow($, clock, 'pacing-reload')
+  expect(seen.runs).toEqual(['/reload-plugins'])
+  expect(seen.toasts).toEqual(['📦 Reload from the computer: /reload-plugins does not run over a remote connection.'])
+  expect(seen.fills).toEqual([])
+  expect(seen.store[MARK]).toBe(undefined)
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  // pressed again: one more attempt; Not now hides it
+  await pressRow($, clock, 'pacing-reload')
+  expect(seen.runs.length).toBe(2)
+  await pressRow($, clock, 'pacing-reload-not-now')
+  expect(await reloadRow($)).toBe(undefined)
+})
+
+test('Reload over a remote connection, the words in an answer that reports no error: the same toast, never "updated"', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { answer: { text: REMOTE } })
+  await rowUp($, clock, seen)
+  await pressRow($, clock, 'pacing-reload')
+  expect(seen.toasts).toEqual(['📦 Reload from the computer: /reload-plugins does not run over a remote connection.'])
+  expect(seen.fills).toEqual([])
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  await clock.advance(RELOAD_SETTLE)
+  expect(seen.toasts.length).toBe(1)
+  expect(seen.store[MARK]).toBe(undefined)
+})
+
+test('Reload rejected, not for a remote connection: the command goes into the prompt box, one key left', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { reject: 'a module may not run this command' })
+  await rowUp($, clock, seen)
+  await pressRow($, clock, 'pacing-reload')
+  expect(seen.runs).toEqual(['/reload-plugins'])
+  expect(seen.fills).toEqual(['/reload-plugins'])
+  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
+  expect(await reloadRow($)).toBe(undefined)
+  // the mark stays for the reload that Enter runs
+  expect(seen.store[MARK]).toEqual({ version: '0.9.11', at: T0 + RELOAD_AFTER_TURN + RELOAD_CHECK_EVERY })
+})
+
+test('Reload with an error answer: the prompt box too', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { answer: { text: 'Something went wrong', exitCode: 1 } })
+  await rowUp($, clock, seen)
+  await pressRow($, clock, 'pacing-reload')
+  expect(seen.fills).toEqual(['/reload-plugins'])
+  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
+  await clock.advance(RELOAD_SETTLE)
+  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
+})
+
+test('Reload with no answer in 3 s: the prompt box filled and the toast', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on, { hang: true })
-  await loadedAndTyped($, clock)
-  seen.manifest = manifestOf('0.9.11')
-  await clock.advance(RELOAD_CHECK_EVERY)
+  await rowUp($, clock, seen)
+  await pressRow($, clock, 'pacing-reload')
   expect(seen.runs).toEqual(['/reload-plugins'])
-  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.fills).toEqual([])
   expect(seen.toasts).toEqual([])
+  await clock.advance(RELOAD_WAIT)
+  expect(seen.fills).toEqual(['/reload-plugins'])
+  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
   expect(await reloadRow($)).toBe(undefined)
-  await clock.advance(RELOAD_GIVE_UP)
-  expect(seen.toasts).toEqual([])
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  expect(seen.store[MARK]).toEqual({ version: '0.9.11', at: T0 + RELOAD_AFTER_TURN + RELOAD_CHECK_EVERY })
+  // later looks: nothing more for this version
   await clock.advance(3 * RELOAD_CHECK_EVERY)
   expect(seen.runs.length).toBe(1)
+  expect(seen.toasts.length).toBe(1)
+})
+
+test('Reload pressed twice: one attempt', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { hang: true })
+  await rowUp($, clock, seen)
+  // two bands drawn with the row, each pressed while the first run is open
+  const a = await $.ui.mount(BAND)
+  const b = await $.ui.mount({ ...BAND, requestId: 'pacing-2' })
+  await a.press({ key: 'pacing-reload' })
+  await b.press({ key: 'pacing-reload' })
+  await a.unmount()
+  await b.unmount()
+  await clock.settle()
+  expect(seen.runs).toEqual(['/reload-plugins'])
+  await clock.advance(RELOAD_WAIT)
+  expect(seen.fills).toEqual(['/reload-plugins'])
+  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
+})
+
+test('Not now hides the row for that version only', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on)
+  await rowUp($, clock, seen)
+  await pressRow($, clock, 'pacing-reload-not-now')
+  expect(await reloadRow($)).toBe(undefined)
+  await clock.advance(3 * RELOAD_CHECK_EVERY)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(await reloadRow($)).toBe(undefined)
+  expect(seen.runs).toEqual([])
+  expect(seen.toasts).toEqual([])
+  // the next version shows it again
+  seen.manifest = manifestOf('0.9.12')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.12 is installed.')
 })
 
 test('an unreadable manifest is no change, and is read again later', async ($, on) => {
@@ -2095,29 +2131,30 @@ test('an unreadable manifest is no change, and is read again later', async ($, o
     await $.turn.complete(turn('claude-fable-5-2', 1))
     await clock.advance(RELOAD_AFTER_TURN)
   }
-  expect(seen.runs).toEqual([])
+  expect(await reloadRow($)).toBe(undefined)
   expect(seen.toasts).toEqual([])
   // written whole: found at the next look
   seen.manifest = manifestOf('0.9.11')
   await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.runs).toEqual(['/reload-plugins'])
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
 })
 
-test('reload off: nothing runs by itself; the row at once, and Reload runs it', async ($, on) => {
+test('reload off: no row, one toast per version to type the command', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on, { config: JSON.stringify({ autoReload: false }) })
-  await loadedAndTyped($, clock)
-  seen.manifest = manifestOf('0.9.11')
-  await clock.advance(RELOAD_CHECK_EVERY)
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  await rowUp($, clock, seen)
+  expect(seen.toasts).toEqual(['📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.'])
+  expect(await reloadRow($)).toBe(undefined)
   await clock.advance(2 * RELOAD_CHECK_EVERY)
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(RELOAD_AFTER_TURN)
+  expect(seen.toasts.length).toBe(1)
   expect(seen.runs).toEqual([])
-  expect(seen.toasts).toEqual([])
-  await pressRow($, clock, 'pacing-reload')
-  expect(seen.runs).toEqual(['/reload-plugins'])
+  seen.manifest = manifestOf('0.9.12')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.toasts).toEqual(['📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.', '📦 Pacing 0.9.12 is installed: type /reload-plugins to load it.'])
+  expect(await reloadRow($)).toBe(undefined)
 })
 
 test('a side session nobody types in is left alone', async ($, on) => {
@@ -2132,6 +2169,7 @@ test('a side session nobody types in is left alone', async ($, on) => {
   await clock.advance(3 * RELOAD_CHECK_EVERY)
   expect(seen.runs).toEqual([])
   expect(seen.toasts).toEqual([])
+  expect(await reloadRow($)).toBe(undefined)
 })
 
 // ---- every meter, read by the module itself ----

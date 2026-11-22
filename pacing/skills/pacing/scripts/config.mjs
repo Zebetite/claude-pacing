@@ -186,7 +186,7 @@ const show = c => {
   console.log('offers to compact a large session: ' + (c.compactAsk === false ? 'off' : 'on'));
   console.log('toasts about running subagents: ' + (c.agentNotices === false ? 'off' : 'on'));
   console.log('offers to switch this session to the recommended model or effort: ' + (c.switchAsk === false ? 'off' : 'on'));
-  console.log('reload of the plugins when a new version is installed: ' + (c.autoReload === false ? 'off' : 'on'));
+  console.log('Reload row when a new version is installed (off: a toast to type /reload-plugins): ' + (c.autoReload === false ? 'off' : 'on'));
   console.log('data folder: ' + dataDir);
 };
 const fail = m => { console.log(m); process.exit(1); };

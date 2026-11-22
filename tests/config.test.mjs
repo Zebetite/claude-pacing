@@ -360,10 +360,10 @@ describe('the reload at a new version', () => {
     const s = sandbox();
     try {
       s.config(['init']);
-      assert.match(s.config([]).out, /^reload of the plugins when a new version is installed: on$/m);
+      assert.match(s.config([]).out, /^Reload row when a new version is installed \(off: a toast to type \/reload-plugins\): on$/m);
       s.config(['reload', 'off']);
       assert.equal(JSON.parse(s.read('config.json')).autoReload, false);
-      assert.match(s.config([]).out, /^reload of the plugins when a new version is installed: off$/m);
+      assert.match(s.config([]).out, /^Reload row when a new version is installed \(off: a toast to type \/reload-plugins\): off$/m);
       s.config(['reset']);
       assert.equal(JSON.parse(s.read('config.json')).autoReload, false);
       s.config(['apply', 'reload', 'on']);
@@ -381,6 +381,7 @@ describe('the reload at a new version', () => {
     // a toast leads with the icon of its kind where "Pacing: " stood
     assert.ok(guide.includes('`🔄 updated to 0.9.12 and reloaded.`'));
     assert.ok(guide.includes('`📦 Pacing 0.9.12 is installed: type /reload-plugins to load it.`'));
-    assert.ok(guide.includes('`/pacing reload off` turns it off'));
+    assert.ok(guide.includes('`📦 Reload from the computer: /reload-plugins does not run over a remote connection.`'));
+    assert.ok(guide.includes('`/pacing reload off` turns the row off'));
   });
 });
