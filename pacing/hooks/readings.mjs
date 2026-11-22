@@ -222,20 +222,22 @@ export const levelPhrase = level => PHRASE[level] || level || '';
 // foreground agent (the turn waited for them); a new or resumed session
 // starts with none. While any run:
 //   the status line leads with them, the whole line within LINE_MAX, in
-//   steps: each agent with its time, then names, then the count and the
-//   longest run, then the count alone; never without the count, and the
-//   level with its share always shows;
+//   steps: each agent with its assignment, what it is doing, its time and
+//   the estimate, then less and less of that, then names, then the count;
+//   never without the count, and the budget share always shows;
 //   a toast when one starts and when one ends, and every 5 minutes while
 //   any runs (`/pacing notify off` quiets the toasts);
 //   a background agent still running after the turn ended gets a row in the
 //   band above the prompt, under the offer to compact, never over it.
 // Toasts and the row are one line each, within MSG_MAX.
-// While agents run the whole line keeps within the normal line's own widest,
-// "Budget 999% · usage: Weekly 100% Fable 100%" (43). (33 was what one
-// screenshot showed before the app's ellipsis during a turn; the footer's
-// room varies with the window and what else stands in it.)
-export const LINE_MAX = 43;
-export const MSG_MAX = 80;
+// While agents run the whole line keeps within LINE_MAX: a line of 75
+// characters was seen whole in the desktop app's footer, and a module cannot
+// learn the room it really has (it varies with the window and what else
+// stands there; one screenshot showed 33 before the ellipsis during a turn).
+// So the order is the agents, the budget share, the usage: a cut by the app
+// takes the least important end.
+export const LINE_MAX = 75;
+export const MSG_MAX = 120;
 // While anything runs the line is redrawn every REFRESH_EVERY from what the
 // module knows (no cost); the agents are settled from the engine's list every
 // SETTLE_EVERY, and side sessions polled every POLL_EVERY while one runs or for
@@ -289,70 +291,113 @@ const STEPS = { Read: 'reading', Grep: 'searching', Glob: 'searching', Bash: 'ru
 export const stepOf = tool => STEPS[tool] || (String(tool || '').startsWith('mcp__') ? 'a tool' : String(tool || '').toLowerCase().slice(0, 12));
 const est = (a, now) => estimateOf(a.runs, now - a.startedAt);
 const estText = (a, now) => (est(a, now) == null ? '' : '~' + est(a, now) + '%');
-// One agent as the user reads it: its name, how long it has run, what it is
-// doing, the estimate, in that order ("reader 3m searching ~60%"); as much as
-// `parts` asks for. A side session's name is its short title.
+// One agent as the user reads it: its name, its assignment (the short
+// description it was started with), what it is doing now, how long it has
+// run, the estimate, in that order; as much as `parts` asks for.
+//   with a step      reader: read the logs, searching 3m ~60%
+//   without one      reader is running: read the logs 3m
+//   no assignment    reader searching 3m ~60%, reader is running 3m
+// `parts.task` is how many characters of the assignment show (cut with an
+// ellipsis past it; 0 or absent: none). `parts.quote` is the toasts' form,
+// which says "running" itself: reader "read the logs", searching 3m ~60%.
+// A side session's name is its short title, and it has no assignment beside it.
 const nameOf = a => (a.kind === 'session' ? a.label || 'side session' : roleOf(a.type));
-const detail = (a, now, parts) => [nameOf(a), parts.time ? dur(now - a.startedAt) : '', parts.step && a.step ? a.step : '', parts.est ? estText(a, now) : '']
-  .filter(Boolean).join(' ');
-// "2 Agents", "2 Agents are running": the count, only for more than one
+// an assignment longer than this is cut wherever it shows; one cut shorter
+// than TASK_MIN says nothing and is left out instead
+export const TASK_MAX = 60;
+export const TASK_MIN = 8;
+const cut = (s, n) => (chars(s) > n ? [...s].slice(0, Math.max(1, n - 1)).join('') + '…' : s);
+export const taskOf = a => (!a || a.kind === 'session' ? '' : cut(String(a.description || '').replace(/\s+/g, ' ').trim(), TASK_MAX));
+const detail = (a, now, parts) => {
+  const task = parts.task ? cut(taskOf(a), parts.task) : '';
+  const step = parts.step && a.step ? a.step : '';
+  const head = parts.quote ? nameOf(a) + (task ? ' "' + task + '"' : '') + (step ? (task ? ', ' : ' ') + step : '')
+    : step ? nameOf(a) + (task ? ': ' + task + ', ' : ' ') + step
+    : nameOf(a) + (parts.time ? ' is running' : '') + (task ? ': ' + task : '');
+  return [head, parts.time ? dur(now - a.startedAt) : '', parts.est ? estText(a, now) : ''].filter(Boolean).join(' ');
+};
+// What shows of every agent, from all of it to the names alone: for all of
+// them at each step and from the right, the estimate goes, then the step,
+// then the assignment (cut shorter and shorter, then gone), then the time
+// and "is running" with it.
+const shrinks = (agents, more = {}) => {
+  const longest = Math.max(0, ...agents.map(a => chars(taskOf(a))));
+  const out = [{ task: TASK_MAX, step: 1, time: 1, est: 1 }, { task: TASK_MAX, step: 1, time: 1 }, { task: TASK_MAX, time: 1 }];
+  for (let n = longest - 1; n >= TASK_MIN; n--) out.push({ task: n, time: 1 });
+  out.push({ time: 1 }, {});
+  return out.map(parts => ({ ...parts, ...more }));
+};
+// "2 Agents", "2 Agents are running": the count, only for more than one;
+// `word` goes before "running" ("still", "also")
 export const countText = list => list.length + (list.length === 1 ? ' Agent' : ' Agents');
-export const runningText = (list, still = false) => countText(list) + (list.length === 1 ? ' is ' : ' are ') + (still ? 'still ' : '') + 'running';
-// the status line's agent part: each agent in full, then, for all of them at
-// each step and from the right: the estimate, the step, the time (the names
-// then stand alone, "⏳ reader, ⏳ researcher"); then, with more than one,
-// the count as a sentence, "⏳ 2 Agents are running", and last the bare
-// count, "⏳ 2 Agents". "Agent" stands for a named single agent only where a
-// lone side session's title does not fit even alone.
+export const runningText = (list, word = '') => countText(list) + (list.length === 1 ? ' is ' : ' are ') + (word ? word + ' ' : '') + 'running';
+// the status line's agent part: each agent in full, "⏳ implementer:
+// Auto-reload on plugin update, editing 2m ~60%", then less of each (see
+// shrinks) down to the names alone, "⏳ reader, ⏳ researcher"; then, with
+// more than one, the count as a sentence, "⏳ 2 Agents are running", and
+// last the bare count, "⏳ 2 Agents". "Agent" stands for a named single
+// agent only where a lone side session's title does not fit even alone.
 export const agentPart = (agents, now, room) => {
   const n = agents.length;
   if (!n) return '';
-  const each = parts => agents.map(a => '⏳ ' + detail(a, now, parts)).join(', ');
-  const names = agents.map(a => '⏳ ' + nameOf(a)).join(', ');
   return firstFit([
-    each({ time: 1, step: 1, est: 1 }),
-    each({ time: 1, step: 1 }),
-    each({ time: 1 }),
-    names,
+    ...shrinks(agents).map(parts => agents.map(a => '⏳ ' + detail(a, now, parts)).join(', ')),
     ...(n > 1 ? ['⏳ ' + runningText(agents), '⏳ ' + countText(agents)] : agents[0].kind === 'session' ? ['⏳ 1 Agent is running', '⏳ 1 Agent'] : []),
     '⏳' + n,
   ], room);
 };
 // who else runs, for a toast: by name for one or two, a count for more
-const others = (list, still) => (list.length === 0 ? (still ? 'nothing is running now' : 'nothing else is running')
-  : list.length <= 2 ? list.map(nameOf).join(' and ') + (list.length === 1 ? ' is ' : ' are ') + (still ? 'still ' : '') + 'running'
-  : runningText(list, still));
-export const startedText = (a, list) => firstFit([
-  'Pacing: ' + nameOf(a) + ' started' + (runOn(a) ? ' on ' + runOn(a) : '') + '; ' + others(list.filter(x => x !== a && x.id !== a.id), false) + '.',
-  'Pacing: ' + nameOf(a) + ' started; ' + others(list.filter(x => x !== a && x.id !== a.id), false) + '.',
-  'Pacing: ' + nameOf(a) + ' started.',
-], MSG_MAX);
-export const doneText = (a, ms, tokens, list) => firstFit([
-  'Pacing: ' + nameOf(a) + ' done in ' + dur(ms) + (tokens ? ', ' + Math.round(tokens / 1000) + 'k tokens' : '') + '; ' + others(list, true) + '.',
-  'Pacing: ' + nameOf(a) + ' done in ' + dur(ms) + '; ' + others(list, true) + '.',
-  'Pacing: ' + nameOf(a) + ' done in ' + dur(ms) + '.',
-], MSG_MAX);
-// the 5-minute toast and the row: one line each, the same order of what goes
+const others = (list, word) => (list.length === 0 ? 'nothing else is running'
+  : list.length <= 2 ? list.map(nameOf).join(' and ') + (list.length === 1 ? ' is ' : ' are ') + word + ' running'
+  : runningText(list, word));
+// the assignment in a toast, quoted, whole and then cut shorter and shorter
+const quoted = (task, n) => (task ? ' "' + cut(task, n) + '"' : '');
+const cuts = task => { const out = []; for (let n = chars(task) - 1; n >= TASK_MIN; n--) out.push(n); return out; };
+// "Pacing: implementer is running "Auto-reload on plugin update" on Fable 5.2
+// high; reader is also running." What gives way past MSG_MAX, in order: who
+// else runs, the assignment's end, the assignment, the model.
+export const startedText = (a, list) => {
+  const rest = list.filter(x => x !== a && x.id !== a.id);
+  const head = 'Pacing: ' + nameOf(a) + ' is running', task = taskOf(a), on = runOn(a) ? ' on ' + runOn(a) : '';
+  return firstFit([
+    head + quoted(task, TASK_MAX) + on + (rest.length ? '; ' + others(rest, 'also') : '') + '.',
+    head + quoted(task, TASK_MAX) + on + '.',
+    ...cuts(task).map(n => head + quoted(task, n) + on + '.'),
+    head + on + '.',
+    head + '.',
+  ], MSG_MAX);
+};
+// "Pacing: implementer is done with "Auto-reload on plugin update" after 3m,
+// 41k tokens; nothing else is running." What gives way: the tokens, who else
+// runs, the assignment's end, the assignment.
+export const doneText = (a, ms, tokens, list) => {
+  const head = 'Pacing: ' + nameOf(a) + ' is done', task = taskOf(a), after = ' after ' + dur(ms);
+  const withTask = n => (task ? ' with' + quoted(task, n) : '');
+  return firstFit([
+    head + withTask(TASK_MAX) + after + (tokens ? ', ' + Math.round(tokens / 1000) + 'k tokens' : '') + '; ' + others(list, 'still') + '.',
+    head + withTask(TASK_MAX) + after + '; ' + others(list, 'still') + '.',
+    head + withTask(TASK_MAX) + after + '.',
+    ...cuts(task).map(n => head + withTask(n) + after + '.'),
+    head + after + '.',
+  ], MSG_MAX);
+};
+// the 5-minute toast and the row: one line each, the same order of what goes.
+// The toast: "Pacing: still running: implementer "Auto-reload on plugin
+// update", editing 12m ~60%.", several joined by "; " while an assignment
+// shows and by ", " once none does.
 export const progressText = (agents, now) => {
   const longest = dur(now - Math.min(...agents.map(a => a.startedAt)));
-  const each = parts => agents.map(a => detail(a, now, parts)).join(', ');
+  const each = parts => { const items = agents.map(a => detail(a, now, parts)); return items.join(items.some(i => i.includes('"')) ? '; ' : ', '); };
   return firstFit([
-    'Pacing: still running: ' + each({ time: 1, step: 1, est: 1 }) + '.',
-    'Pacing: still running: ' + each({ time: 1, step: 1 }) + '.',
-    'Pacing: still running: ' + each({ time: 1 }) + '.',
-    'Pacing: still running: ' + agents.map(nameOf).join(', ') + '.',
-    'Pacing: ' + runningText(agents, true) + ', the longest for ' + longest + '.',
-    'Pacing: ' + runningText(agents, true) + '.',
+    ...shrinks(agents, { quote: 1 }).map(parts => 'Pacing: still running: ' + each(parts) + '.'),
+    'Pacing: ' + runningText(agents, 'still') + ', the longest for ' + longest + '.',
+    'Pacing: ' + runningText(agents, 'still') + '.',
   ], MSG_MAX);
 };
 export const backgroundText = (agents, now, room = MSG_MAX) => {
-  const each = parts => agents.map(a => '⏳ ' + detail(a, now, parts)).join(', ');
   const names = agents.map(a => '⏳ ' + nameOf(a)).join(', ');
   return firstFit([
-    'In the background: ' + each({ time: 1, step: 1, est: 1 }),
-    'In the background: ' + each({ time: 1, step: 1 }),
-    'In the background: ' + each({ time: 1 }),
-    'In the background: ' + names,
+    ...shrinks(agents).map(parts => 'In the background: ' + agents.map(a => '⏳ ' + detail(a, now, parts)).join(', ')),
     ...(agents.length > 1 ? ['⏳ ' + runningText(agents) + ' in the background', '⏳ ' + runningText(agents), '⏳ ' + countText(agents)] : [names]),
   ], Math.min(room, MSG_MAX));
 };
@@ -399,12 +444,16 @@ export const workingSessions = (rows, host) => (host ? rows.filter(r => r && r.s
 export const startedBy = (rows, host) => (host ? rows.filter(r => r && r.startedBy === host && !r.isArchived).length : 0);
 // a side session's short title: its title cut to 24 characters
 export const shortTitle = row => { const t = String((row && (row.title || row.name)) || 'side session'); return chars(t) > 24 ? [...t].slice(0, 23).join('') + '…' : t; };
-export const sessionStartedText = (row, list) => firstFit([
-  'Pacing: side session ' + shortTitle(row) + ' started; ' + others(list.filter(x => x.id !== row.sessionId), false) + '.',
-  'Pacing: a side session started; ' + others(list.filter(x => x.id !== row.sessionId), false) + '.',
-], MSG_MAX);
+export const sessionStartedText = (row, list) => {
+  const rest = list.filter(x => x.id !== row.sessionId);
+  const also = rest.length ? '; ' + others(rest, 'also') : '';
+  return firstFit([
+    'Pacing: side session ' + shortTitle(row) + ' is running' + also + '.',
+    'Pacing: a side session is running' + also + '.',
+  ], MSG_MAX);
+};
 export const sessionDoneText = (a, ms, list) => firstFit([
-  'Pacing: side session ' + (a.label || 'side session') + ' ended its turn after ' + dur(ms) + '; ' + others(list, true) + '.',
+  'Pacing: side session ' + (a.label || 'side session') + ' ended its turn after ' + dur(ms) + '; ' + others(list, 'still') + '.',
   'Pacing: a side session ended its turn after ' + dur(ms) + '.',
 ], MSG_MAX);
 // the refresh while anything runs: every REFRESH_EVERY, the line and the
@@ -606,10 +655,115 @@ export const lineOf = (j, model, tokens, agentTokens, now, full = false, agents 
   const id = child ? idOf(model, prices) : null;
   const self = child ? (id && tierOf[id]) || 'Other' : null;
   if (full) return fullText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now)
-    + (agents.length ? '\nRunning: ' + agents.map(a => (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { time: 1, est: 1, step: 1 }) + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.description ? ', ' + a.description : '')).join('; ')
+    + (agents.length ? '\nRunning: ' + agents.map(a => (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { task: TASK_MAX, time: 1, est: 1, step: 1 }) + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.kind === 'session' && a.description ? ', ' + a.description : '')).join('; ')
       + (agents.some(a => estText(a, now)) ? '\n~ is a rough estimate from how long that kind of agent usually takes, not a measure of the work done.' : '') : '');
   return statusText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now, agents);
 };
+
+// ---- a new version: the session reloads its plugins by itself ----
+// The desktop app syncs installed plugins about every 20 minutes and
+// replaces this plugin's files in place; an open session ran the old code
+// until someone typed /reload-plugins. So the module does it:
+//   it knows the version it was loaded as (plugin.json, read at load) and
+//   reads the file again RELOAD_AFTER_TURN after a turn ends and every
+//   RELOAD_CHECK_EVERY: one $.fs.read, no process, no model call;
+//   another version there, in a session a person has typed in, with no turn
+//   running, no survey up and no subagent of its own at work: /reload-plugins
+//   as if typed ($.command.run, from a timer: the engine refuses it inside
+//   a hook the turn waits on), once per version;
+//   the copy the reload brings says so at its load, "Pacing: updated to
+//   0.9.11 and reloaded." (a mark the copy that asked left in $.store under
+//   the session's id tells it; the mark goes once it is said);
+//   a run the engine rejects: "Pacing 0.9.11 is installed: type
+//   /reload-plugins to load it.", once per version.
+// A reload starts changed modules only: a version that left this file as it
+// was keeps this copy running. So RELOAD_SETTLE after the command ran, the
+// copy that asked looks once more. Its own file on disk as it was loaded:
+// it is the new version's code, and says "updated". Its file changed and it
+// still runs: the reload did not take, and the person is asked to type it.
+// Never a second attempt for a version: a fresh copy takes the version on
+// disk as its own, and a copy that stays remembers what it asked for.
+// A manifest that does not read or names no version (half-written during a
+// sync) is no change, and is read again at the next look. A side session
+// nobody types in is left alone: it loads the new version at its next start.
+// `/pacing reload off` turns it off.
+export const RELOAD_CHECK_EVERY = 5 * 60 * 1000;
+export const RELOAD_AFTER_TURN = 2 * 1000;
+export const RELOAD_SETTLE = 10 * 1000;
+// a command that neither ran nor was refused in this long is given up
+export const RELOAD_GIVE_UP = 10 * 60 * 1000;
+// the version a manifest's text names, or null
+export const versionOf = text => { try { const v = JSON.parse(text).version; return typeof v === 'string' && v ? v : null; } catch { return null; } };
+export const reloadedText = version => 'Pacing: updated to ' + version + ' and reloaded.';
+export const reloadAskText = version => 'Pacing ' + version + ' is installed: type /reload-plugins to load it.';
+// whether the reload at a new version is on (config.json's autoReload; on unless false)
+async function reloadOn($) {
+  try {
+    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
+    if (!home) return true;
+    return JSON.parse(await $.fs.read(home + '/.claude/pacing/config.json')).autoReload !== false;
+  } catch { return true; }
+}
+// the version plugin.json names now, and this module's own text; null when unreadable
+async function versionOnDisk($) { try { return versionOf(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')); } catch { return null; } }
+async function codeOnDisk($) { try { return await $.fs.read($.plugin.root + '/hooks/readings.mjs'); } catch { return null; } }
+// where this session's mark is kept in the store, or null where the engine gives no id
+async function reloadKey($) { try { const id = await $.session.id(); return id ? 'reload:' + id : null; } catch { return null; } }
+function say($, text) { try { $.ui.toast(text, { timeoutMs: 15000 }); } catch { /* an engine without toasts */ } }
+async function unmark($, key) { if (key) { try { await $.store.delete(key); } catch { /* no store */ } } }
+// /reload-plugins as if typed. Started, never awaited: it is queued until
+// the session is idle, and may never answer the copy it unloads.
+async function runReload($, rl, key, version) {
+  try { await $.command.run({ command: 'reload-plugins' }); } catch {
+    // rejected, or an engine without the call: the person types it
+    if (rl.asked && rl.asked.version === version) { rl.asked = null; await unmark($, key); say($, reloadAskText(version)); }
+    return;
+  }
+  // it ran and this copy still runs: one more look says which it is
+  if (rl.asked && rl.asked.version === version) {
+    rl.asked.ran = true;
+    try { $.clock.after(RELOAD_SETTLE, () => { look($, rl); }); } catch { /* the slow timer looks */ }
+  }
+}
+// one look at the version on disk; `rl` is the copy's memory (see register).
+// Never throws: a look is a convenience, and the next one tries again.
+async function look($, rl) {
+  if (rl.looking) return;
+  rl.looking = true;
+  try {
+    const disk = await versionOnDisk($);
+    if (!disk) return;
+    const key = await reloadKey($);
+    let mark;
+    if (key) { try { mark = await $.store.get(key); } catch { /* no store */ } }
+    if (rl.loaded === null) {
+      // this copy's first look: what it was loaded as. A mark here is the
+      // reload this session asked for, which brought this copy.
+      rl.loaded = disk;
+      rl.code = await codeOnDisk($);
+      if (mark) { await unmark($, key); say($, reloadedText(disk)); }
+      return;
+    }
+    if (rl.asked) {
+      // this copy asked for a reload and still runs
+      if (!rl.asked.ran && (rl.busy || (await $.clock.now()) - rl.asked.at < RELOAD_GIVE_UP)) return;
+      const { version, ran } = rl.asked;
+      rl.asked = null;
+      // the mark gone: a fresh copy has taken over and said so
+      if (key && !mark) return;
+      await unmark($, key);
+      if (ran && rl.code !== null && (await codeOnDisk($)) === rl.code) { rl.loaded = version; say($, reloadedText(version)); }
+      else say($, reloadAskText(version));
+      return;
+    }
+    if (disk === rl.loaded || disk === rl.acted) return;
+    if (!rl.free() || !(await reloadOn($))) return;
+    rl.acted = disk;
+    rl.asked = { version: disk, at: await $.clock.now(), ran: false };
+    if (key) { try { await $.store.set(key, { version: disk, at: rl.asked.at }); } catch { /* no store: this copy's own memory */ } }
+    runReload($, rl, key, disk).catch(() => { /* said already, or the next look */ });
+  } catch { /* the next look */ } finally { rl.looking = false; }
+}
 
 /** @type {import('claude-code').Register} */
 export const register = on => {
@@ -664,6 +818,20 @@ export const register = on => {
   const st = { agents, timer: null, settledAt: 0, polledAt: 0, watchUntil: 0, progressAt: 0, host: null, children: 0, quiet: false, watchSince: 0,
     list: runningAgents, lineNow, reading: () => reading };
   const stopTick = () => stopTickOf(st);
+
+  // the reload at a new version (see "a new version"): what the looks read
+  // and write. The version and the text this copy was loaded as, the version
+  // it asked a reload for and that request while it is open ({ version, at,
+  // ran }), whether a main-thread turn runs, whether the band was last drawn
+  // under a survey, the timers, and whether a reload may run now.
+  const rl = { loaded: null, code: null, acted: null, asked: null, busy: false, survey: false, looking: false, timer: null, afterTurn: null,
+    free: () => attended && !rl.busy && !rl.survey && !runningAgents().some(a => a.kind !== 'session') };
+
+  // a main-thread turn runs from here to its turn.complete: no reload meanwhile
+  on('turn.start', ($, e, next) => {
+    if (!e.agentId) rl.busy = true;
+    return next(e);
+  });
 
   // An Agent call: its effort, which agent.spawn does not carry, and the
   // agent in the line at once, before the engine resolves and spawns it (a
@@ -741,6 +909,8 @@ export const register = on => {
   // model, or one step less effort). The background agents' row goes under it.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const p = e.props || {};
+    // for the reload at a new version: never under a survey
+    if (!(p.view && p.view.agentId) && (!e.plugin || e.plugin === 'pacing')) rl.survey = !!p.hasSurvey;
     const background = runningAgents().filter(a => a.background);
     if ((!offer && !sw && !background.length) || p.hasSurvey || p.isWorking || (p.view && p.view.agentId) || (e.plugin && e.plugin !== 'pacing')) return next(e);
     const { Box, Text, Button } = $.ui.resolve(e);
@@ -873,6 +1043,13 @@ export const register = on => {
     })().catch(() => { /* a failure draws nothing new */ });
     // the side sessions already working (a reload mid-work): in the line, no toast
     (async () => { st.quiet = true; await pollSessions($, st, await $.clock.now()); })().catch(() => { /* none known */ });
+    // the version this copy was loaded as, and from here a slow look at the
+    // one on disk (see "a new version")
+    look($, rl);
+    try {
+      if (rl.timer) rl.timer.cancel();
+      rl.timer = $.clock.every(RELOAD_CHECK_EVERY, () => { look($, rl); });
+    } catch { /* an engine without timers: the look after a turn */ }
     return result;
   });
   on('command.run', { command: 'pacing-status' }, async ($) => {
@@ -934,6 +1111,15 @@ export const register = on => {
     if (!e.agentId) {
       try { lastTurnAt = await $.clock.now(); } catch { /* no clock: no warning */ }
       if (e.usage && e.usage.model) sessionModel = e.usage.model;
+      // a natural break: one look at the version on disk, once the turn is
+      // over (a timer: /reload-plugins cannot run from inside this hook)
+      rl.busy = false;
+      if (attended) {
+        try {
+          if (rl.afterTurn) rl.afterTurn.cancel();
+          rl.afterTurn = $.clock.after(RELOAD_AFTER_TURN, () => { look($, rl); });
+        } catch { /* an engine without timers: no look */ }
+      }
     }
     const u = e.usage;
     if (u && u.model) {

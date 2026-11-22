@@ -44,5 +44,6 @@ export const checkConfig = raw => {
   drop('compactAsk', v => typeof v === 'boolean', 'the offers to compact are not on or off');
   drop('agentNotices', v => typeof v === 'boolean', 'the notices about running subagents are not on or off');
   drop('switchAsk', v => typeof v === 'boolean', 'the offers to switch model or effort are not on or off');
+  drop('autoReload', v => typeof v === 'boolean', 'the reload at a new version is not on or off');
   return { cfg: c, problems };
 };

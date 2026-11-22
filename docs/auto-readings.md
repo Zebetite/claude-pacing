@@ -365,3 +365,87 @@ level in the status line.
   ellipsis during a turn; the footer's room varies. Toasts name who else
   runs ("; reader is running", "; nothing else is running"), a count only
   for three or more.
+
+## A new version reloads by itself (0.9.11)
+
+- **The case.** The desktop app syncs installed plugins about every 20
+  minutes and replaces the plugin's files in place. An open session ran
+  the old module until someone typed `/reload-plugins`, and the user had to
+  ask whether the version had arrived.
+- **The look.** The module reads `.claude-plugin/plugin.json` under
+  `$.plugin.root` at load (`session.start`, once per copy: the version it
+  was loaded as), 2 seconds after each main-thread turn ends, and every 5
+  minutes: one `$.fs.read`, no process, no model call. A manifest that does
+  not read or names no version (half-written during a sync) is no change,
+  and is read again at the next look.
+- **The reload.** Another version on disk, in a session a person has typed
+  in, with no turn running (`turn.start` to `turn.complete`), no survey up
+  (the band's last `hasSurvey`) and no in-process subagent at work:
+  `$.command.run({ command: 'reload-plugins' })`, once per version, from a
+  timer, since the engine refuses the call inside a hook the turn waits
+  on. A side session nobody types in is left alone: it loads the new
+  version at its next start. `/pacing reload off` (`autoReload: false`)
+  turns it off.
+- **Who says so.** The copy that asked may be unloaded before its call
+  answers, so it leaves a mark in `$.store` under `reload:<session id>`,
+  and the copy the reload brings finds it at its load: `Pacing: updated to
+  0.9.11 and reloaded.` The mark is deleted once said. A load with no
+  mark (a new session, a reload the person typed) says nothing.
+- **A copy that stays.** The engine's types say a reload starts changed
+  modules only, so a version that left `readings.mjs` as it was keeps the
+  copy running. 10 seconds after the command ran, the copy that asked
+  looks once more: its own file on disk as it was loaded, it is the new
+  version's code, says "updated" and counts as that version; its file
+  changed and it still runs, the reload did not take: `Pacing 0.9.11 is
+  installed: type /reload-plugins to load it.` The same line when the
+  engine rejects the call, and when the command neither ran nor was
+  refused in 10 minutes. Once per version.
+- **No loop.** A fresh copy takes the version on disk as its own, and a
+  copy that stays remembers the version it asked for: one attempt per
+  version, whatever the reload did.
+- **`$` goes to top-level functions only.** The loader refuses a hooks
+  module that passes `$` to a function declared inside `register`, so the
+  look and the run are top-level (`look($, rl)`, `runReload`), with the
+  copy's memory in an object, as `st` is for the refresh.
+- **Not checked live:** whether the engine accepts `/reload-plugins` from a
+  module, and that `session.start` then runs in the new copy.
+
+## The assignment and "is running" in the line (0.9.11)
+
+- **The case.** With one agent running the line read `⏳ implementer 2m`
+  with room to spare, and the toasts named neither the task nor that the
+  agent runs. "Task" is both: the assignment (the short `description` the
+  agent was started with) and what it is doing now (the step).
+- **The order,** per agent: name, assignment, step, time, estimate. With a
+  step, `⏳ implementer: Auto-reload on plugin update, editing 2m ~60% ·
+  Budget 77%`; before one is known, `⏳ implementer is running: Auto-reload
+  on plugin update 2m`. An agent without a description has no assignment
+  part (`⏳ reader searching 3m ~60%`, `⏳ reader is running 3m`); a side
+  session's title is its name (`⏳ Task s1 is running 5s`).
+- **Without room,** for all agents at each step and from the right: the
+  estimate; the step (the form becomes `name is running: assignment
+  time`); the assignment, cut with `…` one character at a time down to 8
+  and then gone (`⏳ implementer is running 2m`); the time and "is
+  running", leaving the names (`⏳ reader, ⏳ implementer`); with more than
+  one, `⏳ 2 Agents are running`, then `⏳ 2 Agents`; last the bare count.
+  An assignment is never longer than 60 characters anywhere.
+- **75 characters** while agents run (43 before): a line of 75 was seen
+  whole in the app's footer, and a module cannot learn the room it has.
+  The order stays agents, `Budget x%`, usage, so a cut by the app takes the
+  least important end; the usage gives way first, and shows where what is
+  left has room for it. Two agents with their assignments pass 75, so two
+  read `⏳ implementer is running 2m, ⏳ reader is running 3m · Budget 77%`.
+- **Toasts,** one line each, within 120 characters (80 before):
+  `Pacing: implementer is running "Auto-reload on plugin update" on Fable
+  5.2 high.`, with `; reader is also running.` when others run (two by
+  name, a count from three on) and no tail when none does;
+  `Pacing: implementer is done with "Auto-reload on plugin update" after
+  3m, 41k tokens; nothing else is running.` or `; reader is still
+  running.`; every 5 minutes `Pacing: still running: implementer
+  "Auto-reload on plugin update", editing 12m ~60%.`, several joined by
+  "; " while an assignment shows. A side session: `Pacing: side session
+  Task s1 is running.`, and `… ended its turn after 35s; nothing else is
+  running.`
+- **The row and `/pacing-status`** use the line's form: `In the
+  background: ⏳ implementer: Auto-reload on plugin update, editing 2m
+  ~60%`.

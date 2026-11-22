@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, MSG_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadedText, reloadAskText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, RELOAD_SETTLE, RELOAD_GIVE_UP } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -819,7 +819,7 @@ const agentEngine = (on: any, opts: { list?: () => { id: string; status: string 
 const spawn = ($: any, type: string, model = 'haiku', background = false, description = 'a task') =>
   $.agent.spawn({ prompt: 'p', description, subagentType: type, model, background } as any)
 
-test('one agent: a toast when it starts, the line leads with it and its time, a toast when it ends, then the plain line', async ($, on) => {
+test('one agent: a toast when it starts, the line leads with it, its assignment and its time, a toast when it ends, then the plain line', async ($, on) => {
   const status = engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
@@ -828,18 +828,18 @@ test('one agent: a toast when it starts, the line leads with it and its time, a 
   await $.session.measure(measure(10))
   expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
   await spawn($, 'pacing:reader')
-  expect(seen.toasts).toEqual(['Pacing: reader started on Haiku 5.5; nothing else is running.'])
-  expect(status.at(-1)).toBe('⏳ reader 0s · Budget 50%')
+  expect(seen.toasts).toEqual(['Pacing: reader is running "a task" on Haiku 5.5.'])
+  expect(status.at(-1)).toBe('⏳ reader is running: a task 0s · Budget 50% · usage: Weekly 10% Fable 40%')
   // it refreshes while it runs
   await clock.advance(3 * 60000)
-  expect(status.at(-1)).toBe('⏳ reader 3m · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ reader is running: a task 3m · Budget 50% · usage: Weekly 10% Fable 40%')
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
-  expect(seen.toasts.at(-1)).toMatch(/^Pacing: reader done in 3m, \d+k tokens; nothing is running now\.$/)
+  expect(seen.toasts.at(-1)).toMatch(/^Pacing: reader is done with "a task" after 3m, \d+k tokens; nothing else is running\.$/)
   // the plain line again, the agent's spend in its tier split
   expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
 })
 
-test('several agents: the count leads; a progress toast every 5 minutes and no more often; the count falls as each ends', async ($, on) => {
+test('several agents: each in the line; a progress toast every 5 minutes and no more often; the line follows as each ends', async ($, on) => {
   const status = engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
@@ -850,13 +850,14 @@ test('several agents: the count leads; a progress toast every 5 minutes and no m
   await spawn($, 'pacing:reader')
   await clock.advance(40 * 1000)
   await spawn($, 'pacing:implementer', 'opus')
-  expect(seen.toasts.at(-1)).toBe('Pacing: implementer started on Opus 5.5; reader is running.')
-  expect(status.at(-1)).toBe('⏳ reader 40s, ⏳ implementer 0s · Budget 50%')
+  expect(seen.toasts.at(-1)).toBe('Pacing: implementer is running "a task" on Opus 5.5; reader is also running.')
+  // two with their assignments pass the width: the assignments go, for both
+  expect(status.at(-1)).toBe('⏳ reader is running 40s, ⏳ implementer is running 0s · Budget 50%')
 
   await clock.advance(4 * 60000)
   expect(seen.toasts.filter(t => t.includes('still running:'))).toEqual([])
   await clock.advance(30 * 1000)
-  expect(seen.toasts.filter(t => t.includes('still running:'))).toEqual(['Pacing: still running: reader 5m, implementer 4m.'])
+  expect(seen.toasts.filter(t => t.includes('still running:'))).toEqual(['Pacing: still running: reader "a task" 5m; implementer "a task" 4m.'])
   // not again before another 5 minutes
   await clock.advance(4 * 60000)
   expect(seen.toasts.filter(t => t.includes('still running:')).length).toBe(1)
@@ -865,8 +866,8 @@ test('several agents: the count leads; a progress toast every 5 minutes and no m
 
   live.delete('ag1')
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
-  expect(seen.toasts.at(-1)).toMatch(/^Pacing: reader done in 10m, \d+k tokens; implementer is still running\.$/)
-  expect(status.at(-1)).toBe('⏳ implementer 10m · Budget 50%')
+  expect(seen.toasts.at(-1)).toMatch(/^Pacing: reader is done with "a task" after 10m, \d+k tokens; implementer is still running\.$/)
+  expect(status.at(-1)).toBe('⏳ implementer is running: a task 10m · Budget 50% · usage: Weekly 10%')
 })
 
 test('the count never sticks: the main turn ends its foreground agents, the engine\'s list ends the rest, a new session starts with none', async ($, on) => {
@@ -883,7 +884,7 @@ test('the count never sticks: the main turn ends its foreground agents, the engi
   await spawn($, 'general-purpose', 'sonnet', true)
   // the main turn ends: the foreground reader with it, though no end was heard
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(status.at(-1)).toMatch(/^⏳ general 0s · Budget 50%/)
+  expect(status.at(-1)).toMatch(/^⏳ general is running: a task 0s · Budget 50%/)
   // the engine lists the background one as done: gone at the next refresh
   live.clear()
   await clock.advance(30 * 1000)
@@ -914,7 +915,7 @@ test('a background agent after the turn ended: a row above the prompt, under the
   const ui = await $.ui.mount(BAND)
   const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
   await ui.unmount()
-  expect(texts).toEqual(['This session is 320k tokens. Compacting now makes every later turn cheaper.', 'In the background: ⏳ researcher 2m'])
+  expect(texts).toEqual(['This session is 320k tokens. Compacting now makes every later turn cheaper.', 'In the background: ⏳ researcher is running: a task 2m'])
   // while a turn runs, neither shows
   const busy = await $.ui.mount({ ...BAND, props: { ...BAND.props, isWorking: true } })
   expect(await busy.find({ type: 'Text' })).toBeFalsy()
@@ -928,7 +929,7 @@ test('notify off: no toasts; the line still shows the agents', async ($, on) => 
   const seen = agentEngine(on, { config: JSON.stringify({ agentNotices: false }), list: () => [{ id: 'ag1', status: 'running' }] })
   await $.session.measure(measure(10))
   await spawn($, 'pacing:reader')
-  expect(status.at(-1)).toBe('⏳ reader 0s · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ reader is running: a task 0s · Budget 50% · usage: Weekly 10% Fable 40%')
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
   expect(seen.toasts).toEqual([])
 })
@@ -948,7 +949,7 @@ test('an older engine without the agents list or timers: the line still counts, 
 })
 
 // the whole line within LINE_MAX while agents run, at every level and length
-const A = (type: string, mins: number, model = 'claude-haiku-5-5', effort?: string) => ({ id: type + mins, type, model, effort, startedAt: T0 - mins * 60000, background: false })
+const A = (type: string, mins: number, model = 'claude-haiku-5-5', effort?: string, description?: string) => ({ id: type + mins, type, model, effort, description, startedAt: T0 - mins * 60000, background: false })
 const LONGEST_MIX = [1, 2, 3, 4, 5, 6, 7, 8].map(tier => ({ tier, share: 12 })).concat([{ tier: 'Other' as any, share: 4 }])
 const FAR = { all: 100, line: 46.7, ofBudget: 214, level: 'throttle', premium: 100, premiumLabel: 'Fable 5.2', premiumAt: null }
 const SETS = {
@@ -956,42 +957,65 @@ const SETS = {
   two: [A('pacing:reader', 3), A('pacing:implementer', 1, 'claude-opus-5-5', 'high')],
   six: [A('general-purpose', 12), A('someplugin:very-long-agent-name', 9), A('pacing:implementer', 7), A('pacing:verifier', 5), A('Explore', 3), A('pacing:researcher', 1)],
 }
+// the same agents, each with an assignment, a step and a history
+const LONG_TASK = 'Auto-reload on plugin update when the desktop app has installed a new version of the plugin'
+const described = (list: any[], description = LONG_TASK) => list.map(a => ({ ...a, description, step: 'on the web', runs: [4 * 60000, 5 * 60000, 6 * 60000] }))
 
-test('with 1, 2, 3 and 6 agents, long names, far over budget and the longest split: the line fits and holds every agent or their count, and the budget', async () => {
+test('with 1, 2, 3 and 6 agents, long names and assignments, far over budget: the line keeps within 75 and holds every agent or their count, and the budget', async () => {
   let longest = ''
   const three = [...SETS.two, A('pacing:verifier', 0.5)]
-  for (const list of [SETS.one, SETS.two, three, SETS.six]) {
-    for (const [j, self] of [[FAR, null], [FAR, 'Other'], [{ ...FAR, level: 'stop', ofBudget: 999 }, 'Other'], [{ ...FAR, level: 'ahead', ofBudget: 77 }, 1]] as const) {
-      const s = statusText(j as any, LONGEST_MIX, self as any, T0, list as any)
-      if (chars(s) > chars(longest)) longest = s
-      expect(chars(s)).toBeLessThanOrEqual(LINE_MAX)
-      expect(s.startsWith('⏳') || s.includes(' · ⏳')).toBe(true)
-      // every agent by name, or their count: never less
-      expect(list.every(a => s.includes('⏳ ' + roleOf(a.type))) || s.includes('⏳ ' + list.length + ' Agents') || s.includes('⏳' + list.length)).toBe(true)
-      expect(s).toContain('Budget ' + j.ofBudget + '%')
+  for (const plain of [SETS.one, SETS.two, three, SETS.six]) {
+    for (const list of [plain, described(plain), described(plain, 'Read the logs')]) {
+      for (const [j, self] of [[FAR, null], [FAR, 'Other'], [{ ...FAR, level: 'stop', ofBudget: 999 }, 'Other'], [{ ...FAR, level: 'ahead', ofBudget: 77 }, 1]] as const) {
+        const s = statusText(j as any, LONGEST_MIX, self as any, T0, list as any)
+        if (chars(s) > chars(longest)) longest = s
+        expect(chars(s)).toBeLessThanOrEqual(LINE_MAX)
+        expect(s.startsWith('⏳') || s.includes(' · ⏳')).toBe(true)
+        // every agent by name, or their count: never less
+        expect(list.every(a => s.includes('⏳ ' + roleOf(a.type))) || s.includes('⏳ ' + list.length + ' Agents') || s.includes('⏳' + list.length)).toBe(true)
+        expect(s).toContain('Budget ' + j.ofBudget + '%')
+        // the agents, then the budget share, then the usage: a cut by the app takes the least important end
+        expect(s.indexOf('⏳')).toBeLessThan(s.indexOf('Budget'))
+        if (s.includes('usage:')) expect(s.indexOf('Budget')).toBeLessThan(s.indexOf('usage:'))
+      }
     }
   }
-  // the width: the normal line's own widest
-  expect(LINE_MAX).toBe(43)
-  expect(chars('Budget 999% · usage: Weekly 100% Fable 100%')).toBe(LINE_MAX)
-  expect(chars(longest)).toBeLessThanOrEqual(LINE_MAX)
+  // the width: a line of 75 characters was seen whole in the app's footer
+  expect(LINE_MAX).toBe(75)
+  // the longest line there is uses the width to the last character
+  expect(chars(longest)).toBe(LINE_MAX)
+  expect(longest).toBe('⏳ reader is running: Auto-reload on plugin update when th… 3m · Budget 214%')
+  // an assignment is never longer than TASK_MAX, wherever it shows
+  expect(TASK_MAX).toBe(60)
+  expect(agentPart(described(SETS.one as any), T0, 500)).toBe('⏳ reader: Auto-reload on plugin update when the desktop app has insta…, on the web 3m ~60%')
   expect(roleOf('general-purpose')).toBe('general')
   expect(roleOf('someplugin:very-long-agent-name')).toBe('very-long-a…')
 })
-test('the toasts and the row are one line each, within MSG_MAX, however many run; Agent only for more than one', async () => {
+test('the toasts and the row are one line each, within 120, however many run and however long the assignment; Agent only for more than one', async () => {
   const six = SETS.six as any
-  const msgs = [startedText(six[1], six), doneText(six[1], 9 * 60000, 123456, six.slice(2)), progressText(six, T0), backgroundText(six, T0), backgroundText(six, T0, 40)]
-  for (const m of msgs) {
-    expect(chars(m)).toBeLessThanOrEqual(MSG_MAX)
-    expect(m).not.toContain('\n')
+  const twelve = [...six, ...six.map((a: any) => ({ ...a, id: a.id + 'b' }))]
+  expect(MSG_MAX).toBe(120)
+  for (const list of [six, described(six), twelve, described(twelve)]) {
+    const msgs = [startedText(list[1], list), doneText(list[1], 9 * 60000, 123456, list.slice(2)), progressText(list, T0), backgroundText(list, T0), backgroundText(list, T0, 40)]
+    for (const m of msgs) {
+      expect(chars(m)).toBeLessThanOrEqual(MSG_MAX)
+      expect(m).not.toContain('\n')
+    }
   }
-  expect(progressText(six, T0)).toBe('Pacing: 6 Agents are still running, the longest for 12m.')
+  // the 5-minute toast: by name while they fit, then the count
+  expect(progressText(six, T0)).toBe('Pacing: still running: general 12m, very-long-a… 9m, implementer 7m, verifier 5m, explore 3m, researcher 1m.')
+  expect(progressText(twelve, T0)).toBe('Pacing: 12 Agents are still running, the longest for 12m.')
   expect(progressText(SETS.two as any, T0)).toBe('Pacing: still running: reader 3m, implementer 1m.')
-  expect(startedText(SETS.one[0] as any, SETS.one as any)).toBe('Pacing: reader started on Haiku 5.5 medium; nothing else is running.')
-  expect(startedText(SETS.two[1] as any, SETS.two as any)).toBe('Pacing: implementer started on Opus 5.5 high; reader is running.')
-  expect(doneText(six[1], 9 * 60000, 123456, six.slice(2))).toBe('Pacing: very-long-a… done in 9m, 123k tokens; 4 Agents are still running.')
-  expect(doneText(SETS.two[0] as any, 60000, 1000, [SETS.two[1]] as any)).toBe('Pacing: reader done in 1m, 1k tokens; implementer is still running.')
+  // an agent without a description has no assignment part
+  expect(startedText(SETS.one[0] as any, SETS.one as any)).toBe('Pacing: reader is running on Haiku 5.5 medium.')
+  expect(startedText(SETS.two[1] as any, SETS.two as any)).toBe('Pacing: implementer is running on Opus 5.5 high; reader is also running.')
+  expect(doneText(six[1], 9 * 60000, 123456, six.slice(2))).toBe('Pacing: very-long-a… is done after 9m, 123k tokens; 4 Agents are still running.')
+  expect(doneText(SETS.two[0] as any, 60000, 1000, [SETS.two[1]] as any)).toBe('Pacing: reader is done after 1m, 1k tokens; implementer is still running.')
   expect(backgroundText(six, T0, 40)).toBe('⏳ 6 Agents are running in the background')
+  // a long assignment: who else runs goes first, then the assignment's end
+  const long = described(SETS.two as any)
+  expect(startedText(long[1], long)).toBe('Pacing: implementer is running "Auto-reload on plugin update when the desktop app has insta…" on Opus 5.5 high.')
+  expect(doneText(long[1], 3 * 60000, 41000, [long[0]])).toBe('Pacing: implementer is done with "Auto-reload on plugin update when the desktop app has insta…" after 3m.')
 })
 // ---- an estimate of a running agent's progress ----
 
@@ -1018,54 +1042,126 @@ test('the log keeps only the recent runs of each type', async () => {
 
 // three earlier reader runs of 4, 5 and 6 minutes
 const HISTORY = { 'pacing:reader': [4 * 60000, 5 * 60000, 6 * 60000] }
-const withRuns = (list: any[], runs = HISTORY['pacing:reader']) => list.map(a => ({ ...a, runs, step: 'searching' }))
 
-test('each agent in full, then from the right for all of them: the estimate, the step, the time; then the names alone; then the count as a sentence; the bare count last', async () => {
-  const one = withRuns(SETS.one as any), two = withRuns(SETS.two as any), three = withRuns([...SETS.two, A('pacing:verifier', 0.5)] as any)
-  // one agent: name, time, step, estimate
-  expect(statusText({ ...FAR, level: 'ahead', ofBudget: 77 } as any, [], null, T0, one)).toBe('⏳ reader 3m searching ~60% · Budget 77%')
-  expect(agentPart(one, T0, 80)).toBe('⏳ reader 3m searching ~60%')
-  expect(agentPart(one, T0, 22)).toBe('⏳ reader 3m searching')
-  expect(agentPart(one, T0, 14)).toBe('⏳ reader 3m')
-  expect(agentPart(one, T0, 9)).toBe('⏳ reader')
-  // two
-  expect(agentPart(two, T0, 80)).toBe('⏳ reader 3m searching ~60%, ⏳ implementer 1m searching ~20%')
-  expect(agentPart(two, T0, 50)).toBe('⏳ reader 3m searching, ⏳ implementer 1m searching')
-  expect(agentPart(two, T0, 30)).toBe('⏳ reader 3m, ⏳ implementer 1m')
-  expect(agentPart(two, T0, 25)).toBe('⏳ reader, ⏳ implementer')
-  expect(agentPart(two, T0, 22)).toBe('⏳ 2 Agents are running')
-  expect(agentPart(two, T0, 12)).toBe('⏳ 2 Agents')
-  // three
-  expect(agentPart(three, T0, 80)).toBe('⏳ reader 3m searching, ⏳ implementer 1m searching, ⏳ verifier 30s searching')
-  expect(agentPart(three, T0, 45)).toBe('⏳ reader 3m, ⏳ implementer 1m, ⏳ verifier 30s')
-  expect(agentPart(three, T0, 40)).toBe('⏳ reader, ⏳ implementer, ⏳ verifier')
-  expect(agentPart(three, T0, 30)).toBe('⏳ 3 Agents are running')
-  expect(agentPart(three, T0, 12)).toBe('⏳ 3 Agents')
-  // no "is running" beside the names: they stand alone
-  expect(agentPart(two, T0, 37)).toBe('⏳ reader 3m, ⏳ implementer 1m')
-  for (const room of [80, 40, 25, 23]) expect(agentPart(two, T0, room)).not.toContain('running')
-  const named = [{ ...two[0], startedAt: T0 - 3600000 * 9 }, { ...two[1], startedAt: T0 - 3600000 * 9 }]
-  expect(agentPart(named, T0, 32)).toBe('⏳ reader 9h, ⏳ implementer 9h')
-  // the order holds: the estimate never outlives the step, nor the step the time
-  for (const room of [80, 60, 50, 40, 30, 20, 10]) {
-    const p = agentPart(two, T0, room)
-    if (p.includes('~')) expect(p).toContain('searching')
-    if (p.includes('searching')) expect(p).toMatch(/\d+[smh] searching/)
-  }
-  // a type without history has no estimate
-  expect(agentPart(withRuns(SETS.one as any, []), T0, 80)).toBe('⏳ reader 3m searching')
+// an implementer two minutes into "Auto-reload on plugin update", editing,
+// 60 % by its type's history; a reader and a verifier beside it
+const IMPL = { id: 'i', type: 'pacing:implementer', model: 'claude-fable-5-2', effort: 'high', description: 'Auto-reload on plugin update', startedAt: T0 - 2 * 60000, background: false, runs: [3 * 60000, 200000, 4 * 60000], step: 'editing' } as any
+const READER = { id: 'r', type: 'pacing:reader', model: 'claude-haiku-5-5', effort: 'medium', description: 'Read the test logs', startedAt: T0 - 3 * 60000, background: false, runs: HISTORY['pacing:reader'], step: 'searching' } as any
+const VERIFIER = { id: 'v', type: 'pacing:verifier', model: 'claude-haiku-5-5', effort: 'medium', description: 'Run the suite', startedAt: T0 - 30000, background: false, runs: [], step: null } as any
+const J77 = { ...FAR, level: 'ahead', ofBudget: 77 } as any
+
+test('the forms the user approved, word for word: the line with a step, the line without one, the start toast', async () => {
+  expect(statusText(J77, [], null, T0, [IMPL])).toBe('⏳ implementer: Auto-reload on plugin update, editing 2m ~60% · Budget 77%')
+  expect(agentPart([{ ...IMPL, step: null, runs: [] }], T0, 80)).toBe('⏳ implementer is running: Auto-reload on plugin update 2m')
+  expect(startedText(IMPL, [IMPL])).toBe('Pacing: implementer is running "Auto-reload on plugin update" on Fable 5.2 high.')
+  // and the others of the same shape
+  expect(startedText(IMPL, [IMPL, READER])).toBe('Pacing: implementer is running "Auto-reload on plugin update" on Fable 5.2 high; reader is also running.')
+  expect(startedText(IMPL, [IMPL, READER, VERIFIER])).toBe('Pacing: implementer is running "Auto-reload on plugin update" on Fable 5.2 high; reader and verifier are also running.')
+  expect(startedText(IMPL, [IMPL, READER, VERIFIER, { ...VERIFIER, id: 'w' }])).toBe('Pacing: implementer is running "Auto-reload on plugin update" on Fable 5.2 high; 3 Agents are also running.')
+  expect(doneText(IMPL, 3 * 60000, 41000, [])).toBe('Pacing: implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; nothing else is running.')
+  expect(doneText(IMPL, 3 * 60000, 41000, [READER])).toBe('Pacing: implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; reader is still running.')
+  expect(doneText(IMPL, 3 * 60000, 41000, [READER, VERIFIER, { ...VERIFIER, id: 'w' }])).toBe('Pacing: implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; 3 Agents are still running.')
+  expect(progressText([{ ...IMPL, startedAt: T0 - 12 * 60000, runs: [20 * 60000, 20 * 60000, 20 * 60000] }], T0)).toBe('Pacing: still running: implementer "Auto-reload on plugin update", editing 12m ~60%.')
 })
-test('the full detail in the 5-minute toast and the row, in the same order, each one line within MSG_MAX', async () => {
-  const two = withRuns(SETS.two as any)
-  expect(progressText(two, T0)).toBe('Pacing: still running: reader 3m searching ~60%, implementer 1m searching ~20%.')
-  expect(progressText(withRuns(SETS.one as any), T0)).toBe('Pacing: still running: reader 3m searching ~60%.')
-  expect(backgroundText(withRuns(SETS.one as any), T0)).toBe('In the background: ⏳ reader 3m searching ~60%')
-  expect(backgroundText(two, T0, 50)).toBe('In the background: ⏳ reader 3m, ⏳ implementer 1m')
-  expect(backgroundText(two, T0, 45)).toBe('In the background: ⏳ reader, ⏳ implementer')
+
+test('one agent, step by step as the room shrinks: the estimate goes, then the step, then the assignment (cut, then gone), then the time and "is running"', async () => {
+  const one = [IMPL]
+  expect(agentPart(one, T0, 60)).toBe('⏳ implementer: Auto-reload on plugin update, editing 2m ~60%')
+  expect(agentPart(one, T0, 59)).toBe('⏳ implementer: Auto-reload on plugin update, editing 2m')
+  // without the step the agent "is running"; that is longer, so the assignment is cut at once
+  expect(agentPart(one, T0, 54)).toBe('⏳ implementer is running: Auto-reload on plugin up… 2m')
+  expect(agentPart(one, T0, 45)).toBe('⏳ implementer is running: Auto-reload on … 2m')
+  expect(agentPart(one, T0, 37)).toBe('⏳ implementer is running: Auto-re… 2m')
+  // a cut under 8 characters says nothing: the assignment goes
+  expect(agentPart(one, T0, 36)).toBe('⏳ implementer is running 2m')
+  expect(agentPart(one, T0, 27)).toBe('⏳ implementer is running 2m')
+  expect(agentPart(one, T0, 26)).toBe('⏳ implementer')
+  expect(agentPart(one, T0, 13)).toBe('⏳ implementer')
+  // a lone named agent never becomes "1 Agent": the bare count
+  expect(agentPart(one, T0, 12)).toBe('⏳1')
+  // no step known: "is running", and the estimate last as ever
+  const idle = [{ ...IMPL, step: null }]
+  expect(agentPart(idle, T0, 62)).toBe('⏳ implementer is running: Auto-reload on plugin update 2m ~60%')
+  expect(agentPart(idle, T0, 61)).toBe('⏳ implementer is running: Auto-reload on plugin update 2m')
+  expect(agentPart(idle, T0, 56)).toBe('⏳ implementer is running: Auto-reload on plugin upda… 2m')
+  // in the line: the usage gives way before any of the agent does
+  expect(statusText(J77, [], null, T0, idle)).toBe('⏳ implementer is running: Auto-reload on plugin update 2m ~60% · Budget 77%')
+  expect(statusText({ ...J77, premium: null }, [], null, T0, [{ ...IMPL, description: 'Fix it' }])).toBe('⏳ implementer: Fix it, editing 2m ~60% · Budget 77% · usage: Weekly 100%')
+})
+
+test('two and three agents: the same steps, for all of them at each step; then the names, the count as a sentence, the bare count', async () => {
+  const two = [IMPL, READER], three = [IMPL, READER, VERIFIER]
+  expect(agentPart(two, T0, 109)).toBe('⏳ implementer: Auto-reload on plugin update, editing 2m ~60%, ⏳ reader: Read the test logs, searching 3m ~60%')
+  expect(agentPart(two, T0, 108)).toBe('⏳ implementer: Auto-reload on plugin update, editing 2m, ⏳ reader: Read the test logs, searching 3m')
+  expect(agentPart(two, T0, 98)).toBe('⏳ implementer is running: Auto-reload on plugin up… 2m, ⏳ reader is running: Read the test logs 3m')
+  expect(agentPart(two, T0, 71)).toBe('⏳ implementer is running: Auto-re… 2m, ⏳ reader is running: Read th… 3m')
+  expect(agentPart(two, T0, 70)).toBe('⏳ implementer is running 2m, ⏳ reader is running 3m')
+  expect(agentPart(two, T0, 51)).toBe('⏳ implementer is running 2m, ⏳ reader is running 3m')
+  expect(agentPart(two, T0, 50)).toBe('⏳ implementer, ⏳ reader')
+  expect(agentPart(two, T0, 23)).toBe('⏳ implementer, ⏳ reader')
+  expect(agentPart(two, T0, 22)).toBe('⏳ 2 Agents are running')
+  expect(agentPart(two, T0, 21)).toBe('⏳ 2 Agents')
+  expect(agentPart(two, T0, 9)).toBe('⏳2')
+  // in the line of 75: two with their assignments do not fit, so both "are running" with their times
+  expect(statusText(J77, [], null, T0, two)).toBe('⏳ implementer is running 2m, ⏳ reader is running 3m · Budget 77%')
+  // three: the one without a step "is running" beside the two that have one
+  expect(agentPart(three, T0, 151)).toBe('⏳ implementer: Auto-reload on plugin update, editing 2m ~60%, ⏳ reader: Read the test logs, searching 3m ~60%, ⏳ verifier is running: Run the suite 30s')
+  expect(agentPart(three, T0, 150)).toBe('⏳ implementer: Auto-reload on plugin update, editing 2m, ⏳ reader: Read the test logs, searching 3m, ⏳ verifier is running: Run the suite 30s')
+  expect(agentPart(three, T0, 108)).toBe('⏳ implementer is running: Auto-re… 2m, ⏳ reader is running: Read th… 3m, ⏳ verifier is running: Run the… 30s')
+  expect(agentPart(three, T0, 107)).toBe('⏳ implementer is running 2m, ⏳ reader is running 3m, ⏳ verifier is running 30s')
+  expect(agentPart(three, T0, 77)).toBe('⏳ implementer, ⏳ reader, ⏳ verifier')
+  expect(agentPart(three, T0, 34)).toBe('⏳ 3 Agents are running')
+  expect(agentPart(three, T0, 21)).toBe('⏳ 3 Agents')
+  expect(agentPart(three, T0, 9)).toBe('⏳3')
+  // three do not fit with their times either: the names; the usage shows where what is left has room for it
+  expect(statusText(J77, [], null, T0, three)).toBe('⏳ implementer, ⏳ reader, ⏳ verifier · Budget 77% · usage: Weekly 100%')
+  // the order holds at every width: no estimate without the step, no step without the whole assignment, no cut beside a step
+  for (let room = 2; room <= 160; room++) {
+    for (const list of [[IMPL], two, three]) {
+      const p = agentPart(list, T0, room)
+      expect(chars(p)).toBeLessThanOrEqual(Math.max(room, 2))
+      if (p.includes('~')) expect(p).toContain(', editing')
+      if (p.includes(', editing')) expect(p).toContain('Auto-reload on plugin update,')
+      if (p.includes('…')) expect(p).not.toContain('editing')
+      if (p.includes('is running:') || p.includes(', editing')) expect(p).toMatch(/ \d+[smh]/)
+    }
+  }
+})
+
+test('an agent without a description has no assignment part, in the line, the row or the toasts', async () => {
+  const bare = [{ ...READER, description: undefined }]
+  expect(agentPart(bare, T0, 80)).toBe('⏳ reader searching 3m ~60%')
+  expect(agentPart(bare, T0, 25)).toBe('⏳ reader searching 3m')
+  expect(agentPart(bare, T0, 20)).toBe('⏳ reader')
+  expect(agentPart([{ ...READER, description: '  ', step: null }], T0, 80)).toBe('⏳ reader is running 3m ~60%')
+  expect(agentPart([{ ...READER, description: undefined, step: null, runs: [] }], T0, 80)).toBe('⏳ reader is running 3m')
+  expect(statusText(J77, [], null, T0, bare)).toBe('⏳ reader searching 3m ~60% · Budget 77% · usage: Weekly 100% Fable 100%')
+  expect(startedText(bare[0], bare)).toBe('Pacing: reader is running on Haiku 5.5 medium.')
+  expect(doneText(bare[0], 3 * 60000, 41000, [])).toBe('Pacing: reader is done after 3m, 41k tokens; nothing else is running.')
+  expect(progressText(bare, T0)).toBe('Pacing: still running: reader searching 3m ~60%.')
+  expect(backgroundText(bare, T0)).toBe('In the background: ⏳ reader searching 3m ~60%')
+  // a description over several lines is one line
+  expect(agentPart([{ ...READER, description: 'Read\n  the logs', step: null, runs: [] }], T0, 80)).toBe('⏳ reader is running: Read the logs 3m')
+})
+
+test('the 5-minute toast and the row follow the same order and shrink the same way, each one line within 120', async () => {
+  const two = [IMPL, READER], three = [IMPL, READER, VERIFIER]
+  // the toast: the assignment quoted, several joined by "; "
+  expect(progressText([IMPL], T0)).toBe('Pacing: still running: implementer "Auto-reload on plugin update", editing 2m ~60%.')
+  expect(progressText(two, T0)).toBe('Pacing: still running: implementer "Auto-reload on plugin update" 2m; reader "Read the test logs" 3m.')
+  expect(progressText(three, T0)).toBe('Pacing: still running: implementer "Auto-reload on p…" 2m; reader "Read the test lo…" 3m; verifier "Run the suite" 30s.')
+  const short = [{ ...IMPL, description: 'Fix it' }, { ...READER, description: 'Logs' }]
+  expect(progressText(short, T0)).toBe('Pacing: still running: implementer "Fix it", editing 2m ~60%; reader "Logs", searching 3m ~60%.')
+  // the row above the prompt: the line's own form
+  expect(backgroundText([IMPL], T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing 2m ~60%')
+  expect(backgroundText([{ ...IMPL, step: null, runs: [] }], T0)).toBe('In the background: ⏳ implementer is running: Auto-reload on plugin update 2m')
+  expect(backgroundText(two, T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing 2m, ⏳ reader: Read the test logs, searching 3m')
+  expect(backgroundText(two, T0, 117)).toBe('In the background: ⏳ implementer is running: Auto-reload on plugin up… 2m, ⏳ reader is running: Read the test logs 3m')
+  expect(backgroundText(two, T0, 75)).toBe('In the background: ⏳ implementer is running 2m, ⏳ reader is running 3m')
+  expect(backgroundText(two, T0, 60)).toBe('In the background: ⏳ implementer, ⏳ reader')
+  expect(backgroundText(two, T0, 41)).toBe('⏳ 2 Agents are running in the background')
   expect(backgroundText(two, T0, 30)).toBe('⏳ 2 Agents are running')
-  const five = withRuns([...SETS.two, A('pacing:verifier', 0.5), A('pacing:researcher', 2), A('general-purpose', 12)] as any)
-  expect(progressText(five, T0)).toBe('Pacing: still running: reader, implementer, verifier, researcher, general.')
-  for (const m of [progressText(withRuns(SETS.six as any), T0), backgroundText(withRuns(SETS.six as any), T0), backgroundText(two, T0, 50)]) {
+  for (const m of [progressText(three, T0), backgroundText(three, T0), backgroundText(two, T0, 50)]) {
     expect(chars(m)).toBeLessThanOrEqual(MSG_MAX)
     expect(m).not.toContain('\n')
   }
@@ -1086,12 +1182,14 @@ test('in a session: the history from the store gives the estimate, the agent\'s 
   await $.session.measure(measure(10))
   await spawn($, 'pacing:reader')
   await clock.advance(3 * 60000)
-  expect(status.at(-1)).toBe('⏳ reader 3m ~60% · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ reader is running: a task 3m ~60% · Budget 50% · usage: Weekly 10%')
   await $.tool.call({ tool: 'Grep', pattern: 'x', agentId: 'ag1' } as any)
   await clock.advance(2 * 60000)
   // capped at 95 % at the median and past it, the step in the toast
-  expect(seen.toasts.at(-1)).toBe('Pacing: still running: reader 5m searching ~95%.')
-  expect(status.at(-1)).toBe('⏳ reader 5m searching ~95% · Budget 50%')
+  expect(seen.toasts.at(-1)).toBe('Pacing: still running: reader "a task", searching 5m ~95%.')
+  expect(status.at(-1)).toBe('⏳ reader: a task, searching 5m ~95% · Budget 50% · usage: Weekly 10%')
+  // /pacing-status: the same order, and the model the agent runs on
+  expect((await $.command.run({ command: 'pacing-status', args: '' } as any)).text.split('\n')[1]).toBe('Running: reader: a task, searching 5m ~95% (Haiku 5.5)')
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
   expect(store['pacing:reader']).toEqual([4 * 60000, 5 * 60000, 6 * 60000, 5 * 60000])
 })
@@ -1104,7 +1202,7 @@ test('an engine without a store: no estimate, the time as before', async ($, on)
   await $.session.measure(measure(10))
   await spawn($, 'pacing:reader')
   await clock.advance(3 * 60000)
-  expect(status.at(-1)).toBe('⏳ reader 3m · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ reader is running: a task 3m · Budget 50% · usage: Weekly 10% Fable 40%')
 })
 
 // ---- an offer to switch the session's model or effort ----
@@ -1348,10 +1446,10 @@ test('an agent shows the moment its Agent call comes, before the spawn; the spaw
   })
   await $.session.measure(measure(10))
   await $.tool.call({ tool: 'Agent', description: 'read logs', prompt: 'p', subagent_type: 'pacing:reader', model: 'haiku', effort: 'medium' } as any)
-  expect(during[0]).toBe('⏳ reader 0s · Budget 50%')
-  expect(during[1]).toBe('⏳ reader 0s · Budget 50%')
+  expect(during[0]).toBe('⏳ reader is running: read logs 0s · Budget 50% · usage: Weekly 10%')
+  expect(during[1]).toBe('⏳ reader is running: read logs 0s · Budget 50% · usage: Weekly 10%')
   // one agent, not two: the provisional entry was taken over
-  expect(seen.toasts).toEqual(['Pacing: reader started on Haiku 5.5 medium; nothing else is running.'])
+  expect(seen.toasts).toEqual(['Pacing: reader is running "read logs" on Haiku 5.5 medium.'])
 })
 
 test('an Agent call that spawns nothing leaves the line when it ends', async ($, on) => {
@@ -1373,9 +1471,9 @@ test('every 5 seconds while an agent runs; the timer stops when nothing runs', a
   await $.session.measure(measure(10))
   await spawn($, 'pacing:reader')
   await clock.advance(5000)
-  expect(status.at(-1)).toBe('⏳ reader 5s · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ reader is running: a task 5s · Budget 50% · usage: Weekly 10% Fable 40%')
   await clock.advance(5000)
-  expect(status.at(-1)).toBe('⏳ reader 10s · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ reader is running: a task 10s · Budget 50% · usage: Weekly 10% Fable 40%')
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
   const n = status.length
   await clock.advance(60000)
@@ -1413,14 +1511,14 @@ test('a side session this session started: in the line while it works, a toast w
   running = true
   await $.tool.call({ tool: 'mcp__ccd_session__start_session', title: 'Task s1', initiation: 'user_asked' } as any)
   await clock.advance(5000)
-  expect(status.at(-1)).toBe('⏳ Task s1 5s · Budget 50%')
-  expect(seen.toasts).toEqual(['Pacing: side session Task s1 started; nothing else is running.'])
+  expect(status.at(-1)).toBe('⏳ Task s1 is running 5s · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(seen.toasts).toEqual(['Pacing: side session Task s1 is running.'])
   await clock.advance(20000)
-  expect(status.at(-1)).toBe('⏳ Task s1 25s · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ Task s1 is running 25s · Budget 50% · usage: Weekly 10% Fable 40%')
   // its turn ends: gone at the next poll
   running = false
   await clock.advance(15000)
-  expect(seen.toasts.at(-1)).toBe('Pacing: side session Task s1 ended its turn after 35s; nothing is running now.')
+  expect(seen.toasts.at(-1)).toBe('Pacing: side session Task s1 ended its turn after 35s; nothing else is running.')
   expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
   // a session another one started is not this one's
   expect(status.join('\n')).not.toContain('other')
@@ -1435,9 +1533,9 @@ test('at load, side sessions already working show without a toast; an agent and 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
   await new Promise(r => setTimeout(r, 50))
   expect(seen.toasts).toEqual([])
-  expect(status.at(-1)).toBe('⏳ Task s1 0s · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ Task s1 is running 0s · Budget 50% · usage: Weekly 10% Fable 40%')
   await $.agent.spawn({ prompt: 'p', description: 'x', subagentType: 'pacing:reader', model: 'haiku' } as any)
-  expect(status.at(-1)).toBe('⏳ Task s1 0s, ⏳ reader 0s · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ Task s1 is running 0s, ⏳ reader is running: x 0s · Budget 50%')
 })
 
 test('no side sessions: one look at load, then none, however long the session runs', async ($, on) => {
@@ -1460,16 +1558,17 @@ test('a side session by its short title like any agent; the count only for more 
   const a = { id: 'a', type: 'pacing:reader', startedAt: T0 - 60000 } as any
   const s = { id: 's', kind: 'session', type: 'pacing-pace-fable-met-4', label: 'Pacing: pace Fable meter…', startedAt: T0 - 120000 } as any
   expect(countText([a, s])).toBe('2 Agents')
-  expect(agentPart([s], T0, 80)).toBe('⏳ Pacing: pace Fable meter… 2m')
+  expect(agentPart([s], T0, 80)).toBe('⏳ Pacing: pace Fable meter… is running 2m')
   expect(agentPart([s], T0, 22)).toBe('⏳ 1 Agent is running')
   expect(agentPart([s], T0, 12)).toBe('⏳ 1 Agent')
-  expect(agentPart([a, s], T0, 80)).toBe('⏳ reader 1m, ⏳ Pacing: pace Fable meter… 2m')
+  expect(agentPart([a, s], T0, 80)).toBe('⏳ reader is running 1m, ⏳ Pacing: pace Fable meter… is running 2m')
+  expect(agentPart([a, s], T0, 40)).toBe('⏳ reader, ⏳ Pacing: pace Fable meter…')
   expect(agentPart([a, s], T0, 22)).toBe('⏳ 2 Agents are running')
   expect(agentPart([a, s], T0, 12)).toBe('⏳ 2 Agents')
   expect(agentPart([a, s], T0, 3)).toBe('⏳2')
   // with the budget, within the width
-  expect(statusText({ all: 36, ofBudget: 77, level: 'ahead' } as any, [], null, T0, [s])).toBe('⏳ Pacing: pace Fable meter… 2m · Budget 77%')
-  expect(statusText({ all: 99, ofBudget: 214, level: 'throttle' } as any, [], null, T0, [a, s])).toBe('⏳ 2 Agents are running · Budget 214%')
+  expect(statusText({ all: 36, ofBudget: 77, level: 'ahead' } as any, [], null, T0, [s])).toBe('⏳ Pacing: pace Fable meter… is running 2m · Budget 77% · usage: Weekly 36%')
+  expect(statusText({ all: 99, ofBudget: 214, level: 'throttle' } as any, [], null, T0, [a, s])).toBe('⏳ reader, ⏳ Pacing: pace Fable meter… · Budget 214% · usage: Weekly 99%')
   expect(chars(statusText({ ...FAR, level: 'throttle' } as any, [], 'Other' as any, T0, [a, s, { ...s, id: 't' }]))).toBeLessThanOrEqual(LINE_MAX)
   // "Agent" never for a single named in-process agent
   expect(agentPart([a], T0, 4)).toBe('⏳1')
@@ -1485,4 +1584,280 @@ test('the app\'s list_sessions answer as a module gets it: the rows from its tex
   expect(sessionRows({ text: 'not json' })).toEqual([])
   expect(workingSessions(rows, 'local_main').length).toBe(1)
   expect(workingSessions(rows, 'local_other')).toEqual([])
+})
+
+// ---- a new version: the session reloads its plugins by itself ----
+
+// the engine beneath: the manifest and the module's own file as they stand
+// on disk (a test changes them as the app's sync would), the session's id,
+// the config file, the module's store, the slash commands run and the toasts
+const MARK = 'reload:local_s1'
+const manifestOf = (version: string) => JSON.stringify({ name: 'pacing', version })
+const reloadEngine = (on: any, opts: { config?: string; reject?: boolean; hang?: boolean; store?: Record<string, unknown> } = {}) => {
+  const seen = { runs: [] as string[], toasts: [] as string[], store: { ...(opts.store ?? {}) } as Record<string, unknown>, manifest: manifestOf('0.9.10') as string | null, code: 'the module as it was loaded' }
+  on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+  on('command.register', () => ({ value: { command: 'pacing-status' } }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000, tokens: 1000, percent: 0 }, rateLimits: [] } }))
+  on('session.id', () => ({ value: 'local_s1' }))
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  on('fs.read', (_: unknown, e: any) => {
+    const p = String(e.path)
+    if (/[\\/]\.claude-plugin[\\/]plugin\.json$/.test(p)) {
+      if (seen.manifest === null) throw new Error('ENOENT')
+      return { value: seen.manifest }
+    }
+    if (/[\\/]hooks[\\/]readings\.mjs$/.test(p)) return { value: seen.code }
+    return { value: opts.config !== undefined && /[\\/]\.claude[\\/]pacing[\\/]config\.json$/.test(p) ? opts.config : '{}' }
+  })
+  on('command.run', (_: unknown, e: any) => {
+    seen.runs.push('/' + e.command + (e.args ? ' ' + e.args : ''))
+    if (opts.reject) throw new Error('a module may not run this command')
+    if (opts.hang) return new Promise(() => {})
+    return { text: 'Reloaded plugins' }
+  })
+  on('store.get', (_: unknown, e: any) => ({ value: seen.store[e.key] }))
+  on('store.set', (_: unknown, e: any) => { seen.store[e.key] = e.value; return { value: undefined } })
+  on('store.delete', (_: unknown, e: any) => { delete seen.store[e.key]; return { value: undefined } })
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', (_: unknown, e: any) => (seen.toasts.push(e.text), { value: undefined }))
+  on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
+  on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
+  return seen
+}
+// a session loaded as 0.9.10 that a person has typed in, its turn ended
+const loadedAndTyped = async ($: any, clock: any) => {
+  await start($)
+  await clock.settle()
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+}
+
+test('the reload\'s words, and the version a manifest names', async () => {
+  expect(reloadedText('0.9.11')).toBe('Pacing: updated to 0.9.11 and reloaded.')
+  expect(reloadAskText('0.9.11')).toBe('Pacing 0.9.11 is installed: type /reload-plugins to load it.')
+  expect(versionOf(manifestOf('0.9.11'))).toBe('0.9.11')
+  // half-written during a sync, or no version in it: none
+  expect(versionOf('{ "name": "pacing", "vers')).toBe(null)
+  expect(versionOf('')).toBe(null)
+  expect(versionOf('{"name":"pacing"}')).toBe(null)
+  expect(versionOf('{"version":11}')).toBe(null)
+})
+
+test('the version unchanged: nothing, at a turn\'s end or on the slow timer', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on)
+  await loadedAndTyped($, clock)
+  await clock.advance(4 * RELOAD_CHECK_EVERY)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(seen.runs).toEqual([])
+  expect(seen.toasts).toEqual([])
+})
+
+test('a new version while the session is idle: /reload-plugins once, as if typed; the copy that stays, its own file unchanged, says so once', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on)
+  await loadedAndTyped($, clock)
+  // the app's sync puts 0.9.11 in the folder; the slow timer finds it
+  seen.manifest = manifestOf('0.9.11')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual(['/reload-plugins'])
+  // a copy the reload brings says so at its load; this one waits for it
+  expect(seen.toasts).toEqual([])
+  expect(seen.store[MARK]).toEqual({ version: '0.9.11', at: T0 + RELOAD_CHECK_EVERY })
+  await clock.advance(RELOAD_SETTLE)
+  expect(seen.toasts).toEqual(['Pacing: updated to 0.9.11 and reloaded.'])
+  expect(seen.store[MARK]).toBe(undefined)
+  // no loop: this copy now counts as 0.9.11
+  await clock.advance(3 * RELOAD_CHECK_EVERY)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(seen.runs.length).toBe(1)
+  expect(seen.toasts.length).toBe(1)
+})
+
+test('a new version found as a turn ends: the reload comes after the turn, never from inside it', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on)
+  await loadedAndTyped($, clock)
+  seen.manifest = manifestOf('0.9.11')
+  await $.turn.start({ text: 'next', turnId: 't2' } as any)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  // the hook itself ran nothing
+  expect(seen.runs).toEqual([])
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(seen.runs).toEqual(['/reload-plugins'])
+})
+
+test('the copy a reload brings finds the mark at its load and says "updated", once', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  // what the copy that asked left for this session
+  const seen = reloadEngine(on, { store: { [MARK]: { version: '0.9.11', at: T0 - 1000 } } })
+  seen.manifest = manifestOf('0.9.11')
+  await start($)
+  await clock.settle()
+  expect(seen.toasts).toEqual(['Pacing: updated to 0.9.11 and reloaded.'])
+  expect(seen.store[MARK]).toBe(undefined)
+  // loaded is what is on disk: nothing more
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(3 * RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual([])
+  expect(seen.toasts.length).toBe(1)
+})
+
+test('a load with no mark says nothing: a new session, or a reload the person typed', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { store: { 'reload:local_other': { version: '0.9.10', at: T0 - 1000 } } })
+  await start($)
+  await clock.settle()
+  expect(seen.toasts).toEqual([])
+  // another session's mark is not this one's
+  expect(seen.store).toEqual({ 'reload:local_other': { version: '0.9.10', at: T0 - 1000 } })
+})
+
+test('during a turn it waits; so it does under a survey and while a subagent of its own runs', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on)
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag1' }))
+  on('agent.list', () => ({ value: [{ id: 'ag1', status: 'running', description: '', type: 'x' }] }))
+  await loadedAndTyped($, clock)
+  seen.manifest = manifestOf('0.9.11')
+  // a turn runs: the slow timer looks and leaves it
+  await $.turn.start({ text: 'a long one', turnId: 't2' } as any)
+  await clock.advance(2 * RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual([])
+  // a subagent's turn ending is not the session's
+  await $.turn.complete(turn('claude-haiku-5-5', 1, 'a9'))
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual([])
+  // the turn ends with a background agent still at work: not yet
+  await spawn($, 'pacing:reader', 'haiku', true)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(seen.runs).toEqual([])
+  await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
+  // a survey is up: not yet
+  const survey = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true } })
+  await survey.unmount()
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual([])
+  // gone: the next look runs it
+  const band = await $.ui.mount(BAND)
+  await band.unmount()
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual(['/reload-plugins'])
+})
+
+test('a rejection: the line asking the person to type it, once per version, and no second attempt', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { reject: true })
+  await loadedAndTyped($, clock)
+  seen.manifest = manifestOf('0.9.11')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual(['/reload-plugins'])
+  expect(seen.toasts).toEqual(['Pacing 0.9.11 is installed: type /reload-plugins to load it.'])
+  expect(seen.store[MARK]).toBe(undefined)
+  // every later look, at a turn's end or on the timer: nothing
+  await clock.advance(6 * RELOAD_CHECK_EVERY)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(seen.runs.length).toBe(1)
+  expect(seen.toasts.length).toBe(1)
+  // the next version is a new one: one attempt, one line
+  seen.manifest = manifestOf('0.9.12')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs.length).toBe(2)
+  expect(seen.toasts).toEqual(['Pacing 0.9.11 is installed: type /reload-plugins to load it.', 'Pacing 0.9.12 is installed: type /reload-plugins to load it.'])
+})
+
+test('a reload that leaves the old code running: one attempt, then the line to type it, and the guard holds', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on)
+  await loadedAndTyped($, clock)
+  // the new version changed this module too, yet this copy still runs
+  seen.manifest = manifestOf('0.9.11')
+  seen.code = 'the module of 0.9.11'
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual(['/reload-plugins'])
+  await clock.advance(RELOAD_SETTLE)
+  expect(seen.toasts).toEqual(['Pacing 0.9.11 is installed: type /reload-plugins to load it.'])
+  await clock.advance(6 * RELOAD_CHECK_EVERY)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(seen.runs.length).toBe(1)
+  expect(seen.toasts.length).toBe(1)
+})
+
+test('a command that never answers is given up after 10 minutes: the line to type it, once', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { hang: true })
+  await loadedAndTyped($, clock)
+  seen.manifest = manifestOf('0.9.11')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual(['/reload-plugins'])
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.toasts).toEqual([])
+  await clock.advance(RELOAD_GIVE_UP)
+  expect(seen.toasts).toEqual(['Pacing 0.9.11 is installed: type /reload-plugins to load it.'])
+  await clock.advance(3 * RELOAD_CHECK_EVERY)
+  expect(seen.runs.length).toBe(1)
+  expect(seen.toasts.length).toBe(1)
+})
+
+test('an unreadable manifest is no change, and is read again later', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on)
+  await loadedAndTyped($, clock)
+  // half-written during a sync, then missing, then without a version
+  for (const text of ['{ "name": "pacing", "vers', null, '{"name":"pacing"}']) {
+    seen.manifest = text
+    await clock.advance(RELOAD_CHECK_EVERY)
+    await $.turn.complete(turn('claude-fable-5-2', 1))
+    await clock.advance(RELOAD_AFTER_TURN)
+  }
+  expect(seen.runs).toEqual([])
+  expect(seen.toasts).toEqual([])
+  // written whole: found at the next look
+  seen.manifest = manifestOf('0.9.11')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual(['/reload-plugins'])
+})
+
+test('reload off: nothing; so too in a side session nobody types in', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { config: JSON.stringify({ autoReload: false }) })
+  await loadedAndTyped($, clock)
+  seen.manifest = manifestOf('0.9.11')
+  await clock.advance(3 * RELOAD_CHECK_EVERY)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(seen.runs).toEqual([])
+  expect(seen.toasts).toEqual([])
+})
+
+test('a side session nobody types in is left alone', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on)
+  await start($)
+  await clock.settle()
+  await $.prompt.submit({ text: 'do the task', origin: { kind: 'peer' } } as any)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  seen.manifest = manifestOf('0.9.11')
+  await clock.advance(3 * RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual([])
+  expect(seen.toasts).toEqual([])
 })

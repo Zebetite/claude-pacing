@@ -330,32 +330,43 @@ each with its own instructions and tools:
 | researcher | documentation and the web, with sources | no |
 
 **Seeing them work.** While agents run, the status line leads with them
-and still shows the budget, each agent by its name, how long it has run,
-what it is doing and the estimate: `⏳ reader 3m searching ~60% · Budget
-77%`. Side sessions this session started show by their short title
-while they work (in the desktop app, which says which sessions are
-working). When the line has no room, it drops for every agent, from
-the right: the estimate, then the step, then the time, leaving the
-names, `⏳ reader, ⏳ implementer`; then, with more than one, it gives
-the count, `⏳ 2 Agents are running`, and last `⏳ 2 Agents`. The usage figures make room first. An agent shows the
+and still shows the budget, each agent by its name, its assignment (the
+short description it was started with), what it is doing, how long it
+has run and the estimate: `⏳ implementer: Auto-reload on plugin update,
+editing 2m ~60% · Budget 77%`. Before its first step is known it reads
+`⏳ implementer is running: Auto-reload on plugin update 2m`. Side
+sessions this session started show by their short title while they work
+(in the desktop app, which says which sessions are working): `⏳ Task s1
+is running 5s`. The line keeps within 75 characters. When it has no
+room, it drops for every agent, from the right: the estimate, then the
+step, then the assignment (first cut with `…`, then gone: `⏳ implementer
+is running 2m`), then the time and "is running", leaving the names,
+`⏳ reader, ⏳ implementer`; then, with more than one, it gives the
+count, `⏳ 2 Agents are running`, and last `⏳ 2 Agents`. The usage
+figures make room first. An agent shows the
 moment the session calls it, before Claude Code has started it. The
 line refreshes every 5 seconds while anything runs and goes back to the
 plain line when the last one ends. `/pacing-status` says which of the
-Agents are side sessions. A toast says when an agent starts (its role, model and
-effort, and how many run), when it ends (how long it ran, its tokens,
-how many still run), and every 5 minutes while any runs. An agent that
+Agents are side sessions. A toast says when an agent starts (`Pacing:
+implementer is running "Auto-reload on plugin update" on Fable 5.2
+high.`, and `; reader is also running.` when others run), when it ends
+(`Pacing: implementer is done with "Auto-reload on plugin update" after
+3m, 41k tokens; nothing else is running.`), and every 5 minutes while
+any runs (`Pacing: still running: implementer "Auto-reload on plugin
+update", editing 12m ~60%.`). An agent that
 works on in the background after the turn ends gets a row above the
-prompt, under the offer to compact. `/pacing-status` lists every running
+prompt, under the offer to compact, in the line's own form.
+`/pacing-status` lists every running
 agent with what it is doing. `/pacing notify off` turns the toasts off;
 the line and the row stay. The session also says in one line which
 agent it started, on which model and effort, and for what.
 
-Once a kind of agent has finished three runs, its entry shows a
-percentage such as `⏳ reader ~60%`. The percentage is a rough estimate
+Once a kind of agent has finished three runs, its entry ends with a
+percentage such as `~60%`. The percentage is a rough estimate
 from how long that kind of agent usually takes, not a measure of the work
-done, and it stays at 95 % or below until the agent ends. The 5-minute
-toast, the row and `/pacing-status` also name what the agent is doing
-now, from its latest tool call (`reading`, `searching`, `editing`).
+done, and it stays at 95 % or below until the agent ends. What the agent
+is doing now comes from its latest tool call (`reading`, `searching`,
+`editing`).
 
 The budget still picks the model: each call gets the model and effort of
 the tier that work routes to at the current level. The reader is the
@@ -429,6 +440,7 @@ first hands work to a subagent; a plain report never loads them.
 | `/pacing week` | the last two weeks in sum: where the meter ended, the share of the time at each level, and whether it crossed the line |
 | `/pacing next on`, `/pacing next off` | lets the skill set, or stop setting, the default model of new sessions |
 | `/pacing switch on`, `/pacing switch off` | turns the offer to switch the session to the recommended model or effort on (the default) or off: a row above the prompt with Switch and Not now |
+| `/pacing reload on`, `/pacing reload off` | turns the reload at a new version on (the default) or off: when the app has installed a new version of the plugin, an idle session runs `/reload-plugins` by itself and says so in one line |
 | `/pacing notify on`, `/pacing notify off` | turns the toasts about running subagents on (the default) or off: when one starts, when one ends, and every 5 minutes while any runs; the status line and the row above the prompt still show them |
 | `/pacing compact on`, `/pacing compact off` | turns the offers to compact a large session on (the default) or off: a row above the prompt with Compact now from 300 000 tokens, plainer from 500 000, and a warning before the cache of an idle session lapses |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model weekly meter belongs to (Fable by default), or says the plan has none |
@@ -450,3 +462,14 @@ to its default and the report says which; a file that no longer parses
 is set aside as `config.json.damaged`. The first run creates the configuration
 from the defaults (or takes over the files of an earlier standalone
 install of this skill) and shows this guide once.
+
+**A new version.** The desktop app installs a new version of the plugin
+in the background, and an open session used to keep the old one until
+you typed `/reload-plugins`. On a Claude Code version with hooks modules
+the plugin does that itself: it looks for a new version when a turn ends
+and every 5 minutes, and once the session is idle it runs
+`/reload-plugins` and says so in one line, `Pacing: updated to 0.9.11 and
+reloaded.` Never during a turn, and only in a session you have typed in.
+Where Claude Code does not let a plugin run that command, the line reads
+`Pacing 0.9.11 is installed: type /reload-plugins to load it.`, once per
+version. `/pacing reload off` turns it off.

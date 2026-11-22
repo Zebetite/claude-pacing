@@ -324,3 +324,32 @@ describe('the offer to switch', () => {
     } finally { s.cleanup(); }
   });
 });
+
+describe('the reload at a new version', () => {
+  test('on by default, off and on again, kept by reset, a bad value refused or dropped', () => {
+    const s = sandbox();
+    try {
+      s.config(['init']);
+      assert.match(s.config([]).out, /^reload of the plugins when a new version is installed: on$/m);
+      s.config(['reload', 'off']);
+      assert.equal(JSON.parse(s.read('config.json')).autoReload, false);
+      assert.match(s.config([]).out, /^reload of the plugins when a new version is installed: off$/m);
+      s.config(['reset']);
+      assert.equal(JSON.parse(s.read('config.json')).autoReload, false);
+      s.config(['apply', 'reload', 'on']);
+      assert.equal(JSON.parse(s.read('config.json')).autoReload, true);
+      const r = s.config(['reload', 'maybe']);
+      assert.equal(r.code, 1);
+      assert.match(r.out, /reload on \| reload off/);
+      // a value that is no switch is dropped with a note, and the default stands
+      s.writeConfig({ ...JSON.parse(s.read('config.json')), autoReload: 'sometimes' });
+      assert.match(s.config([]).out, /the reload at a new version is not on or off: the default is used/);
+    } finally { s.cleanup(); }
+  });
+  test('the guide says what it does, in the module\'s own words', () => {
+    const guide = fs.readFileSync(path.join(plugin, 'skills', 'pacing', 'GUIDE.md'), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(guide.includes('`Pacing: updated to 0.9.11 and reloaded.`'));
+    assert.ok(guide.includes('`Pacing 0.9.11 is installed: type /reload-plugins to load it.`'));
+    assert.ok(guide.includes('`/pacing reload off` turns it off'));
+  });
+});

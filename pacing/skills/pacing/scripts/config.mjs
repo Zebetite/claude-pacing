@@ -70,6 +70,7 @@ const defaults = () => ({
   compactAsk: true,
   agentNotices: true,
   switchAsk: true,
+  autoReload: true,
   premium: 'fable',
   fallback: { model: 'opus', effort: 'high' },
   reader: { model: 'haiku', effort: 'medium' },
@@ -157,6 +158,7 @@ const show = c => {
   console.log('offers to compact a large session: ' + (c.compactAsk === false ? 'off' : 'on'));
   console.log('notices about running subagents: ' + (c.agentNotices === false ? 'off' : 'on'));
   console.log('offers to switch this session to the recommended model or effort: ' + (c.switchAsk === false ? 'off' : 'on'));
+  console.log('reload of the plugins when a new version is installed: ' + (c.autoReload === false ? 'off' : 'on'));
   console.log('data folder: ' + dataDir);
 };
 const fail = m => { console.log(m); process.exit(1); };
@@ -203,7 +205,7 @@ process.on('exit', () => { for (const n of configNotes) console.log(n); });
 // whole history, so a setup that writes eight settings, or three agent
 // records after a batch of tasks, is one call this way and not eight.
 if (cmd === 'apply') {
-  const APPLY = ['set', 'add', 'remove', 'weight', 'next', 'compact', 'notify', 'switch', 'premium', 'fallback', 'reader', 'verifier', 'agent', 'note'];
+  const APPLY = ['set', 'add', 'remove', 'weight', 'next', 'compact', 'notify', 'switch', 'reload', 'premium', 'fallback', 'reader', 'verifier', 'agent', 'note'];
   const groups = [];
   let cur = [];
   for (const w of argv.slice(1)) { if (w === '+') { if (cur.length) groups.push(cur); cur = []; } else cur.push(w); }
@@ -497,6 +499,13 @@ switch (cmd || 'show') {
     }); show(cfg);
     break;
   }
+  case 'reload': {
+    mutate(cfg => {
+      if (a !== 'on' && a !== 'off') fail('reload on | reload off');
+      cfg.autoReload = a === 'on';
+    }); show(cfg);
+    break;
+  }
   case 'notify': {
     mutate(cfg => {
       if (a !== 'on' && a !== 'off') fail('notify on | notify off');
@@ -550,6 +559,7 @@ switch (cmd || 'show') {
       if (keep.compactAsk === false) c.compactAsk = false;
       if (keep.agentNotices === false) c.agentNotices = false;
       if (keep.switchAsk === false) c.switchAsk = false;
+      if (keep.autoReload === false) c.autoReload = false;
       if (keep.premium !== undefined) c.premium = keep.premium;
       return c;
     });
@@ -557,5 +567,5 @@ switch (cmd || 'show') {
     break;
   }
   default:
-    fail('commands: show | json | init | help [full] | apply <command> + <command> ... | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | compact on|off | notify on|off | switch on|off | premium <model>|none | fallback <model> <effort>|none | reader <model> <effort>|ladder | verifier <model> <effort>|ladder | reset | version | where | notes | note <role> <fact> | agent <role> <id> <model> <effort> <tokens> | agents | handover [new|done]');
+    fail('commands: show | json | init | help [full] | apply <command> + <command> ... | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | compact on|off | notify on|off | switch on|off | reload on|off | premium <model>|none | fallback <model> <effort>|none | reader <model> <effort>|ladder | verifier <model> <effort>|ladder | reset | version | where | notes | note <role> <fact> | agent <role> <id> <model> <effort> <tokens> | agents | handover [new|done]');
 }

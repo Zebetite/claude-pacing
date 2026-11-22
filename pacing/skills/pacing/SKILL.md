@@ -1,6 +1,6 @@
 ---
 name: pacing
-description: "Pace the weekly plan allowance over a ladder of models: a day-by-day budget line and the logged trend decide how far down the ladder work goes. Reports and settings: use whenever the user mentions usage, the allowance, which model to use, or throttling, and after each big task; `usage` or no argument reports, `usage now` measures afresh; `help`, `setup`, `set`, `add`, `remove`, `reset`, `weight`, `log`, `week`, `next`, `compact`, `notify`, `switch`, `premium`, `fallback`, `reader`, `verifier`, `notes`, `agents`, `handover`, `version` manage it. The rules for delegating work are in the `pacing:route` skill."
+description: "Pace the weekly plan allowance over a ladder of models: a day-by-day budget line and the logged trend decide how far down the ladder work goes. Reports and settings: use whenever the user mentions usage, the allowance, which model to use, or throttling, and after each big task; `usage` or no argument reports, `usage now` measures afresh; `help`, `setup`, `set`, `add`, `remove`, `reset`, `weight`, `log`, `week`, `next`, `compact`, `notify`, `switch`, `reload`, `premium`, `fallback`, `reader`, `verifier`, `notes`, `agents`, `handover`, `version` manage it. The rules for delegating work are in the `pacing:route` skill."
 ---
 
 # Model pacing: reports and settings
@@ -32,7 +32,7 @@ the first big task is done.
 | `/pacing`, `usage`, no argument | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" last`: show its report as section 2 says; on a `measure:` line, sections 1 and 2 |
 | `usage now` | sections 1 and 2 |
 | after a big task, unasked | the same with `--brief` (`last --brief`; on `measure:`, section 1's command with `--brief`): one line to the user as section 2 says |
-| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `compact on\|off`, `notify on\|off`, `switch on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `reader <model> <effort>\|ladder`, `verifier <model> <effort>\|ladder`, `version`, `notes`, `agents`, `help [full]` ("usage help") | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result whole |
+| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `compact on\|off`, `notify on\|off`, `switch on\|off`, `reload on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `reader <model> <effort>\|ladder`, `verifier <model> <effort>\|ladder`, `version`, `notes`, `agents`, `help [full]` ("usage help") | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result whole |
 | `log`, `week` | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" log` (or `week`), show the result |
 | `setup` | read `${CLAUDE_SKILL_DIR}/SETUP.md` and follow it |
 | `handover` | read `${CLAUDE_SKILL_DIR}/HANDOVER.md` and follow it |

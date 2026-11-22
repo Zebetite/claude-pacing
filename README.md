@@ -74,8 +74,8 @@ ladder, and the top tier is picked once in the session's model menu.
 Updates: turn on auto-update for this marketplace under `/plugin` →
 Marketplaces (it is off by default for marketplaces you add yourself), or
 run `/plugin marketplace update claude-pacing` and `claude plugin update
-pacing@claude-pacing`. A running session keeps the old version until
-`/reload-plugins`.
+pacing@claude-pacing`. A running session loads the new version by itself once it
+is idle (`/pacing reload off` turns that off; then type `/reload-plugins`).
 
 Requirements: Node.js 18 or later on the PATH of the shell Claude Code
 uses, and a Claude plan with usage limits (the plugin reads the usage
