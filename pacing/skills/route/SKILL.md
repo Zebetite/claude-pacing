@@ -97,7 +97,7 @@ This session's model is the user's to set; the lever is delegation.
 - **`upward:` line**: one contained hard task with a clear deliverable may
   go to the subagent it names; an open debugging hunt may not.
 - **5-hour window**: at 85 % or more, hold heavy work until the printed
-  time; if the pace line says it fills before the reset, delegate bulky
+  time; if its `5-hour window` line says it fills before the reset, delegate bulky
   work or pause heavy runs.
 - **Extra usage on**: at "stop", go on only with the user's word, saying
   what is spent of the cap.

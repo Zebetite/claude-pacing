@@ -35,9 +35,10 @@
 //   node config.mjs note <role> <one fact> [--project <folder>]   add a line to a role's notes
 //   node config.mjs note <role> --replace <words of a stale line> <the fact now> [--project <folder>]
 //                                   put the fact in the place of the one line that holds those words
-//   node config.mjs agent <role> <agent id> <model> <effort> <tokens> [--project <folder>]
+//   node config.mjs agent <role> <agent id> <model> <effort> <tokens> [--spent <in>,<out>,<read>,<write>] [--project <folder>]
 //                                   record a task a role agent finished; the first record of
-//                                   an id is a fresh agent, the later ones resumed
+//                                   an id is a fresh agent, the later ones resumed. --spent:
+//                                   what the task spent, its requests summed (saved.mjs)
 //   node config.mjs agents [--project <folder>]   the kept agents (the latest of each role in
 //                                   the last 24 h) and the runs' tokens by role and model
 //   node config.mjs start [<role>] [--project <folder>]   all a role agent reads before its first
@@ -46,7 +47,6 @@
 //                                   session pastes into a general-purpose agent's prompt
 //   node config.mjs part <done> <total>   an agent's progress through a task in parts: one
 //                                   line, nothing written (the hooks module reads the call)
-//   node config.mjs panel auto|off  the live panel of the running agents (/pacing-agents)
 // Models are the Agent tool's ids; the label is what the user sees.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -78,7 +78,6 @@ const defaults = () => ({
   agentNotices: true,
   switchAsk: true,
   autoReload: true,
-  agentsPanel: 'auto',
   premium: 'fable',
   fallback: { model: 'opus', effort: 'high' },
   reader: { model: 'haiku', effort: 'medium' },
@@ -180,15 +179,14 @@ const show = c => {
     console.log('tier ' + (i + 1) + '  ' + (t.label + ' ' + t.effort).padEnd(20) + ' [' + t.model + ']  ' + role);
   });
   console.log('last day weight: ' + c.lastDayWeight + '  (installed ' + c.installed + ', plugin ' + version() + ')');
-  console.log('per-model weekly meter: ' + premiumText(c) + '; when it is full: ' + fallbackText(c));
+  console.log('per-model meter: ' + premiumText(c) + '; when it is full: ' + fallbackText(c));
   console.log('reader agent: ' + readerText(c) + ' (bulky reading)');
   console.log('verifier agent: ' + verifierText(c) + ' (plain test runs; checks to judge: the lowest tier)');
   console.log('next-session model switch: ' + (c.setNextModel === false ? 'off' : 'on'));
   console.log('offers to compact a large session: ' + (c.compactAsk === false ? 'off' : 'on'));
-  console.log('notices about running subagents: ' + (c.agentNotices === false ? 'off' : 'on'));
+  console.log('toasts about running subagents: ' + (c.agentNotices === false ? 'off' : 'on'));
   console.log('offers to switch this session to the recommended model or effort: ' + (c.switchAsk === false ? 'off' : 'on'));
   console.log('reload of the plugins when a new version is installed: ' + (c.autoReload === false ? 'off' : 'on'));
-  console.log('live panel of the running agents (/pacing-agents): ' + (c.agentsPanel === 'off' ? 'off' : 'auto'));
   console.log('data folder: ' + dataDir);
 };
 const fail = m => { console.log(m); process.exit(1); };
@@ -274,7 +272,7 @@ process.on('exit', () => { for (const n of configNotes) console.log(n); });
 // whole history, so a setup that writes eight settings, or three agent
 // records after a batch of tasks, is one call this way and not eight.
 if (cmd === 'apply') {
-  const APPLY = ['set', 'add', 'remove', 'weight', 'next', 'compact', 'notify', 'switch', 'reload', 'panel', 'premium', 'fallback', 'reader', 'verifier', 'agent', 'note'];
+  const APPLY = ['set', 'add', 'remove', 'weight', 'next', 'compact', 'notify', 'switch', 'reload', 'premium', 'fallback', 'reader', 'verifier', 'agent', 'note'];
   const groups = [];
   let cur = [];
   for (const w of argv.slice(1)) { if (w === '+') { if (cur.length) groups.push(cur); cur = []; } else cur.push(w); }
@@ -430,15 +428,21 @@ switch (cmd || 'show') {
   }
   case 'agent': {
     if (!ROLES.includes(a)) fail('role must be one of ' + ROLES.join(', '));
+    // what the task spent, every request of its run summed: input, output,
+    // cache read, cache write; kept only when all four are whole numbers
+    const spentAt = argv.indexOf('--spent');
+    const spentArg = spentAt > 1 ? argv.splice(spentAt, 2)[1] : null;
+    const split = /^(\d+),(\d+),(\d+),(\d+)$/.exec(String(spentArg || ''));
+    const spent = split ? { in: +split[1], out: +split[2], read: +split[3], write: +split[4] } : null;
     const [id, model, effort, tokText] = argv.slice(2);
-    if (argv.length !== 6) fail('usage: agent <role> <agent id> <model> <effort> <tokens>');
+    if (argv.length !== 6) fail('usage: agent <role> <agent id> <model> <effort> <tokens> [--spent <in>,<out>,<read>,<write>]');
     checkModel(model); checkEffort(effort);
     const tokens = parseTokens(tokText);
     if (tokens === null) fail('tokens must be a number, such as 84000 or 84k');
     const f = agentsLog(projectRoot());
     const tasks = readRuns(f).filter(r => r.id === id).length + 1;
     fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.appendFileSync(f, JSON.stringify({ t: new Date().toISOString(), role: a, id, model, effort, tokens, resumed: tasks > 1 }) + '\n');
+    fs.appendFileSync(f, JSON.stringify({ t: new Date().toISOString(), role: a, id, model, effort, tokens, resumed: tasks > 1, ...(spent ? { spent } : {}) }) + '\n');
     const full = tasks >= KEEP_TASKS || tokens >= KEEP_TOKENS;
     console.log('recorded: ' + a + ' ' + id + ', task ' + tasks + ', ' + kTok(tokens) + ' tokens'
       + (full ? '; the next ' + a + ' task goes to a fresh agent (' + KEEP_TASKS + ' tasks or ' + kTok(KEEP_TOKENS) + ' tokens reached)' : ''));
@@ -595,15 +599,6 @@ switch (cmd || 'show') {
     }); show(cfg);
     break;
   }
-  case 'panel': {
-    // read by the hooks module, which registers /pacing-agents to open or
-    // close the panel; auto is the default, also when the key is absent
-    mutate(cfg => {
-      if (a !== 'auto' && a !== 'off') fail('panel auto | panel off');
-      cfg.agentsPanel = a;
-    }); show(cfg);
-    break;
-  }
   case 'notify': {
     mutate(cfg => {
       if (a !== 'on' && a !== 'off') fail('notify on | notify off');
@@ -658,7 +653,6 @@ switch (cmd || 'show') {
       if (keep.agentNotices === false) c.agentNotices = false;
       if (keep.switchAsk === false) c.switchAsk = false;
       if (keep.autoReload === false) c.autoReload = false;
-      if (keep.agentsPanel === 'off') c.agentsPanel = 'off';
       if (keep.premium !== undefined) c.premium = keep.premium;
       return c;
     });
@@ -666,5 +660,5 @@ switch (cmd || 'show') {
     break;
   }
   default:
-    fail('commands: show | json | init | help [full] | apply <command> + <command> ... | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | compact on|off | notify on|off | switch on|off | reload on|off | panel auto|off | premium <model>|none | fallback <model> <effort>|none | reader <model> <effort>|ladder | verifier <model> <effort>|ladder | reset | version | where | notes | note <role> <fact> | agent <role> <id> <model> <effort> <tokens> | agents | start [<role>] | part <done> <total> | handover [new|done]');
+    fail('commands: show | json | init | help [full] | apply <command> + <command> ... | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | compact on|off | notify on|off | switch on|off | reload on|off | premium <model>|none | fallback <model> <effort>|none | reader <model> <effort>|ladder | verifier <model> <effort>|ladder | reset | version | where | notes | note <role> <fact> | agent <role> <id> <model> <effort> <tokens> | agents | start [<role>] | part <done> <total> | handover [new|done]');
 }

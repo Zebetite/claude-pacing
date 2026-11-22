@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadedText, reloadAskText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, RELOAD_SETTLE, RELOAD_GIVE_UP, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, PANEL, panelLines, outcomeOf, DONE_SHOWN, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, leftOf, leftText, usualText } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadedText, reloadAskText, reloadRowText, RELOAD_ENTER, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, RELOAD_SETTLE, RELOAD_GIVE_UP, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, leftOf, leftText, usualText, budgetText, tokensText } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -15,15 +15,21 @@ const PRICES = {
 }
 // the default ladder: Fable, Opus, Sonnet; the reader on Haiku after it
 const TIER_OF = { 'claude-fable-5-2': 1, 'claude-opus-5-5': 2, 'claude-sonnet-5-5': 3, 'claude-haiku-5-5': 4 }
+// each place by name, as budget.mjs sends them for /pacing-status
+const TIER_NAMES = { 1: 'Fable 5.2 high', 2: 'Opus 5.5 medium', 3: 'Sonnet 5.5 medium', 4: 'Haiku 5.5 medium' }
 
 const measure = (pct: number, more: { kind: string; percentUsed: number; resetsAt?: string }[] = [], tokens = 50000) => ({
   context: { window: 1000000, tokens, percent: Math.round(tokens / 10000) },
   rateLimits: [{ kind: 'seven_day', percentUsed: pct, resetsAt: RESET }, ...more],
   changed: ['rateLimits' as const],
 })
+// `rate`: the tokens per point budget.mjs learned (none: the left shows in points)
 const answer = (level: string, all: number, extra: Record<string, unknown> = {}) => ({
   exitCode: 0,
-  stdout: JSON.stringify({ level, all, line: 20, ofBudget: Math.round(100 * all / 20), tierOf: TIER_OF, prices: PRICES, premium: 40,
+  stdout: JSON.stringify({ level, all, line: 20, ofBudget: Math.round(100 * all / 20),
+    tokensPerPoint: typeof extra.rate === 'number' ? extra.rate : null,
+    left: { points: Math.round((20 - all) * 10) / 10, tokens: typeof extra.rate === 'number' ? Math.round((20 - all) * extra.rate) : null },
+    tierOf: TIER_OF, tierNames: TIER_NAMES, prices: PRICES, premium: 40,
     premiumOut: false, premiumLabel: 'Fable 5.2', premiumAt: null, logged: true, do: 'the default split', ...extra }) + '\n',
   stderr: '',
   isStdoutTruncated: false,
@@ -59,24 +65,25 @@ test('a reading runs budget.mjs from the plugin folder', async ($, on) => {
   expect(argv.slice(2)).toEqual(['--all', '10', '--reset', RESET, '--source', 'hook', '--five', '4', '--five-reset', '2026-11-13T15:00:00.000Z'])
 })
 
-// the tier split, now only in /pacing-status's long form
-const split = async ($: any) => ((await $.command.run({ command: 'pacing-status', args: '' } as any)).text.split('\n')[0].match(/(?:[🟡⚪🟠🟤🟣🔴🔵🟢⚫](?:Tier \d+|Other)\[\d+%\] ?)+/u) || [''])[0].trim()
+// the tier split, now only in /pacing-status's long form, each tier by its model
+const split = async ($: any) => (await $.command.run({ command: 'pacing-status', args: '' } as any)).text.split('\n')[0].replace(/^Pacing: /, '').split(', ')
+  .find((p: string) => /^[🟡⚪🟠🟤🟣🔴🔵🟢⚫]/u.test(p) && !p.includes('side session')) || ''
 
-test('the status line: the budget share and the usage, no tiers; the tier split in /pacing-status', async ($, on) => {
+test('the status line: what is left of the budget and the usage, no tiers; the tier split in /pacing-status', async ($, on) => {
   const status = engine(on)
   on('process.run', () => ({ value: answer('ahead', 15.4) }))
 
   await $.session.measure(measure(15.4))
-  expect(status.at(-1)).toBe('Budget 77% · usage: Weekly 15% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 5% · usage: Weekly 15% Fable 40%')
 
   await $.turn.complete(turn('claude-fable-5-2', 8))
   await $.turn.complete(turn('claude-opus-5-5', 1.5, 'a1'))
   await $.turn.complete(turn('claude-haiku-5-5', 0.5, 'a2'))
   // no new reading is due (the meter did not move): the line is redrawn all the same
   await $.session.measure(measure(15.4))
-  expect(status.at(-1)).toBe('Budget 77% · usage: Weekly 15% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 5% · usage: Weekly 15% Fable 40%')
   expect(status.at(-1)).not.toMatch(/T\d|Tier/)
-  expect(await split($)).toBe('🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%]')
+  expect(await split($)).toBe('🟡Fable 5.2 high 80% ⚪Opus 5.5 medium 15% 🟤Haiku 5.5 medium 5%')
 })
 
 test('a priced model off the ladder is Other, one with no price is left out; a long ladder takes more colours', async ($, on) => {
@@ -88,8 +95,9 @@ test('a priced model off the ladder is Other, one with no price is left out; a l
   await $.turn.complete(turn('claude-opus-5-5', 0.5))
   await $.turn.complete({ ...turn('claude-sonnet-5-5', 1), usage: { model: 'claude-opus-4-8', input_tokens: 0, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } })
   await $.session.measure(measure(18))
-  expect(status.at(-1)).toBe('Budget 90% · usage: Weekly 18%')
-  expect(await split($)).toBe('🟠Tier 3[75%] 🟣Tier 5[13%] ⚫Other[12%]')
+  expect(status.at(-1)).toBe('Budget left: 2% · usage: Weekly 18%')
+  // a place budget.mjs gave no name (an older one): the model alone, by tierOf
+  expect(await split($)).toBe('🟠Sonnet 5.5 medium 75% 🟣Haiku 5.5 13% ⚫Other 12%')
 })
 
 test('the shares always add up to 100, however the spend divides', async ($, on) => {
@@ -103,7 +111,7 @@ test('the shares always add up to 100, however the spend divides', async ($, on)
   await $.turn.complete(turn('claude-haiku-5-5', 1))
   await $.session.measure(measure(10))
   const line = await split($)
-  const shares = [...line.matchAll(/\[(\d+)%\]/g)].map(m => Number(m[1]))
+  const shares = [...line.matchAll(/ (\d+)%/g)].map(m => Number(m[1]))
   expect(shares).toEqual([29, 29, 28, 14])
   expect(shares.reduce((a, b) => a + b, 0)).toBe(100)
 })
@@ -134,7 +142,7 @@ test('no run without a weekly window, nor again before it moves a point', async 
   expect(runs).toBe(2)
 })
 
-test('a change of level is one toast with the level words; the line says the budget share alone', async ($, on) => {
+test('a change of level is one toast with the level words; the line says what is left alone', async ($, on) => {
   const status = engine(on)
   const toasts: string[] = []
   let next = answer('on pace', 18)
@@ -143,12 +151,94 @@ test('a change of level is one toast with the level words; the line says the bud
 
   await $.session.measure(measure(18))
   expect(toasts).toEqual([])
-  next = answer('over', 21, { do: 'medium tasks leave the session model too' })
+  next = answer('over', 21, { do: 'medium tasks leave the session\'s model too' })
   await $.session.measure(measure(21))
-  expect(toasts).toEqual(['⚠️ on budget -> over budget. medium tasks leave the session model too'])
+  expect(toasts).toEqual(['⚠️ on budget -> over budget. medium tasks leave the session\'s model too'])
   next = answer('stop', 96)
   await $.session.measure(measure(96))
-  expect(status.at(-1)).toBe('Budget 480% · usage: Weekly 96% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: -76% · usage: Weekly 96% Fable 40%')
+})
+
+test('what is left in tokens: K, M from a million, the sign in front, 0K under a thousand', () => {
+  expect(tokensText(850000)).toBe('850K')
+  expect(tokensText(1234567)).toBe('1.2M')
+  expect(tokensText(999400)).toBe('999K')
+  expect(tokensText(-120000)).toBe('-120K')
+  expect(tokensText(-2460000)).toBe('-2.5M')
+  expect(tokensText(999)).toBe('0K')
+  expect(tokensText(-400)).toBe('0K')
+  expect(tokensText(0)).toBe('0K')
+  expect(budgetText({ line: 20, all: 10, left: { points: 10, tokens: 850000 } })).toBe('Budget left: 850K')
+  expect(budgetText({ line: 20, all: 21.5, left: { points: -1.5, tokens: -120000 } })).toBe('Budget left: -120K')
+  expect(budgetText({ line: 20, all: 20, left: { points: 0, tokens: 0 } })).toBe('Budget left: 0K')
+})
+
+test('until a rate is learned, the points of the week; a dash only with no figure at all', () => {
+  expect(budgetText({ line: 20, all: 15.4, left: { points: 4.6, tokens: null } })).toBe('Budget left: 5%')
+  expect(budgetText({ line: 20, all: 26, left: { points: -6, tokens: null } })).toBe('Budget left: -6%')
+  expect(budgetText({ line: 20, all: 20.3, left: { points: -0.3, tokens: null } })).toBe('Budget left: 0%')
+  // a reading without `left`: from the line and the meter
+  expect(budgetText({ line: 46.7, all: 40 })).toBe('Budget left: 7%')
+  expect(budgetText({})).toBe('Budget left: -')
+  expect(budgetText(null)).toBe('Budget left: -')
+})
+
+test('the status line in tokens once budget.mjs has a rate, negative past the line', async ($, on) => {
+  const status = engine(on)
+  let next = answer('ahead', 10, { rate: 85000 })
+  on('process.run', () => ({ value: next }))
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('Budget left: 850K · usage: Weekly 10% Fable 40%')
+  next = answer('throttle', 26, { rate: 85000 })
+  await $.session.measure(measure(26))
+  expect(status.at(-1)).toBe('Budget left: -510K · usage: Weekly 26% Fable 40%')
+})
+
+test('--spent: every token of the session and its agents since the last reading that ran; a failed run keeps them for the next', async ($, on) => {
+  engine(on)
+  const runs: string[][] = []
+  let fail = false
+  on('process.run', (_, e) => (runs.push([...e.argv]), { value: fail ? { ...answer('ahead', 10), exitCode: 1, stdout: 'bad input' } : answer('ahead', 10) }))
+  const spentOf = (argv: string[]) => (argv.includes('--spent') ? argv[argv.indexOf('--spent') + 1] : null)
+
+  // nothing spent yet: no flag
+  await $.session.measure(measure(10))
+  expect(spentOf(runs[0])).toBe(null)
+  // $1 of Fable output is 25 000 tokens, $1 of Opus output 50 000 (a subagent's)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await $.turn.complete(turn('claude-opus-5-5', 1, 'a1'))
+  await $.session.measure(measure(11))
+  expect(spentOf(runs[1])).toBe('75000')
+  // a run that failed: its tokens go with the next one
+  await $.turn.complete(turn('claude-fable-5-2', 0.4))
+  fail = true
+  await $.session.measure(measure(12))
+  expect(spentOf(runs[2])).toBe('10000')
+  fail = false
+  await $.turn.complete(turn('claude-fable-5-2', 0.4))
+  await $.session.measure(measure(13))
+  expect(spentOf(runs[3])).toBe('20000')
+  // and nothing twice
+  await $.session.measure(measure(14))
+  expect(spentOf(runs[4])).toBe(null)
+})
+
+test('the width with the longer budget text: the agents\' count, the budget whole, the usage only as far as it fits', () => {
+  const now = Date.parse('2026-11-16T12:00:00.000Z')
+  const wide = { all: 100, line: 46.7, level: 'throttle', premium: 100, premiumLabel: 'Fable 5.2', premiumAt: null, left: { points: -53.3, tokens: -12345678 } }
+  const two = [
+    { id: 'i', type: 'pacing:implementer', model: 'claude-opus-5-5', startedAt: now - 120000, step: 'editing' },
+    { id: 'r', type: 'pacing:reader', model: 'claude-haiku-5-5', startedAt: now - 180000, step: 'searching' },
+  ]
+  for (const list of [two.slice(0, 1), two]) {
+    for (const self of [null, 'Other']) {
+      const s = statusText(wide as any, [], self as any, now, list as any)
+      expect(chars(s)).toBeLessThanOrEqual(LINE_MAX)
+      expect(s).toContain(' · Budget left: -12.3M')
+    }
+  }
+  expect(statusText(wide as any, [], null, now, two as any)).toBe('⏳ 2 Subagents running · Budget left: -12.3M · usage: Weekly 100% Fable 100%')
+  expect(statusText(wide as any, [], null, now, two.slice(0, 1) as any)).toBe('⏳ 1 Subagent running · Budget left: -12.3M · usage: Weekly 100% Fable 100%')
 })
 
 test('a failed run changes nothing and never throws into the session', async ($, on) => {
@@ -173,12 +263,12 @@ test('a carried per-model figure is current for half an hour; when that meter se
   on('ui.toast', (_, e) => (toasts.push(e.text), { value: undefined }))
 
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 18%')
-  next = answer('over', 11, { premium: 22, premiumAt: null, premiumLevel: 'over', levelBy: 'premium', premiumOfBudget: 110, do: 'medium tasks leave the session model too' })
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 18%')
+  next = answer('over', 11, { premium: 22, premiumAt: null, premiumLevel: 'over', levelBy: 'premium', premiumOfBudget: 110, do: 'medium tasks leave the session\'s model too' })
   await $.session.measure(measure(11))
   // no "Fable over 110%": the per-model meter shows as its usage only
-  expect(status.at(-1)).toBe('Budget 55% · usage: Weekly 11% Fable 22%')
-  expect(toasts).toEqual(['⚠️ under budget -> over budget (Fable meter). medium tasks leave the session model too'])
+  expect(status.at(-1)).toBe('Budget left: 9% · usage: Weekly 11% Fable 22%')
+  expect(toasts).toEqual(['⚠️ under budget -> over budget (Fable\'s meter). medium tasks leave the session\'s model too'])
 })
 
 test('the session moved off the per-model meter\'s model is one toast, though the level stays', async ($, on) => {
@@ -189,9 +279,9 @@ test('the session moved off the per-model meter\'s model is one toast, though th
   on('ui.toast', (_, e) => (toasts.push(e.text), { value: undefined }))
 
   await $.session.measure(measure(10))
-  next = answer('ahead', 11, { premium: 30, premiumHeld: true, premiumLevel: 'throttle', premiumOfBudget: 150, do: 'Fable 5.2\'s own meter is at throttle: this session belongs on Opus 5.5 high now, and Fable 5.2 is kept for judgment work; the Switch row offers it. the session model does nearly everything' })
+  next = answer('ahead', 11, { premium: 30, premiumHeld: true, premiumLevel: 'throttle', premiumOfBudget: 150, do: 'Fable 5.2\'s meter is at throttle: this session belongs on Opus 5.5 high now, and Fable 5.2 is kept for judgment work; the Switch row offers it. the session\'s model does nearly everything' })
   await $.session.measure(measure(11))
-  expect(toasts).toEqual(['⚠️ Fable 5.2\'s own meter is at throttle: this session belongs on Opus 5.5 high now, and Fable 5.2 is kept for judgment work; the Switch row offers it. the session model does nearly everything'])
+  expect(toasts).toEqual(['⚠️ Fable 5.2\'s meter is at throttle: this session belongs on Opus 5.5 high now, and Fable 5.2 is kept for judgment work; the Switch row offers it. the session\'s model does nearly everything'])
 })
 
 // ---- the warning after a pause ----
@@ -308,14 +398,14 @@ test('the line: from 300 000 tokens and an hour idle, in whole minutes', () => {
 
 // ---- a session another session started ----
 
-test('a side session leads with its own tier: Tier X Sub Agent - X% of budget', async ($, on) => {
+test('a side session leads with sub, and shows the weekly meter only', async ($, on) => {
   const status = engine(on)
   on('process.run', () => ({ value: answer('ahead', 10, { spawned: true }) }))
 
   await $.turn.complete(turn('claude-opus-5-5', 9))
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('sub · Budget 50% · usage: Weekly 10%')
+  expect(status.at(-1)).toBe('sub · Budget left: 10% · usage: Weekly 10%')
 })
 
 test('a side session shows no per-model meter, even when it set the level; a model off the ladder is Other', async ($, on) => {
@@ -327,11 +417,11 @@ test('a side session shows no per-model meter, even when it set the level; a mod
   await $.session.measure(measure(11))
   // no per-model meter in a side session: the weekly share alone, without the
   // level's word, since that meter set the level
-  expect(status.at(-1)).toBe('sub · Budget 55% · usage: Weekly 11%')
+  expect(status.at(-1)).toBe('sub · Budget left: 9% · usage: Weekly 11%')
   next = answer('ahead', 12, { spawned: true })
   await $.turn.complete({ ...turn('claude-fable-5-2', 1), usage: { model: 'claude-opus-4-8', input_tokens: 0, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } })
   await $.session.measure(measure(12))
-  expect(status.at(-1)).toBe('sub · Budget 60% · usage: Weekly 12%')
+  expect(status.at(-1)).toBe('sub · Budget left: 8% · usage: Weekly 12%')
 })
 
 test('a session of its own, or one whose start is not known, keeps the plain line', async ($, on) => {
@@ -344,14 +434,14 @@ test('a session of its own, or one whose start is not known, keeps the plain lin
 
   await $.turn.complete(turn('claude-opus-5-5', 1))
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 40%')
   next = answer('ahead', 11, { spawned: null })
   await $.session.measure(measure(11))
-  expect(status.at(-1)).toBe('Budget 55% · usage: Weekly 11% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 9% · usage: Weekly 11% Fable 40%')
   // an older budget.mjs says nothing of it
   next = answer('ahead', 12)
   await $.session.measure(measure(12))
-  expect(status.at(-1)).toBe('Budget 60% · usage: Weekly 12% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 8% · usage: Weekly 12% Fable 40%')
 })
 
 test('a side session before its first turn ends takes the model it is set to', async ($, on) => {
@@ -363,7 +453,7 @@ test('a side session before its first turn ends takes the model it is set to', a
 
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('sub · Budget 50% · usage: Weekly 10%')
+  expect(status.at(-1)).toBe('sub · Budget left: 10% · usage: Weekly 10%')
 })
 
 test('a side session whose model is not known yet is marked sub at once, and shows no per-model meter', async ($, on) => {
@@ -373,7 +463,7 @@ test('a side session whose model is not known yet is marked sub at once, and sho
 
   await $.turn.complete(turn('claude-opus-5-5', 1, 'a1'))
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('sub · Budget 50% · usage: Weekly 10%')
+  expect(status.at(-1)).toBe('sub · Budget left: 10% · usage: Weekly 10%')
 })
 
 test('the line is redrawn when the main thread\'s turn ends', async ($, on) => {
@@ -384,7 +474,7 @@ test('the line is redrawn when the main thread\'s turn ends', async ($, on) => {
   const before = status.length
   await $.turn.complete(turn('claude-opus-5-5', 1))
   expect(status.length).toBe(before + 1)
-  expect(status.at(-1)).toBe('sub · Budget 50% · usage: Weekly 10%')
+  expect(status.at(-1)).toBe('sub · Budget left: 10% · usage: Weekly 10%')
   // a subagent's turn waits for the next measure
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'a1'))
   expect(status.length).toBe(before + 1)
@@ -395,7 +485,7 @@ test('the line is redrawn when the main thread\'s turn ends', async ($, on) => {
 // the case reported: Fable read at 71 %, then unread for 15 hours while all
 // models went from 45 to 49 %; the real meter stood at 90 %
 const STALE = { premium: 71, premiumAt: '2026-11-15T01:00:00.000Z', premiumEstimate: 90, premiumLevel: 'throttle', premiumHeld: true, premiumOfBudget: 152,
-  needFull: 'the Fable 5.2 figure is 15 h old', do: 'Fable 5.2\'s own meter is at throttle: this session belongs on Opus 5.5 high now, and Fable 5.2 is kept for judgment work; the Switch row offers it. medium tasks leave the session model too' }
+  needFull: 'the Fable 5.2 figure is 15 h old', do: 'Fable 5.2\'s meter is at throttle: this session belongs on Opus 5.5 high now, and Fable 5.2 is kept for judgment work; the Switch row offers it. medium tasks leave the session\'s model too' }
 const AT_16 = Date.parse('2026-11-15T16:00:00.000Z')
 
 test('a 15-hour-old carried figure: the line shows it plainly; /pacing-status gives its age and the estimate', async ($, on) => {
@@ -406,16 +496,16 @@ test('a 15-hour-old carried figure: the line shows it plainly; /pacing-status gi
   const full = async () => (await $.command.run({ command: 'pacing-status', args: '' } as any)).text.split('\n')[0]
 
   await $.session.measure(measure(49))
-  expect(status.at(-1)).toBe('Budget 245% · usage: Weekly 49% Fable 71%')
+  expect(status.at(-1)).toBe('Budget left: -29% · usage: Weekly 49% Fable 71%')
   expect(status.at(-1)).not.toMatch(/old|est|\(/)
   expect(await full()).toContain('71% Fable 15h ago, est. 90%')
   await clock.advance(20 * 60000)
   await $.session.measure(measure(49))
-  expect(status.at(-1)).toBe('Budget 245% · usage: Weekly 49% Fable 71%')
+  expect(status.at(-1)).toBe('Budget left: -29% · usage: Weekly 49% Fable 71%')
   // no estimate to give: the age alone, in /pacing-status; under an hour in minutes, past two days in days
   next = answer('over', 50, { ...STALE, premiumEstimate: null, premiumAt: '2026-11-15T15:35:00.000Z' })
   await $.session.measure(measure(50))
-  expect(status.at(-1)).toBe('Budget 250% · usage: Weekly 50% Fable 71%')
+  expect(status.at(-1)).toBe('Budget left: -30% · usage: Weekly 50% Fable 71%')
   expect(await full()).toContain('71% Fable 45m ago)')
   next = answer('over', 51, { ...STALE, premiumEstimate: 71, premiumAt: '2026-11-12T16:20:00.000Z' })
   await $.session.measure(measure(51))
@@ -479,6 +569,7 @@ test('the note is one block beside the prompt, marked as automatic', async ($, o
 // Fable held: Opus 5.5 high (the fallback) on top, Opus 5.5 medium at tier 2,
 // as budget.mjs maps them for the ladder in force
 const HELD_MAP = { tierOf: { 'claude-opus-5-5': 1, 'claude-sonnet-5-5': 3, 'claude-fable-5-2': 1, 'claude-haiku-5-5': 4 },
+  tierNames: { 1: 'Opus 5.5 high', 2: 'Opus 5.5 medium', 3: 'Sonnet 5.5 medium', 4: 'Haiku 5.5 medium' },
   agentTierOf: { 'claude-opus-5-5': 2, 'claude-sonnet-5-5': 3, 'claude-fable-5-2': 1, 'claude-haiku-5-5': 4 } }
 
 test('the session on the fallback is tier 1; its subagents on the same model are tier 2', async ($, on) => {
@@ -489,8 +580,8 @@ test('the session on the fallback is tier 1; its subagents on the same model are
   await $.turn.complete(turn('claude-opus-5-5', 3, 'a1'))
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'a2'))
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('sub · Budget 50% · usage: Weekly 10%')
-  expect(await split($)).toBe('🟡Tier 1[60%] ⚪Tier 2[30%] 🟤Tier 4[10%]')
+  expect(status.at(-1)).toBe('sub · Budget left: 10% · usage: Weekly 10%')
+  expect(await split($)).toBe('🟡Opus 5.5 high 60% ⚪Opus 5.5 medium 30% 🟤Haiku 5.5 medium 10%')
 })
 
 test('an older budget.mjs without agentTierOf: every turn counts by tierOf, as before', async ($, on) => {
@@ -500,8 +591,8 @@ test('an older budget.mjs without agentTierOf: every turn counts by tierOf, as b
   await $.turn.complete(turn('claude-fable-5-2', 8))
   await $.turn.complete(turn('claude-opus-5-5', 2, 'a1'))
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
-  expect(await split($)).toBe('🟡Tier 1[80%] ⚪Tier 2[20%]')
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 40%')
+  expect(await split($)).toBe('🟡Fable 5.2 high 80% ⚪Opus 5.5 medium 20%')
 })
 
 // ---- the line fits the footer the desktop app gives it ----
@@ -513,7 +604,7 @@ test('an older budget.mjs without agentTierOf: every turn counts by tierOf, as b
 const chars = (s: string) => [...s].length
 const head = (s: string) => { const p = s.split(' · '); return p.slice(0, /sub$/.test(p[0]) ? 2 : 1).join(' · ') }
 const LONG_MIX = [1, 2, 3, 4, 5, 6, 7, 8].map(tier => ({ tier, share: 12 })).concat([{ tier: 'Other' as any, share: 4 }])
-const BASE = { all: 100, line: 46.7, ofBudget: 214, premium: 100, premiumLabel: 'Fable 5.2', premiumAt: null as string | null }
+const BASE = { all: 100, line: 46.7, ofBudget: 214, left: { points: -53.3, tokens: -4530500 }, premium: 100, premiumLabel: 'Fable 5.2', premiumAt: null as string | null }
 const WORST = [
   // a side session off the ladder, the per-model meter held, three digits
   { j: { ...BASE, level: 'throttle', premiumHeld: true, premiumOfBudget: 999 }, self: 'Other' },
@@ -522,9 +613,9 @@ const WORST = [
   // the per-model meter set the level
   { j: { ...BASE, level: 'throttle', levelBy: 'premium', premiumOfBudget: 999 }, self: 'Other' },
   // stop, which says wrap up
-  { j: { ...BASE, level: 'stop', ofBudget: 999 }, self: 'Other' },
+  { j: { ...BASE, level: 'stop', ofBudget: 999, left: { points: -99.9, tokens: -12345678 } }, self: 'Other' },
   // on pace, the longest level word
-  { j: { ...BASE, level: 'on pace', ofBudget: 999 }, self: 'Other' },
+  { j: { ...BASE, level: 'on pace', ofBudget: 999, left: { points: -99.9, tokens: -12345678 } }, self: 'Other' },
 ]
 
 test('the lead, a side session\'s tier and the level with its budget share, fits the narrowest footer', async () => {
@@ -534,14 +625,14 @@ test('the lead, a side session\'s tier and the level with its budget share, fits
     expect(chars(head(s))).toBeLessThanOrEqual(HEAD_MAX)
   }
   // the case reported, now: the lead within the narrow room, the split after it
-  const reported = statusText({ ...BASE, all: 50, premium: 90, level: 'over', ofBudget: 107, premiumHeld: true, premiumOfBudget: 158 }, [{ tier: 1, share: 100 }], 1, now)
+  const reported = statusText({ ...BASE, all: 50, premium: 90, level: 'over', ofBudget: 107, left: { points: -3.3, tokens: -280000 }, premiumHeld: true, premiumOfBudget: 158 }, [{ tier: 1, share: 100 }], 1, now)
   // a side session shows no per-model meter
-  expect(reported).toBe('sub · Budget 107% · usage: Weekly 50%')
+  expect(reported).toBe('sub · Budget left: -280K · usage: Weekly 50%')
   expect(chars(head(reported))).toBeLessThanOrEqual(HEAD_MAX)
   // a realistic main session's whole line is shorter than the old form's
-  const realistic = statusText({ ...BASE, all: 48, premium: 71, ofBudget: 103, level: 'over' }, [{ tier: 1, share: 45 }, { tier: 2, share: 55 }], null, now)
-  expect(realistic).toBe('Budget 103% · usage: Weekly 48% Fable 71%')
-  expect(chars(realistic)).toBeLessThan(chars(fullText({ ...BASE, all: 48, premium: 71, ofBudget: 103, level: 'over' }, [{ tier: 1, share: 45 }, { tier: 2, share: 55 }], null, now)))
+  const realistic = statusText({ ...BASE, all: 48, premium: 71, ofBudget: 103, left: { points: -1.3, tokens: -110000 }, level: 'over' }, [{ tier: 1, share: 45 }, { tier: 2, share: 55 }], null, now)
+  expect(realistic).toBe('Budget left: -110K · usage: Weekly 48% Fable 71%')
+  expect(chars(realistic)).toBeLessThan(chars(fullText({ ...BASE, all: 48, premium: 71, ofBudget: 103, left: { points: -1.3, tokens: -110000 }, level: 'over' }, [{ tier: 1, share: 45 }, { tier: 2, share: 55 }], null, now)))
 })
 
 test('the order: sub, the budget share, then the usage; no tiers; a cut takes the tail', async () => {
@@ -550,14 +641,14 @@ test('the order: sub, the budget share, then the usage; no tiers; a cut takes th
     [{ tier: 1, share: 60 }, { tier: 2, share: 40 }], null, now)
   const parts = s.split(' · ')
   // the weekly level and share; the per-model meter only as its usage, last
-  expect(parts[0]).toBe('Budget 214%')
+  expect(parts[0]).toBe('Budget left: -4.5M')
   expect(parts.join(' · ')).not.toContain('held')
   expect(parts[1]).toBe('usage: Weekly 100% Fable 100%')
   expect(parts.length).toBe(2)
   // a side session: sub first, then the weekly share, no per-model meter
   const side = statusText({ ...BASE, level: 'throttle', premiumHeld: true, premiumOfBudget: 158, premiumAt: '2026-11-16T09:00:00.000Z', premiumEstimate: 104 },
     [{ tier: 1, share: 60 }, { tier: 2, share: 40 }], 2, now).split(' · ')
-  expect(side).toEqual(['sub', 'Budget 214%', 'usage: Weekly 100%'])
+  expect(side).toEqual(['sub', 'Budget left: -4.5M', 'usage: Weekly 100%'])
   // no newline: a footer shows one line
   for (const { j, self } of WORST) expect(statusText(j, LONG_MIX, self, now)).not.toContain('\n')
 })
@@ -572,7 +663,15 @@ test('/pacing-status shows the whole line in the long form, and what to do now',
   await $.session.measure(measure(21))
   const r = await $.command.run({ command: 'pacing-status', args: '' } as any)
   // a side session's long form shows no per-model meter either
-  expect(r.text).toBe('Pacing: ⚪Tier 2 Sub Agent - Budget 105%, ⚪Tier 2[100%], (21% Weekly)\nNow: Fable 5.2 held: Opus 5.5 high')
+  expect(r.text).toBe('Pacing: ⚪side session on Opus 5.5 medium - Budget left: -1%, ⚪Opus 5.5 medium 100%, (21% Weekly)\nNow: Fable 5.2 held: Opus 5.5 high')
+})
+
+test('/pacing-status names models, not tier numbers: from an older budget.mjs the model alone; a side session off the ladder by its own model', () => {
+  const now = Date.parse('2026-11-16T12:00:00.000Z')
+  const j = { ...BASE, level: 'ahead', tierOf: { 'claude-opus-5-5': 2 } }
+  expect(fullText(j, [{ tier: 2, share: 70 }, { tier: 7, share: 20 }, { tier: 'Other' as any, share: 10 }], null, now)).toContain('⚪Opus 5.5 70% 🔵Tier 7 20% ⚫Other 10%')
+  expect(fullText(j, [], 'Other', now, 'claude-haiku-5-5').startsWith('⚫side session on Haiku 5.5 - Budget left: ')).toBe(true)
+  expect(fullText({ ...j, tierNames: { 2: 'Opus 5.5 medium' } }, [{ tier: 2, share: 100 }], 2, now).startsWith('⚪side session on Opus 5.5 medium - ')).toBe(true)
 })
 
 // ---- the offer to compact ----
@@ -819,27 +918,27 @@ const agentEngine = (on: any, opts: { list?: () => { id: string; status: string 
 const spawn = ($: any, type: string, model = 'haiku', background = false, description = 'a task') =>
   $.agent.spawn({ prompt: 'p', description, subagentType: type, model, background } as any)
 
-test('one agent: a toast when it starts, the line leads with it and its time, the assignment in the toasts, a toast when it ends, then the plain line', async ($, on) => {
+test('one agent: a toast when it starts, the line leads with the count, the assignment in the toasts, a toast when it ends, then the plain line', async ($, on) => {
   const status = engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = agentEngine(on, { list: () => [{ id: 'ag1', status: 'running' }] })
 
   await $.session.measure(measure(10))
-  expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 40%')
   await spawn($, 'pacing:reader')
   expect(seen.toasts).toEqual(['▶️ reader is running "a task" on Haiku 5.5.'])
-  expect(status.at(-1)).toBe('⏳ reader is running 0s · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   // it refreshes while it runs
   await clock.advance(3 * 60000)
-  expect(status.at(-1)).toBe('⏳ reader is running 3m · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
   expect(seen.toasts.at(-1)).toMatch(/^✅ reader is done with "a task" after 3m, \d+k tokens; nothing else is running\.$/)
   // the plain line again, the agent's spend in its tier split
-  expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 40%')
 })
 
-test('several agents: each in the line; a progress toast every 5 minutes and no more often; the line follows as each ends', async ($, on) => {
+test('several agents: counted in the line; a progress toast every 5 minutes and no more often; the line follows as each ends', async ($, on) => {
   const status = engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
@@ -852,7 +951,7 @@ test('several agents: each in the line; a progress toast every 5 minutes and no 
   await spawn($, 'pacing:implementer', 'opus')
   expect(seen.toasts.at(-1)).toBe('▶️ implementer is running "a task" on Opus 5.5; reader is also running.')
   // two that "are running" with their times, beside the budget: the usage has no room
-  expect(status.at(-1)).toBe('⏳ reader is running 40s, ⏳ implementer is running 0s · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ 2 Subagents running · Budget left: 10% · usage: Weekly 10% Fable 40%')
 
   await clock.advance(4 * 60000)
   expect(seen.toasts.filter(t => t.includes('still running:'))).toEqual([])
@@ -867,7 +966,7 @@ test('several agents: each in the line; a progress toast every 5 minutes and no 
   live.delete('ag1')
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
   expect(seen.toasts.at(-1)).toMatch(/^✅ reader is done with "a task" after 10m, \d+k tokens; implementer is still running\.$/)
-  expect(status.at(-1)).toBe('⏳ implementer is running 10m · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
 })
 
 test('the count never sticks: the main turn ends its foreground agents, the engine\'s list ends the rest, a new session starts with none', async ($, on) => {
@@ -884,15 +983,15 @@ test('the count never sticks: the main turn ends its foreground agents, the engi
   await spawn($, 'general-purpose', 'sonnet', true)
   // the main turn ends: the foreground reader with it, though no end was heard
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(status.at(-1)).toMatch(/^⏳ general is running 0s · Budget 50%/)
+  expect(status.at(-1)).toMatch(/^⏳ 1 Subagent running · Budget left: 10%/)
   // the engine lists the background one as done: gone at the next refresh
   live.clear()
   await clock.advance(30 * 1000)
-  expect(status.at(-1)).toMatch(/^Budget 50% · usage: Weekly 10% Fable 40%$/)
+  expect(status.at(-1)).toMatch(/^Budget left: 10% · usage: Weekly 10% Fable 40%$/)
 
   live.add('ag3')
   await spawn($, 'pacing:verifier')
-  expect(status.at(-1)).toMatch(/^⏳ verifier/)
+  expect(status.at(-1)).toMatch(/^⏳ 1 Subagent running/)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
   await $.session.measure(measure(11))
   expect(status.at(-1)).not.toContain('⏳')
@@ -929,7 +1028,7 @@ test('notify off: no toasts; the line still shows the agents', async ($, on) => 
   const seen = agentEngine(on, { config: JSON.stringify({ agentNotices: false }), list: () => [{ id: 'ag1', status: 'running' }] })
   await $.session.measure(measure(10))
   await spawn($, 'pacing:reader')
-  expect(status.at(-1)).toBe('⏳ reader is running 0s · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
   expect(seen.toasts).toEqual([])
 })
@@ -942,16 +1041,16 @@ test('an older engine without the agents list or timers: the line still counts, 
   await $.session.measure(measure(10))
   await spawn($, 'general-purpose', 'sonnet', true)
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(status.at(-1)).toMatch(/^⏳ general/)
+  expect(status.at(-1)).toMatch(/^⏳ 1 Subagent running/)
   await clock.advance(121 * 60000)
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(status.at(-1)).toMatch(/^Budget 50% · usage: Weekly 10% Fable 40%$/)
+  expect(status.at(-1)).toMatch(/^Budget left: 10% · usage: Weekly 10% Fable 40%$/)
 })
 
 // the whole line within LINE_MAX while agents run, at every level and length
 const A = (type: string, mins: number, model = 'claude-haiku-5-5', effort?: string, description?: string) => ({ id: type + mins, type, model, effort, description, startedAt: T0 - mins * 60000, background: false })
 const LONGEST_MIX = [1, 2, 3, 4, 5, 6, 7, 8].map(tier => ({ tier, share: 12 })).concat([{ tier: 'Other' as any, share: 4 }])
-const FAR = { all: 100, line: 46.7, ofBudget: 214, level: 'throttle', premium: 100, premiumLabel: 'Fable 5.2', premiumAt: null }
+const FAR = { all: 100, line: 46.7, ofBudget: 214, left: { points: -53.3, tokens: -4530500 }, level: 'throttle', premium: 100, premiumLabel: 'Fable 5.2', premiumAt: null }
 const SETS = {
   one: [A('pacing:reader', 3, 'claude-haiku-5-5', 'medium')],
   two: [A('pacing:reader', 3), A('pacing:implementer', 1, 'claude-opus-5-5', 'high')],
@@ -961,33 +1060,38 @@ const SETS = {
 const LONG_TASK = 'Auto-reload on plugin update when the desktop app has installed a new version of the plugin'
 const described = (list: any[], description = LONG_TASK) => list.map(a => ({ ...a, description, step: 'on the web', runs: [4 * 60000, 5 * 60000, 6 * 60000] }))
 
-test('with 1, 2, 3 and 6 agents, long names and assignments, far over budget: the line keeps within 75 and holds every agent or their count, and the budget', async () => {
-  let longest = ''
+test('with 1, 2, 3 and 6 agents, long names and assignments, far over budget: the line keeps within 75, or 34 in the desktop app, and holds their count and the budget', async () => {
+  const longest = { [LINE_MAX]: '', [LINE_MAX_NARROW]: '' } as Record<number, string>
   const three = [...SETS.two, A('pacing:verifier', 0.5)]
-  for (const plain of [SETS.one, SETS.two, three, SETS.six]) {
-    for (const list of [plain, described(plain), described(plain, 'Read the logs')]) {
-      for (const [j, self] of [[FAR, null], [FAR, 'Other'], [{ ...FAR, level: 'stop', ofBudget: 999 }, 'Other'], [{ ...FAR, level: 'ahead', ofBudget: 77 }, 1]] as const) {
-        const s = statusText(j as any, LONGEST_MIX, self as any, T0, list as any)
-        if (chars(s) > chars(longest)) longest = s
-        expect(chars(s)).toBeLessThanOrEqual(LINE_MAX)
-        expect(s.startsWith('⏳') || s.includes(' · ⏳')).toBe(true)
-        // every agent by name, or their count: never less
-        expect(list.every(a => s.includes('⏳ ' + roleOf(a.type))) || s.includes('⏳ ' + list.length + ' Agents') || s.includes('⏳' + list.length)).toBe(true)
-        expect(s).toContain('Budget ' + j.ofBudget + '%')
-        // the agents, then the budget share, then the usage: a cut by the app takes the least important end
-        expect(s.indexOf('⏳')).toBeLessThan(s.indexOf('Budget'))
-        if (s.includes('usage:')) expect(s.indexOf('Budget')).toBeLessThan(s.indexOf('usage:'))
+  for (const max of [LINE_MAX, LINE_MAX_NARROW]) {
+    for (const plain of [SETS.one, SETS.two, three, SETS.six]) {
+      for (const list of [plain, described(plain), described(plain, 'Read the logs')]) {
+        for (const [j, self] of [[FAR, null], [FAR, 'Other'], [{ ...FAR, level: 'stop', ofBudget: 999, left: { points: -99.9, tokens: -12345678 } }, 'Other'], [{ ...FAR, level: 'ahead', ofBudget: 77, left: { points: 10.7, tokens: 850000 } }, 1]] as const) {
+          const s = statusText(j as any, LONGEST_MIX, self as any, T0, list as any, max)
+          if (chars(s) > chars(longest[max])) longest[max] = s
+          expect(chars(s)).toBeLessThanOrEqual(max)
+          expect(s.startsWith('⏳') || s.includes(' · ⏳')).toBe(true)
+          // their count, never a name: who runs is the toasts', the row's and /pacing-status's
+          expect(s).toMatch(new RegExp('(⏳ ' + list.length + ' Subagents?( running)?|⏳' + list.length + ') · '))
+          expect(list.some(a => s.includes(roleOf(a.type)))).toBe(false)
+          expect(s).toContain(budgetText(j))
+          // the agents, then the budget share, then the usage: a cut by the app takes the least important end
+          expect(s.indexOf('⏳')).toBeLessThan(s.indexOf('Budget'))
+          if (s.includes('usage:')) expect(s.indexOf('Budget')).toBeLessThan(s.indexOf('usage:'))
+        }
       }
     }
   }
-  // the width: a line of 75 characters was seen whole in the app's footer
+  // the width: a line of 75 characters was seen whole in a footer; the desktop app cuts at about 35
   expect(LINE_MAX).toBe(75)
-  // the longest line there is uses the width to the last character
-  expect(chars(longest)).toBe(LINE_MAX)
-  expect(longest).toBe('⏳ reader on the web 3m ~60%, ⏳ implementer on the web 1m ~20% · Budget 214%')
+  expect(LINE_MAX_NARROW).toBe(34)
+  expect(longest[LINE_MAX]).toBe('⏳ 2 Subagents running · Budget left: -4.5M · usage: Weekly 100% Fable 100%')
+  expect(longest[LINE_MAX_NARROW]).toBe('⏳ 1 Subagent · Budget left: -12.3M')
+  // more than one beside the longest budget: the bare count, the budget whole
+  expect(statusText({ ...FAR, left: { points: -99.9, tokens: -12345678 } } as any, [], null, T0, SETS.two as any, LINE_MAX_NARROW)).toBe('⏳2 · Budget left: -12.3M')
   // the line never shows an assignment, whatever the room; where one shows (the toasts, the row) it is never longer than TASK_MAX
   expect(TASK_MAX).toBe(60)
-  expect(agentPart(described(SETS.one as any), T0, 500)).toBe('⏳ reader on the web 3m ~60%')
+  expect(agentPart(described(SETS.one as any), T0, 500)).toBe('⏳ 1 Subagent running')
   expect(backgroundText(described(SETS.one as any), T0, 500)).toBe('In the background: ⏳ reader: Auto-reload on plugin update when the desktop app has insta…, on the web 3m ~60%')
   expect(roleOf('general-purpose')).toBe('general')
   expect(roleOf('someplugin:very-long-agent-name')).toBe('very-long-a…')
@@ -1005,14 +1109,14 @@ test('the toasts and the row are one line each, within 120, however many run and
   }
   // the 5-minute toast: by name while they fit, then the count
   expect(progressText(six, T0)).toBe('⏳ still running: general 12m, very-long-a… 9m, implementer 7m, verifier 5m, explore 3m, researcher 1m.')
-  expect(progressText(twelve, T0)).toBe('⏳ 12 Agents are still running, the longest for 12m.')
+  expect(progressText(twelve, T0)).toBe('⏳ 12 Subagents are still running, the longest for 12m.')
   expect(progressText(SETS.two as any, T0)).toBe('⏳ still running: reader 3m, implementer 1m.')
   // an agent without a description has no assignment part
   expect(startedText(SETS.one[0] as any, SETS.one as any)).toBe('▶️ reader is running on Haiku 5.5 medium.')
   expect(startedText(SETS.two[1] as any, SETS.two as any)).toBe('▶️ implementer is running on Opus 5.5 high; reader is also running.')
-  expect(doneText(six[1], 9 * 60000, 123456, six.slice(2))).toBe('✅ very-long-a… is done after 9m, 123k tokens; 4 Agents are still running.')
+  expect(doneText(six[1], 9 * 60000, 123456, six.slice(2))).toBe('✅ very-long-a… is done after 9m, 123k tokens; 4 Subagents are still running.')
   expect(doneText(SETS.two[0] as any, 60000, 1000, [SETS.two[1]] as any)).toBe('✅ reader is done after 1m, 1k tokens; implementer is still running.')
-  expect(backgroundText(six, T0, 40)).toBe('⏳ 6 Agents are running in the background')
+  expect(backgroundText(six, T0, 43)).toBe('⏳ 6 Subagents are running in the background')
   // a long assignment: who else runs goes first, then the assignment's end
   const long = described(SETS.two as any)
   expect(startedText(long[1], long)).toBe('▶️ implementer is running "Auto-reload on plugin update when the desktop app has insta…" on Opus 5.5 high.')
@@ -1049,105 +1153,88 @@ const HISTORY = { 'pacing:reader': [4 * 60000, 5 * 60000, 6 * 60000] }
 const IMPL = { id: 'i', type: 'pacing:implementer', model: 'claude-fable-5-2', effort: 'high', description: 'Auto-reload on plugin update', startedAt: T0 - 2 * 60000, background: false, runs: [3 * 60000, 200000, 4 * 60000], step: 'editing' } as any
 const READER = { id: 'r', type: 'pacing:reader', model: 'claude-haiku-5-5', effort: 'medium', description: 'Read the test logs', startedAt: T0 - 3 * 60000, background: false, runs: HISTORY['pacing:reader'], step: 'searching' } as any
 const VERIFIER = { id: 'v', type: 'pacing:verifier', model: 'claude-haiku-5-5', effort: 'medium', description: 'Run the suite', startedAt: T0 - 30000, background: false, runs: [], step: null } as any
-const J77 = { ...FAR, level: 'ahead', ofBudget: 77 } as any
+const J77 = { ...FAR, level: 'ahead', ofBudget: 77, left: { points: 10.7, tokens: 850000 } } as any
 // the same implementer where its kind has no finished runs yet: no usual length, no time left
 const FIRST = { ...IMPL, runs: [] } as any
 
-test('the forms the user approved: the line without the assignment (0.9.12), the toasts with it, word for word after the icon', async () => {
-  // the status line: the name, the step, the time, the progress; "is running" before a step is known
-  expect(statusText(J77, [], null, T0, [IMPL])).toBe('⏳ implementer editing 2m ~60% · Budget 77% · usage: Weekly 100% Fable 100%')
-  expect(agentPart([{ ...IMPL, step: null, runs: [] }], T0, 80)).toBe('⏳ implementer is running 2m')
-  expect(agentPart([{ ...IMPL, part: { done: 2, total: 4, said: true } }], T0, 80)).toBe('⏳ implementer editing 2m part 2 of 4')
+test('the forms the user approved: the line with the count alone (0.9.13), the toasts with the assignment, word for word after the icon', async () => {
+  // the status line: how many run, nothing of who they are or what they do
+  expect(statusText(J77, [], null, T0, [IMPL])).toBe('⏳ 1 Subagent running · Budget left: 850K · usage: Weekly 100% Fable 100%')
+  expect(agentPart([{ ...IMPL, step: null, runs: [] }], T0, 80)).toBe('⏳ 1 Subagent running')
+  expect(agentPart([{ ...IMPL, part: { done: 2, total: 4, said: true } }, READER], T0, 80)).toBe('⏳ 2 Subagents running')
   // the toasts keep the assignment
   expect(startedText(FIRST, [FIRST])).toBe('▶️ implementer is running "Auto-reload on plugin update" on Fable 5.2 high.')
   // and the others of the same shape
   expect(startedText(FIRST, [FIRST, READER])).toBe('▶️ implementer is running "Auto-reload on plugin update" on Fable 5.2 high; reader is also running.')
   expect(startedText(FIRST, [FIRST, READER, VERIFIER])).toBe('▶️ implementer is running "Auto-reload on plugin update" on Fable 5.2 high; reader and verifier are also running.')
-  expect(startedText(FIRST, [FIRST, READER, VERIFIER, { ...VERIFIER, id: 'w' }])).toBe('▶️ implementer is running "Auto-reload on plugin update" on Fable 5.2 high; 3 Agents are also running.')
+  expect(startedText(FIRST, [FIRST, READER, VERIFIER, { ...VERIFIER, id: 'w' }])).toBe('▶️ implementer is running "Auto-reload on plugin update" on Fable 5.2 high; 3 Subagents are also running.')
   expect(doneText(IMPL, 3 * 60000, 41000, [])).toBe('✅ implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; nothing else is running.')
   expect(doneText(IMPL, 3 * 60000, 41000, [READER])).toBe('✅ implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; reader is still running.')
-  expect(doneText(IMPL, 3 * 60000, 41000, [READER, VERIFIER, { ...VERIFIER, id: 'w' }])).toBe('✅ implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; 3 Agents are still running.')
+  expect(doneText(IMPL, 3 * 60000, 41000, [READER, VERIFIER, { ...VERIFIER, id: 'w' }])).toBe('✅ implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; 3 Subagents are still running.')
   expect(progressText([{ ...IMPL, startedAt: T0 - 12 * 60000, runs: [20 * 60000, 20 * 60000, 20 * 60000] }], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 12m ~60%, about 8m left.')
 })
 
-test('one agent, step by step as the room shrinks: the progress goes, then the step, then the time and "is running"; never the assignment', async () => {
-  const one = [IMPL]
-  expect(agentPart(one, T0, 200)).toBe('⏳ implementer editing 2m ~60%')
-  expect(agentPart(one, T0, 29)).toBe('⏳ implementer editing 2m ~60%')
-  expect(agentPart(one, T0, 28)).toBe('⏳ implementer editing 2m')
-  expect(agentPart(one, T0, 24)).toBe('⏳ implementer editing 2m')
-  // without the step the agent "is running", which is no shorter here: the name alone
-  expect(agentPart(one, T0, 23)).toBe('⏳ implementer')
-  expect(agentPart(one, T0, 13)).toBe('⏳ implementer')
-  // a lone named agent never becomes "1 Agent": the bare count
-  expect(agentPart(one, T0, 12)).toBe('⏳1')
-  // a step longer than "is running" gives way to it before the time goes
-  const wordy = [{ ...IMPL, step: 'exitplanmode' }]
-  expect(agentPart(wordy, T0, 29)).toBe('⏳ implementer exitplanmode 2m')
-  expect(agentPart(wordy, T0, 28)).toBe('⏳ implementer is running 2m')
-  // no step known: "is running", and the progress last as ever
-  const idle = [{ ...IMPL, step: null }]
-  expect(agentPart(idle, T0, 32)).toBe('⏳ implementer is running 2m ~60%')
-  expect(agentPart(idle, T0, 31)).toBe('⏳ implementer is running 2m')
-  expect(agentPart(idle, T0, 26)).toBe('⏳ implementer')
-  // in the line: the usage gives way before any of the agent does, the per-model figure first
-  expect(statusText(J77, [], null, T0, idle)).toBe('⏳ implementer is running 2m ~60% · Budget 77% · usage: Weekly 100%')
-  expect(statusText({ ...J77, premium: null }, [], null, T0, one)).toBe('⏳ implementer editing 2m ~60% · Budget 77% · usage: Weekly 100%')
-})
-
-test('two and three agents: the same steps, for all of them at each step; then the names, the count as a sentence, the bare count', async () => {
-  const two = [IMPL, READER], three = [IMPL, READER, VERIFIER]
-  expect(agentPart(two, T0, 57)).toBe('⏳ implementer editing 2m ~60%, ⏳ reader searching 3m ~60%')
-  expect(agentPart(two, T0, 56)).toBe('⏳ implementer editing 2m, ⏳ reader searching 3m')
-  expect(agentPart(two, T0, 47)).toBe('⏳ implementer editing 2m, ⏳ reader searching 3m')
-  expect(agentPart(two, T0, 46)).toBe('⏳ implementer, ⏳ reader')
-  expect(agentPart(two, T0, 23)).toBe('⏳ implementer, ⏳ reader')
-  expect(agentPart(two, T0, 22)).toBe('⏳ 2 Agents are running')
-  expect(agentPart(two, T0, 21)).toBe('⏳ 2 Agents')
-  expect(agentPart(two, T0, 9)).toBe('⏳2')
-  // in the line of 75: two fit whole, with their steps, times and progress
-  expect(statusText(J77, [], null, T0, two)).toBe('⏳ implementer editing 2m ~60%, ⏳ reader searching 3m ~60% · Budget 77%')
-  expect(statusText(J77, [], null, T0, [{ ...IMPL, part: { done: 2, total: 4, said: true } }, { ...READER, part: { done: 1, total: 3 } }])).toBe('⏳ implementer editing 2m, ⏳ reader searching 3m · Budget 77%')
-  // three: the one without a step "is running" beside the two that have one
-  expect(agentPart(three, T0, 84)).toBe('⏳ implementer editing 2m ~60%, ⏳ reader searching 3m ~60%, ⏳ verifier is running 30s')
-  expect(agentPart(three, T0, 83)).toBe('⏳ implementer editing 2m, ⏳ reader searching 3m, ⏳ verifier is running 30s')
-  expect(agentPart(three, T0, 74)).toBe('⏳ implementer editing 2m, ⏳ reader searching 3m, ⏳ verifier is running 30s')
-  expect(agentPart(three, T0, 73)).toBe('⏳ implementer, ⏳ reader, ⏳ verifier')
-  expect(agentPart(three, T0, 35)).toBe('⏳ implementer, ⏳ reader, ⏳ verifier')
-  expect(agentPart(three, T0, 34)).toBe('⏳ 3 Agents are running')
-  expect(agentPart(three, T0, 21)).toBe('⏳ 3 Agents')
-  expect(agentPart(three, T0, 9)).toBe('⏳3')
-  // three with their times pass 75 beside the budget: the names; the usage shows where what is left has room for it
-  expect(statusText(J77, [], null, T0, three)).toBe('⏳ implementer, ⏳ reader, ⏳ verifier · Budget 77% · usage: Weekly 100%')
-  // the order holds at every width: no progress without the step, no step without the time, and nothing of an assignment
+test('the agent part as the room shrinks: the count with "running", then without it, then the bare count; side sessions counted in', async () => {
+  const one = [IMPL], two = [IMPL, READER], three = [IMPL, READER, VERIFIER]
+  expect(agentPart(one, T0, 200)).toBe('⏳ 1 Subagent running')
+  expect(agentPart(one, T0, 20)).toBe('⏳ 1 Subagent running')
+  expect(agentPart(one, T0, 19)).toBe('⏳ 1 Subagent')
+  expect(agentPart(one, T0, 12)).toBe('⏳ 1 Subagent')
+  expect(agentPart(one, T0, 11)).toBe('⏳1')
+  expect(agentPart(two, T0, 21)).toBe('⏳ 2 Subagents running')
+  expect(agentPart(two, T0, 20)).toBe('⏳ 2 Subagents')
+  expect(agentPart(two, T0, 13)).toBe('⏳ 2 Subagents')
+  expect(agentPart(two, T0, 12)).toBe('⏳2')
+  expect(agentPart(three, T0, 80)).toBe('⏳ 3 Subagents running')
+  expect(agentPart([], T0, 80)).toBe('')
+  // nothing of a name, a step, a time, a progress or an assignment, at any width
   for (let room = 2; room <= 160; room++) {
-    for (const list of [[IMPL], two, three]) {
+    for (const list of [one, two, three]) {
       const p = agentPart(list, T0, room)
       expect(chars(p)).toBeLessThanOrEqual(Math.max(room, 2))
-      if (p.includes('~')) expect(p).toContain(' editing')
-      if (p.includes(' editing')) expect(p).toMatch(/ \d+[smh]/)
-      expect(p).not.toContain('Auto-reload')
-      expect(p).not.toContain(':')
-      expect(p).not.toContain('…')
+      expect(p).toMatch(/^⏳( \d+ Subagents?( running)?|\d+)$/)
     }
   }
 })
 
+test('the line in a terminal (75) and in the desktop app (34): the agents, the budget whole, the usage as far as it fits, the per-model figure first to go', async () => {
+  const two = [IMPL, READER]
+  const J = { all: 36, premium: 40, premiumLabel: 'Fable 5.2', left: { points: 10.7, tokens: 850000 }, level: 'ahead' } as any
+  // the terminal
+  expect(statusText(J, [], null, T0, [])).toBe('Budget left: 850K · usage: Weekly 36% Fable 40%')
+  expect(statusText(J, [], null, T0, [IMPL])).toBe('⏳ 1 Subagent running · Budget left: 850K · usage: Weekly 36% Fable 40%')
+  expect(statusText(J77, [], null, T0, [IMPL, READER, VERIFIER])).toBe('⏳ 3 Subagents running · Budget left: 850K · usage: Weekly 100% Fable 100%')
+  // the desktop app: "running" goes, then the usage, never the budget
+  expect(statusText(J, [], null, T0, [], LINE_MAX_NARROW)).toBe('Budget left: 850K')
+  expect(statusText(J, [], null, T0, [IMPL], LINE_MAX_NARROW)).toBe('⏳ 1 Subagent · Budget left: 850K')
+  expect(statusText(J, [], null, T0, two, LINE_MAX_NARROW)).toBe('⏳ 2 Subagents · Budget left: 850K')
+  expect(statusText({ ...J, left: { points: -2, tokens: -120000 } }, [], null, T0, two, LINE_MAX_NARROW)).toBe('⏳ 2 Subagents · Budget left: -120K')
+  // the usage where it fits whole: the weekly figure alone before none
+  const ten = Array.from({ length: 10 }, (_, i) => ({ ...READER, id: 'r' + i }))
+  expect(statusText({ ...FAR, left: { points: -99.9, tokens: -12345678 } } as any, [], null, T0, ten)).toBe('⏳ 10 Subagents running · Budget left: -12.3M · usage: Weekly 100%')
+  // a side session's "sub" where it costs the agents nothing
+  expect(statusText({ ...J, spawned: true }, [], null, T0, [], LINE_MAX_NARROW)).toBe('sub · Budget left: 850K')
+  expect(statusText({ ...J, spawned: true }, [], null, T0, [IMPL], LINE_MAX_NARROW)).toBe('⏳ 1 Subagent · Budget left: 850K')
+  // the room by the surfaces that draw the session: the narrowest counts
+  expect(lineMaxOf(['terminal'])).toBe(LINE_MAX)
+  expect(lineMaxOf(['desktop'])).toBe(LINE_MAX_NARROW)
+  expect(lineMaxOf(['terminal', 'desktop'])).toBe(LINE_MAX_NARROW)
+  expect(lineMaxOf(['mobile'])).toBe(LINE_MAX_NARROW)
+  expect(lineMaxOf(['vscode'])).toBe(LINE_MAX)
+  expect(lineMaxOf([])).toBe(LINE_MAX)
+  expect(lineMaxOf(undefined)).toBe(LINE_MAX)
+})
+
 test('an agent without a description has no assignment part, in the line, the row or the toasts', async () => {
   const bare = [{ ...READER, description: undefined }]
-  expect(agentPart(bare, T0, 80)).toBe('⏳ reader searching 3m ~60%')
-  expect(agentPart(bare, T0, 25)).toBe('⏳ reader searching 3m')
-  expect(agentPart(bare, T0, 20)).toBe('⏳ reader')
-  expect(agentPart([{ ...READER, description: '  ', step: null }], T0, 80)).toBe('⏳ reader is running 3m ~60%')
-  expect(agentPart([{ ...READER, description: undefined, step: null, runs: [] }], T0, 80)).toBe('⏳ reader is running 3m')
-  expect(statusText(J77, [], null, T0, bare)).toBe('⏳ reader searching 3m ~60% · Budget 77% · usage: Weekly 100% Fable 100%')
+  expect(agentPart(bare, T0, 80)).toBe('⏳ 1 Subagent running')
+  expect(statusText(J77, [], null, T0, bare)).toBe('⏳ 1 Subagent running · Budget left: 850K · usage: Weekly 100% Fable 100%')
   expect(startedText(bare[0], bare)).toBe('▶️ reader is running on Haiku 5.5 medium, about 5m.')
   expect(doneText(bare[0], 3 * 60000, 41000, [])).toBe('✅ reader is done after 3m, 41k tokens; nothing else is running.')
   expect(progressText(bare, T0)).toBe('⏳ still running: reader searching 3m ~60%, about 2m left.')
   expect(backgroundText(bare, T0)).toBe('In the background: ⏳ reader searching 3m ~60%')
   // a description over several lines is one line, where it shows
   expect(backgroundText([{ ...READER, description: 'Read\n  the logs', step: null, runs: [] }], T0)).toBe('In the background: ⏳ reader is running: Read the logs 3m')
-  expect(agentPart([{ ...READER, description: 'Read\n  the logs', step: null, runs: [] }], T0, 80)).toBe('⏳ reader is running 3m')
 })
 
 test('the 5-minute toast and the row follow the same order and shrink the same way, each one line within 120', async () => {
@@ -1165,8 +1252,8 @@ test('the 5-minute toast and the row follow the same order and shrink the same w
   expect(backgroundText(two, T0, 117)).toBe('In the background: ⏳ implementer is running: Auto-reload on plugin up… 2m, ⏳ reader is running: Read the test logs 3m')
   expect(backgroundText(two, T0, 75)).toBe('In the background: ⏳ implementer is running 2m, ⏳ reader is running 3m')
   expect(backgroundText(two, T0, 60)).toBe('In the background: ⏳ implementer, ⏳ reader')
-  expect(backgroundText(two, T0, 41)).toBe('⏳ 2 Agents are running in the background')
-  expect(backgroundText(two, T0, 30)).toBe('⏳ 2 Agents are running')
+  expect(backgroundText(two, T0, 41)).toBe('⏳ 2 Subagents are running')
+  expect(backgroundText(two, T0, 24)).toBe('⏳ 2 Subagents')
   for (const m of [progressText(three, T0), backgroundText(three, T0), backgroundText(two, T0, 50)]) {
     expect(chars(m)).toBeLessThanOrEqual(MSG_MAX)
     expect(m).not.toContain('\n')
@@ -1188,12 +1275,12 @@ test('in a session: the history from the store gives the estimate, the agent\'s 
   await $.session.measure(measure(10))
   await spawn($, 'pacing:reader')
   await clock.advance(3 * 60000)
-  expect(status.at(-1)).toBe('⏳ reader is running 3m ~60% · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   await $.tool.call({ tool: 'Grep', pattern: 'x', agentId: 'ag1' } as any)
   await clock.advance(2 * 60000)
   // capped at 95 % at the median and past it, the step in the toast
   expect(seen.toasts.at(-1)).toBe('⏳ still running: reader "a task", searching 5m ~95%.')
-  expect(status.at(-1)).toBe('⏳ reader searching 5m ~95% · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   // /pacing-status: the same order, and the model the agent runs on
   expect((await $.command.run({ command: 'pacing-status', args: '' } as any)).text.split('\n')[1]).toBe('Running: reader: a task, searching 5m ~95% (Haiku 5.5)')
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
@@ -1208,7 +1295,7 @@ test('an engine without a store: no estimate, the time as before', async ($, on)
   await $.session.measure(measure(10))
   await spawn($, 'pacing:reader')
   await clock.advance(3 * 60000)
-  expect(status.at(-1)).toBe('⏳ reader is running 3m · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
 })
 
 // ---- an offer to switch the session's model or effort ----
@@ -1245,7 +1332,7 @@ const switchText = async ($: any) => {
 test('the switch: wording by case, the urgent ones first', async () => {
   const base = { premiumModelId: 'claude-fable-5-2', premiumLabel: 'Fable 5.2', recommend: REC_OPUS_HIGH }
   expect(switchOffer({ ...base, premiumOut: true }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'out', urgent: true, text: 'Fable 5.2 is out until the reset. Switch this session to Opus 5.5 high.' })
-  expect(switchOffer({ ...base, premiumHeld: true }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'held', urgent: true, text: 'Fable 5.2\'s own meter is over its line. Switch to Opus 5.5 high; Fable stays for hard tasks.' })
+  expect(switchOffer({ ...base, premiumHeld: true }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'held', urgent: true, text: 'Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 high; Fable stays for hard tasks.' })
   expect(switchOffer({ ...base, recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'model', urgent: false, text: 'This week\'s budget suggests Opus 5.5 medium for this session.' })
   // the right model, another effort
   expect(switchOffer({ ...base, recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }, 'claude-opus-5-5', 'high')).toMatchObject({ kind: 'model' })
@@ -1269,7 +1356,7 @@ test('Fable out: the row in the warning colour; Switch runs /model and /effort a
   await ui.press({ key: 'pacing-switch' })
   await ui.unmount()
   expect(seen.runs).toEqual(['/model claude-opus-5-5', '/effort high'])
-  expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 high.')
+  expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.')
   expect(await switchText($)).toBe(undefined)
 })
 
@@ -1293,7 +1380,7 @@ test('once per suggestion: Not now holds until the recommendation changes', asyn
   await clock.advance(31 * 60000)
   await $.session.measure(measure(10))
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(await switchText($)).toBe('⚠️ Fable 5.2\'s own meter is over its line. Switch to Opus 5.5 high; Fable stays for hard tasks.')
+  expect(await switchText($)).toBe('⚠️ Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 high; Fable stays for hard tasks.')
   expect(seen.runs).toEqual([])
 })
 
@@ -1350,6 +1437,84 @@ test('a side session another session drives gets no switch row', async ($, on) =
   expect(await switchText($)).toBe(undefined)
 })
 
+// the engine's store and the session's id, for what the module keeps
+const storeEngine = (on: any) => {
+  const store: Record<string, any> = {}
+  on('session.id', () => ({ value: 'local_s1' }))
+  on('store.get', (_: unknown, e: any) => ({ value: store[e.key] === undefined ? undefined : JSON.parse(JSON.stringify(store[e.key])) }))
+  on('store.set', (_: unknown, e: any) => { store[e.key] = JSON.parse(JSON.stringify(e.value)); return { value: undefined } })
+  on('store.delete', (_: unknown, e: any) => { delete store[e.key]; return { value: undefined } })
+  return store
+}
+const FABLE_MEDIUM = { model: 'claude-fable-5-2', label: 'Fable 5.2', effort: 'medium' }
+
+test('Switch: a read-back that still names the old model is read again after a moment, the commands trusted; the toast says the menu may lag; the row does not come back', async ($, on) => {
+  engine(on)
+  on('process.run', () => ({ value: switchReading({ premiumOut: true, recommend: REC_OPUS_HIGH }) }))
+  const clock = mock.clock(on, { now: T0 })
+  // the engine goes on naming Fable 5.2 and CLAUDE_EFFORT medium after the commands ran
+  const seen = switchEngine(on, { effort: 'medium', sticky: true })
+  const store = storeEngine(on)
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-switch' })
+  await ui.unmount()
+  expect(seen.runs).toEqual(['/model claude-opus-5-5', '/effort high'])
+  // right after the press: no failure said, and no word yet
+  expect(seen.toasts).toEqual([])
+  await clock.advance(READ_BACK_LAG)
+  expect(seen.toasts).toEqual(['🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.'])
+  expect(store['switch:local_s1']).toEqual({ model: 'claude-opus-5-5', effort: 'high' })
+  // the next turn runs on Opus 5.5: its usage names the model from here; the effort stays as set
+  await $.turn.complete(turn('claude-opus-5-5', 1))
+  expect(await switchText($)).toBe(undefined)
+  expect(store['switch:local_s1']).toEqual({ model: null, effort: 'high' })
+  // a command that answered with an error is not trusted
+  expect(commandFailed({ text: 'no', exitCode: 1 })).toBe(true)
+  expect(commandFailed({ text: 'Set model to Opus 5.5' })).toBe(false)
+  expect(commandFailed(undefined)).toBe(false)
+  // only an effort switched: no word on the menu
+  expect(switchedText(FABLE_MEDIUM, 'claude-fable-5-2', 'medium', 'claude-fable-5-2')).toBe('🔁 this session now runs on Fable 5.2 medium.')
+})
+
+test('a typed /effort is noted: the session runs at it, though CLAUDE_EFFORT still says the old one, and the row offering it goes', async ($, on) => {
+  engine(on)
+  on('process.run', () => ({ value: switchReading({ recommend: FABLE_MEDIUM }) }))
+  const seen = switchEngine(on, { sticky: true })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect(await switchText($)).toBe('🔁 This week\'s budget suggests Fable 5.2 medium for this session.')
+  // an effort the command does not take is not noted
+  await $.command.run({ command: 'effort', args: 'turbo' } as any)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect(await switchText($)).toBe('🔁 This week\'s budget suggests Fable 5.2 medium for this session.')
+  await $.command.run({ command: 'effort', args: 'medium' } as any)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect(await switchText($)).toBe(undefined)
+  expect(seen.runs).toEqual(['/effort turbo', '/effort medium'])
+})
+
+test('the effort last set is kept across a reload: the new copy offers no switch to what is set already', async ($, on) => {
+  engine(on)
+  on('process.run', () => ({ value: switchReading({ recommend: FABLE_MEDIUM }) }))
+  const clock = mock.clock(on, { now: T0 })
+  switchEngine(on, { sticky: true })
+  const store = storeEngine(on)
+  on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+  on('command.register', (_: unknown, e: any) => ({ value: { command: e.name } }))
+  on('tool.call', () => ({ result: {} }))
+  store['switch:local_s1'] = { model: null, effort: 'medium' }
+  await start($)
+  await clock.settle()
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect(await switchText($)).toBe(undefined)
+})
+
 // ---- a fresh line at load ----
 
 // the engine beneath at a load: session.start, the command, the meters the
@@ -1386,7 +1551,7 @@ test('a load in a session the user detached: the line drawn afresh at once, with
   const n = status.length
   await start($)
   await settled(status, n)
-  expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 40%')
   // from the stored figures, dry: nothing logged
   expect(seen.runs.at(-1)!.slice(2)).toEqual(['--all', '10', '--reset', RESET, '--source', 'hook', '--five', '4', '--five-reset', '2026-11-13T15:00:00.000Z', '--dry'])
 })
@@ -1397,7 +1562,7 @@ test('a load with no meters yet redraws from a dry run; the first reading after 
   const seen = loadEngine(on, { state: { all: 21, reset: RESET }, answers: () => next })
   await start($)
   await settled(status, 0)
-  expect(status.at(-1)).toBe('Budget 105% · usage: Weekly 21% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: -1% · usage: Weekly 21% Fable 40%')
   expect(seen.runs.length).toBe(1)
   expect(seen.runs[0]).toContain('--dry')
   // the first response: a full reading at once, no 30 minutes, no point moved
@@ -1407,7 +1572,7 @@ test('a load with no meters yet redraws from a dry run; the first reading after 
   expect(seen.runs[1]).not.toContain('--dry')
   // over -> ahead between a stored figure and a fresh one is no change the user was told of
   expect(seen.toasts).toEqual([])
-  expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 40%')
 })
 
 test('a load with the meters the last response reported: a full reading at once, which counts as the last one', async ($, on) => {
@@ -1420,7 +1585,7 @@ test('a load with the meters the last response reported: a full reading at once,
   await settled(status, 0)
   expect(seen.runs.length).toBe(1)
   expect(seen.runs[0].slice(2)).toEqual(['--all', '12', '--reset', RESET, '--source', 'hook', '--five', '3', '--five-reset', '2026-11-13T15:00:00.000Z'])
-  expect(status.at(-1)).toBe('Budget 60% · usage: Weekly 12% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 8% · usage: Weekly 12% Fable 40%')
   // the same figure moments later: no second run
   await $.session.measure(measure(12))
   expect(seen.runs.length).toBe(1)
@@ -1452,8 +1617,8 @@ test('an agent shows the moment its Agent call comes, before the spawn; the spaw
   })
   await $.session.measure(measure(10))
   await $.tool.call({ tool: 'Agent', description: 'read logs', prompt: 'p', subagent_type: 'pacing:reader', model: 'haiku', effort: 'medium' } as any)
-  expect(during[0]).toBe('⏳ reader is running 0s · Budget 50% · usage: Weekly 10% Fable 40%')
-  expect(during[1]).toBe('⏳ reader is running 0s · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(during[0]).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
+  expect(during[1]).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   // one agent, not two: the provisional entry was taken over
   expect(seen.toasts).toEqual(['▶️ reader is running "read logs" on Haiku 5.5 medium.'])
 })
@@ -1466,7 +1631,7 @@ test('an Agent call that spawns nothing leaves the line when it ends', async ($,
   on('tool.call', { tool: 'Agent' }, () => ({ deny: 'not now' }))
   await $.session.measure(measure(10))
   await $.tool.call({ tool: 'Agent', description: 'x', prompt: 'p', subagent_type: 'pacing:verifier' } as any)
-  expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 40%')
 })
 
 test('every 5 seconds while an agent runs; the timer stops when nothing runs', async ($, on) => {
@@ -1476,14 +1641,41 @@ test('every 5 seconds while an agent runs; the timer stops when nothing runs', a
   agentEngine(on, { list: () => [{ id: 'ag1', status: 'running' }] })
   await $.session.measure(measure(10))
   await spawn($, 'pacing:reader')
+  const drawn = status.length
   await clock.advance(5000)
-  expect(status.at(-1)).toBe('⏳ reader is running 5s · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.length).toBe(drawn + 1)
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   await clock.advance(5000)
-  expect(status.at(-1)).toBe('⏳ reader is running 10s · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.length).toBe(drawn + 2)
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
   const n = status.length
   await clock.advance(60000)
   expect(status.length).toBe(n)
+})
+
+test('in the desktop app the line keeps within 34: the count without "running", the budget whole, the usage only where it fits; a terminal alone keeps 75', async ($, on) => {
+  const status = engine(on)
+  big(on)
+  mock.clock(on, { now: T0 })
+  agentEngine(on, { list: () => [{ id: 'ag1', status: 'running' }, { id: 'ag2', status: 'running' }] })
+  let surfaces = ['terminal', 'desktop']
+  let asked = 0
+  on('session.surfaces', () => (asked++, { value: surfaces }))
+  on('session.detach', (_: unknown, e: any) => ({ ...e }))
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('Budget left: 10%')
+  await spawn($, 'pacing:reader')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent · Budget left: 10%')
+  await spawn($, 'pacing:implementer')
+  expect(status.at(-1)).toBe('⏳ 2 Subagents · Budget left: 10%')
+  // asked once, and kept
+  await $.session.measure(measure(10))
+  expect(asked).toBe(1)
+  // the desktop app detaches: asked again, the terminal's room
+  surfaces = ['terminal']
+  await $.session.detach({ clientId: 'desktop:default' } as any)
+  expect(asked).toBe(2)
+  expect(status.at(-1)).toBe('⏳ 2 Subagents running · Budget left: 10% · usage: Weekly 10% Fable 40%')
 })
 
 // the app's list_sessions, as a tool answers it: this session is local_main
@@ -1517,20 +1709,20 @@ test('a side session this session started: in the line while it works, a toast w
   running = true
   await $.tool.call({ tool: 'mcp__ccd_session__start_session', title: 'Task s1', initiation: 'user_asked' } as any)
   await clock.advance(5000)
-  expect(status.at(-1)).toBe('⏳ Task s1 is running 5s · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   expect(seen.toasts).toEqual(['▶️ side session Task s1 is running.'])
   await clock.advance(20000)
-  expect(status.at(-1)).toBe('⏳ Task s1 is running 25s · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   // its turn ends: gone at the next poll
   running = false
   await clock.advance(15000)
   expect(seen.toasts.at(-1)).toBe('✅ side session Task s1 ended its turn after 35s; nothing else is running.')
-  expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 40%')
   // a session another one started is not this one's
   expect(status.join('\n')).not.toContain('other')
 })
 
-test('at load, side sessions already working show without a toast; an agent and a side session are one count of Agents', async ($, on) => {
+test('at load, side sessions already working show without a toast; an agent and a side session are one count of Subagents', async ($, on) => {
   const status = engine(on)
   big(on)
   mock.clock(on, { now: T0 })
@@ -1539,9 +1731,9 @@ test('at load, side sessions already working show without a toast; an agent and 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
   await new Promise(r => setTimeout(r, 50))
   expect(seen.toasts).toEqual([])
-  expect(status.at(-1)).toBe('⏳ Task s1 is running 0s · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   await $.agent.spawn({ prompt: 'p', description: 'x', subagentType: 'pacing:reader', model: 'haiku' } as any)
-  expect(status.at(-1)).toBe('⏳ Task s1 is running 0s, ⏳ reader is running 0s · Budget 50%')
+  expect(status.at(-1)).toBe('⏳ 2 Subagents running · Budget left: 10% · usage: Weekly 10% Fable 40%')
 })
 
 test('no side sessions: one look at load, then none, however long the session runs', async ($, on) => {
@@ -1560,25 +1752,20 @@ test('no side sessions: one look at load, then none, however long the session ru
   expect(seen.polls).toBe(1)
 })
 
-test('a side session by its short title like any agent; the count only for more than one; a lone side session too long for the room is "1 Agent is running"', async () => {
+test('a side session counts as a subagent in the line; the toasts name it by its short title', async () => {
   const a = { id: 'a', type: 'pacing:reader', startedAt: T0 - 60000 } as any
   const s = { id: 's', kind: 'session', type: 'pacing-pace-fable-met-4', label: 'Pacing: pace Fable meter…', startedAt: T0 - 120000 } as any
-  expect(countText([a, s])).toBe('2 Agents')
-  expect(agentPart([s], T0, 80)).toBe('⏳ Pacing: pace Fable meter… is running 2m')
-  expect(agentPart([s], T0, 22)).toBe('⏳ 1 Agent is running')
-  expect(agentPart([s], T0, 12)).toBe('⏳ 1 Agent')
-  expect(agentPart([a, s], T0, 80)).toBe('⏳ reader is running 1m, ⏳ Pacing: pace Fable meter… is running 2m')
-  expect(agentPart([a, s], T0, 40)).toBe('⏳ reader, ⏳ Pacing: pace Fable meter…')
-  expect(agentPart([a, s], T0, 22)).toBe('⏳ 2 Agents are running')
-  expect(agentPart([a, s], T0, 12)).toBe('⏳ 2 Agents')
+  expect(countText([a, s])).toBe('2 Subagents')
+  expect(agentPart([s], T0, 80)).toBe('⏳ 1 Subagent running')
+  expect(agentPart([s], T0, 12)).toBe('⏳ 1 Subagent')
+  expect(agentPart([a, s], T0, 80)).toBe('⏳ 2 Subagents running')
+  expect(agentPart([a, s], T0, 13)).toBe('⏳ 2 Subagents')
   expect(agentPart([a, s], T0, 3)).toBe('⏳2')
   // with the budget, within the width
-  expect(statusText({ all: 36, ofBudget: 77, level: 'ahead' } as any, [], null, T0, [s])).toBe('⏳ Pacing: pace Fable meter… is running 2m · Budget 77% · usage: Weekly 36%')
-  expect(statusText({ all: 99, ofBudget: 214, level: 'throttle' } as any, [], null, T0, [a, s])).toBe('⏳ reader, ⏳ Pacing: pace Fable meter… · Budget 214% · usage: Weekly 99%')
+  expect(statusText({ all: 36, ofBudget: 77, left: { points: 10.7, tokens: 850000 }, level: 'ahead' } as any, [], null, T0, [s])).toBe('⏳ 1 Subagent running · Budget left: 850K · usage: Weekly 36%')
+  expect(statusText({ all: 99, ofBudget: 214, left: { points: -53.3, tokens: -4530500 }, level: 'throttle' } as any, [], null, T0, [a, s], LINE_MAX_NARROW)).toBe('⏳ 2 Subagents · Budget left: -4.5M')
   expect(chars(statusText({ ...FAR, level: 'throttle' } as any, [], 'Other' as any, T0, [a, s, { ...s, id: 't' }]))).toBeLessThanOrEqual(LINE_MAX)
-  // "Agent" never for a single named in-process agent
-  expect(agentPart([a], T0, 4)).toBe('⏳1')
-  expect(agentPart([a], T0, 9)).toBe('⏳ reader')
+  expect(sessionDoneText(s, 120000, [a])).toBe('✅ side session Pacing: pace Fable meter… ended its turn after 2m; reader is still running.')
 })
 test('the app\'s list_sessions answer as a module gets it: the rows from its text, or from its content items', async () => {
   const rows = [{ sessionId: 'local_a', isRunning: true, startedBy: 'local_main', title: 'A task' }]
@@ -1600,7 +1787,7 @@ test('the app\'s list_sessions answer as a module gets it: the rows from its tex
 const MARK = 'reload:local_s1'
 const manifestOf = (version: string) => JSON.stringify({ name: 'pacing', version })
 const reloadEngine = (on: any, opts: { config?: string; reject?: boolean; hang?: boolean; store?: Record<string, unknown> } = {}) => {
-  const seen = { runs: [] as string[], toasts: [] as string[], store: { ...(opts.store ?? {}) } as Record<string, unknown>, manifest: manifestOf('0.9.10') as string | null, code: 'the module as it was loaded' }
+  const seen = { runs: [] as string[], toasts: [] as string[], fills: [] as string[], reject: !!opts.reject, store: { ...(opts.store ?? {}) } as Record<string, unknown>, manifest: manifestOf('0.9.10') as string | null, code: 'the module as it was loaded' }
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
   on('command.register', () => ({ value: { command: 'pacing-status' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000, tokens: 1000, percent: 0 }, rateLimits: [] } }))
@@ -1617,7 +1804,7 @@ const reloadEngine = (on: any, opts: { config?: string; reject?: boolean; hang?:
   })
   on('command.run', (_: unknown, e: any) => {
     seen.runs.push('/' + e.command + (e.args ? ' ' + e.args : ''))
-    if (opts.reject) throw new Error('a module may not run this command')
+    if (seen.reject) throw new Error('a module may not run this command')
     if (opts.hang) return new Promise(() => {})
     return { text: 'Reloaded plugins' }
   })
@@ -1627,8 +1814,23 @@ const reloadEngine = (on: any, opts: { config?: string; reject?: boolean; hang?:
   on('ui.invalidate', () => ({ value: undefined }))
   on('ui.toast', (_: unknown, e: any) => (seen.toasts.push(e.text), { value: undefined }))
   on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
+  on('prompt.fill', (_: unknown, e: any) => (seen.fills.push(e.text), { isFilled: true }))
   on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
   return seen
+}
+// the Reload row's text as drawn now, or undefined
+const reloadRow = async ($: any) => {
+  const ui = await $.ui.mount(BAND)
+  const r = await ui.find({ type: 'Text', text: /is installed/ })
+  await ui.unmount()
+  return r?.text as string | undefined
+}
+// a button of the row pressed, and what it started settled
+const pressRow = async ($: any, clock: any, key: string) => {
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key })
+  await ui.unmount()
+  await clock.settle()
 }
 // a session loaded as 0.9.10 that a person has typed in, its turn ended
 const loadedAndTyped = async ($: any, clock: any) => {
@@ -1642,6 +1844,8 @@ const loadedAndTyped = async ($: any, clock: any) => {
 test('the reload\'s words, and the version a manifest names', async () => {
   expect(reloadedText('0.9.11')).toBe('🔄 updated to 0.9.11 and reloaded.')
   expect(reloadAskText('0.9.11')).toBe('📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.')
+  expect(reloadRowText('0.9.11')).toBe('📦 Pacing 0.9.11 is installed.')
+  expect(RELOAD_ENTER).toBe('📦 Press Enter to reload.')
   expect(versionOf(manifestOf('0.9.11'))).toBe('0.9.11')
   // half-written during a sync, or no version in it: none
   expect(versionOf('{ "name": "pacing", "vers')).toBe(null)
@@ -1762,30 +1966,86 @@ test('during a turn it waits; so it does under a survey and while a subagent of 
   expect(seen.runs).toEqual(['/reload-plugins'])
 })
 
-test('a rejection: the line asking the person to type it, once per version, and no second attempt', async ($, on) => {
+test('a rejection: the Reload row in place of a toast, and no second attempt by itself', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { reject: true })
+  await loadedAndTyped($, clock)
+  expect(await reloadRow($)).toBe(undefined)
+  seen.manifest = manifestOf('0.9.11')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs).toEqual(['/reload-plugins'])
+  expect(seen.toasts).toEqual([])
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  expect(seen.store[MARK]).toBe(undefined)
+  // every later look, at a turn's end or on the timer: nothing more, the row stays
+  await clock.advance(6 * RELOAD_CHECK_EVERY)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(seen.runs.length).toBe(1)
+  expect(seen.toasts).toEqual([])
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  // the next version is a new one: one attempt, the row for it
+  seen.manifest = manifestOf('0.9.12')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(seen.runs.length).toBe(2)
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.12 is installed.')
+})
+
+test('Reload in the row runs /reload-plugins; the copy that stays, its own file unchanged, says "updated" and the row goes', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on, { reject: true })
   await loadedAndTyped($, clock)
   seen.manifest = manifestOf('0.9.11')
   await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.runs).toEqual(['/reload-plugins'])
-  expect(seen.toasts).toEqual(['📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.'])
-  expect(seen.store[MARK]).toBe(undefined)
-  // every later look, at a turn's end or on the timer: nothing
-  await clock.advance(6 * RELOAD_CHECK_EVERY)
-  await $.turn.complete(turn('claude-fable-5-2', 1))
-  await clock.advance(RELOAD_AFTER_TURN)
-  expect(seen.runs.length).toBe(1)
-  expect(seen.toasts.length).toBe(1)
-  // the next version is a new one: one attempt, one line
-  seen.manifest = manifestOf('0.9.12')
-  await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.runs.length).toBe(2)
-  expect(seen.toasts).toEqual(['📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.', '📦 Pacing 0.9.12 is installed: type /reload-plugins to load it.'])
+  seen.reject = false
+  await pressRow($, clock, 'pacing-reload')
+  expect(seen.runs).toEqual(['/reload-plugins', '/reload-plugins'])
+  expect(await reloadRow($)).toBe(undefined)
+  expect(seen.store[MARK]).toEqual({ version: '0.9.11', at: T0 + RELOAD_AFTER_TURN + RELOAD_CHECK_EVERY })
+  await clock.advance(RELOAD_SETTLE)
+  expect(seen.toasts).toEqual(['🔄 updated to 0.9.11 and reloaded.'])
+  expect(seen.fills).toEqual([])
 })
 
-test('a reload that leaves the old code running: one attempt, then the line to type it, and the guard holds', async ($, on) => {
+test('Reload refused: the command goes into the prompt box, one key left', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { reject: true })
+  await loadedAndTyped($, clock)
+  seen.manifest = manifestOf('0.9.11')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  await pressRow($, clock, 'pacing-reload')
+  expect(seen.runs).toEqual(['/reload-plugins', '/reload-plugins'])
+  expect(seen.fills).toEqual(['/reload-plugins'])
+  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
+  expect(await reloadRow($)).toBe(undefined)
+  expect(seen.store[MARK]).toBe(undefined)
+})
+
+test('Not now hides the row for that version only', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { reject: true })
+  await loadedAndTyped($, clock)
+  seen.manifest = manifestOf('0.9.11')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  await pressRow($, clock, 'pacing-reload-not-now')
+  expect(await reloadRow($)).toBe(undefined)
+  await clock.advance(3 * RELOAD_CHECK_EVERY)
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(await reloadRow($)).toBe(undefined)
+  expect(seen.runs.length).toBe(1)
+  expect(seen.toasts).toEqual([])
+  // the next version shows it again
+  seen.manifest = manifestOf('0.9.12')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.12 is installed.')
+})
+
+test('a reload that leaves the old code running: one attempt, then the Reload row, and the guard holds', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on)
@@ -1796,15 +2056,16 @@ test('a reload that leaves the old code running: one attempt, then the line to t
   await clock.advance(RELOAD_CHECK_EVERY)
   expect(seen.runs).toEqual(['/reload-plugins'])
   await clock.advance(RELOAD_SETTLE)
-  expect(seen.toasts).toEqual(['📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.'])
+  expect(seen.toasts).toEqual([])
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
   await clock.advance(6 * RELOAD_CHECK_EVERY)
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(RELOAD_AFTER_TURN)
   expect(seen.runs.length).toBe(1)
-  expect(seen.toasts.length).toBe(1)
+  expect(seen.toasts).toEqual([])
 })
 
-test('a command that never answers is given up after 10 minutes: the line to type it, once', async ($, on) => {
+test('a command that never answers is given up after 10 minutes: the Reload row', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on, { hang: true })
@@ -1814,11 +2075,12 @@ test('a command that never answers is given up after 10 minutes: the line to typ
   expect(seen.runs).toEqual(['/reload-plugins'])
   await clock.advance(RELOAD_CHECK_EVERY)
   expect(seen.toasts).toEqual([])
+  expect(await reloadRow($)).toBe(undefined)
   await clock.advance(RELOAD_GIVE_UP)
-  expect(seen.toasts).toEqual(['📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.'])
+  expect(seen.toasts).toEqual([])
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
   await clock.advance(3 * RELOAD_CHECK_EVERY)
   expect(seen.runs.length).toBe(1)
-  expect(seen.toasts.length).toBe(1)
 })
 
 test('an unreadable manifest is no change, and is read again later', async ($, on) => {
@@ -1841,17 +2103,21 @@ test('an unreadable manifest is no change, and is read again later', async ($, o
   expect(seen.runs).toEqual(['/reload-plugins'])
 })
 
-test('reload off: nothing; so too in a side session nobody types in', async ($, on) => {
+test('reload off: nothing runs by itself; the row at once, and Reload runs it', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on, { config: JSON.stringify({ autoReload: false }) })
   await loadedAndTyped($, clock)
   seen.manifest = manifestOf('0.9.11')
-  await clock.advance(3 * RELOAD_CHECK_EVERY)
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  await clock.advance(2 * RELOAD_CHECK_EVERY)
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(RELOAD_AFTER_TURN)
   expect(seen.runs).toEqual([])
   expect(seen.toasts).toEqual([])
+  await pressRow($, clock, 'pacing-reload')
+  expect(seen.runs).toEqual(['/reload-plugins'])
 })
 
 test('a side session nobody types in is left alone', async ($, on) => {
@@ -1940,10 +2206,10 @@ test('where the usage tool answers, the reading is a full one: its own meters go
   await $.session.measure(measure(35.6, [{ kind: 'five_hour', percentUsed: 11, resetsAt: '2026-11-13T14:59:00.000Z' }]))
   expect(seen.calls).toBe(1)
   expect(seen.runs.length).toBe(1)
-  // the tool's figures, not the engine's two windows
+  // the tool's figures, not the engine's two windows; the turn's tokens since the last reading
   expect(seen.runs[0].slice(2)).toEqual(['--all', '36', '--reset', RESET, '--source', 'hook', '--five', '12', '--five-reset', '2026-11-13T15:00:00.000Z',
-    ...FULL_ARGS, '--session', 'claude-fable-5-2'])
-  expect(status.at(-1)).toBe('Budget 180% · usage: Weekly 36% Fable 41%')
+    ...FULL_ARGS, '--session', 'claude-fable-5-2', '--spent', '25000'])
+  expect(status.at(-1)).toBe('Budget left: -16% · usage: Weekly 36% Fable 41%')
 })
 
 test('a plan without the per-model window, extra usage off, no context: - for the meter and nothing made up', async ($, on) => {
@@ -1986,7 +2252,7 @@ test('the fallback: a tool that is absent, fails or reads as nothing gives the p
   expect(seen.calls).toBe(1)
   expect(seen.runs.length).toBe(1)
   expect(seen.runs[0].slice(2)).toEqual(['--all', '49', '--reset', RESET, '--source', 'hook'])
-  expect(status.at(-1)).toBe('Budget 245% · usage: Weekly 49% Fable 71%')
+  expect(status.at(-1)).toBe('Budget left: -29% · usage: Weekly 49% Fable 71%')
   await $.prompt.submit({ text: 'go on', asUser: true })
   expect(entered.at(-1)?.[0]).toContain('take a full reading: run the `pacing` skill with `usage now`')
   // an answer with no weekly window, and one that is no JSON
@@ -2005,7 +2271,7 @@ test('figures budget.mjs refuses: the plain reading in the same go, never none',
   expect(seen.runs.length).toBe(2)
   expect(seen.runs[0]).toContain('--premium')
   expect(seen.runs[1].slice(2)).toEqual(['--all', '10', '--reset', RESET, '--source', 'hook'])
-  expect(status.at(-1)).toBe('Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 40%')
 })
 
 test('a full reading asks the session for nothing: no note beside the prompt', async ($, on) => {
@@ -2032,7 +2298,7 @@ test('at a load with no meters from the engine yet, the usage tool gives a logge
   expect(seen.runs.length).toBe(1)
   expect(seen.runs[0]).not.toContain('--dry')
   expect(seen.runs[0].slice(2, 6)).toEqual(['--all', '36', '--reset', RESET])
-  expect(status.at(-1)).toBe('Budget 180% · usage: Weekly 36% Fable 41%')
+  expect(status.at(-1)).toBe('Budget left: -16% · usage: Weekly 36% Fable 41%')
   // it counts as the last one: the same figure from the engine moments later runs nothing
   await $.session.measure(measure(36))
   expect(seen.runs.length).toBe(1)
@@ -2060,7 +2326,7 @@ test('when an agent finishes: one reading if the last is 5 minutes old, none if 
   expect(seen.runs.length).toBe(2)
   expect(seen.runs[1]).toContain('--premium')
   expect(seen.calls).toBe(2)
-  expect(status.at(-1)).toBe('Budget 180% · usage: Weekly 36% Fable 41%')
+  expect(status.at(-1)).toBe('Budget left: -16% · usage: Weekly 36% Fable 41%')
   // and that one counts as the last: another agent a minute later reads nothing
   await spawn($, 'general-purpose', 'haiku', false, 'a3')
   await clock.advance(60000)
@@ -2106,7 +2372,7 @@ test('the record\'s words: the role of a type, a model\'s short name, the line a
   expect(freshNote([])).toBeNull()
 })
 
-test('a role agent\'s finished task is recorded by the module: role, id, model, effort and the tokens the engine\'s list has', async ($, on) => {
+test('a role agent\'s finished task is recorded by the module: role, id, model, effort, the tokens the engine\'s list has and what the run spent', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = recordEngine(on, { rows: () => [{ id: 'ag1', tokenCount: 41200, model: 'claude-opus-5-5', effort: 'medium' }], out: () => 'recorded: implementer ag1, task 1, 41k tokens' })
@@ -2118,13 +2384,15 @@ test('a role agent\'s finished task is recorded by the module: role, id, model, 
   await $.session.measure(measure(10))
   await $.tool.call({ tool: 'Agent', tool_use_id: 'tu1', description: 'the change', prompt: 'p', subagent_type: 'pacing:implementer', model: 'opus', effort: 'high' } as any)
   await clock.advance(60000)
-  await $.turn.complete(turn('claude-opus-5-5', 1, 'ag1'))
+  // the run's usage: every request of it summed
+  await $.turn.complete({ ...turn('claude-opus-5-5', 1, 'ag1'), usage: { model: 'claude-opus-5-5', input_tokens: 1200, output_tokens: 8000, cache_read_input_tokens: 350000, cache_creation_input_tokens: 9100 } } as any)
   await clock.settle()
   expect(seen.records.length).toBe(1)
   expect(seen.records[0][0]).toBe('node')
   expect(seen.records[0][1].endsWith('/skills/pacing/scripts/config.mjs')).toBe(true)
-  // the Agent call's effort before the list's; the tokens as the list has them, not the run's summed usage
-  expect(seen.records[0].slice(2)).toEqual(['agent', 'implementer', 'ag1', 'opus', 'high', '41200'])
+  // the Agent call's effort before the list's; the tokens as the list has them, not the run's summed usage;
+  // that summed usage as what the task spent, input, output, cache read, cache write
+  expect(seen.records[0].slice(2)).toEqual(['agent', 'implementer', 'ag1', 'opus', 'high', '41200', '--spent', '1200,8000,350000,9100'])
   // nothing is due: the session is told nothing
   await $.prompt.submit({ text: 'next', asUser: true })
   expect(seen.entered).toEqual([undefined])
@@ -2141,7 +2409,7 @@ test('the session hears of a record only when a fresh agent is due: one hidden l
   await clock.advance(60000)
   await $.turn.complete(turn('claude-opus-5-5', 1, 'ag1'))
   await clock.settle()
-  expect(seen.records[0].slice(2)).toEqual(['agent', 'implementer', 'ag1', 'opus', 'high', '96000'])
+  expect(seen.records[0].slice(2, 8)).toEqual(['agent', 'implementer', 'ag1', 'opus', 'high', '96000'])
   // a slash command does not carry it, and does not use it up
   await $.prompt.submit({ text: '/compact', asUser: true })
   expect(seen.entered.at(-1)).toBeUndefined()
@@ -2179,7 +2447,7 @@ test('the line about a fresh agent rides on a background agent\'s notification t
   await $.turn.complete(turn('claude-opus-5-5', 1, 'ag1'))
   await clock.settle()
   // resumed with no Agent call: the effort it started with is not known here, the list's is
-  expect(seen.records[1].slice(2)).toEqual(['agent', 'implementer', 'ag1', 'opus', 'high', '160000'])
+  expect(seen.records[1].slice(2, 8)).toEqual(['agent', 'implementer', 'ag1', 'opus', 'high', '160000'])
   // a fresh implementer starts before any prompt: nothing left to say
   await spawn($, 'pacing:implementer', 'opus')
   await $.prompt.submit({ text: 'go on', asUser: true })
@@ -2209,7 +2477,7 @@ test('no record without what it needs: another kind of agent, a stopped run, no 
   effort = 'xhigh'
   rows = [{ id: 'ag5', tokenCount: 30000 }]
   await run('pacing:verifier', 'ag5')
-  expect(seen.records.map(r => r.slice(2))).toEqual([['agent', 'verifier', 'ag5', 'haiku', 'xhigh', '30000']])
+  expect(seen.records.map(r => r.slice(2, 8))).toEqual([['agent', 'verifier', 'ag5', 'haiku', 'xhigh', '30000']])
 })
 
 test('the tokens the refresh saw while the agent ran serve when the list has let it go at its end', async ($, on) => {
@@ -2223,16 +2491,24 @@ test('the tokens the refresh saw while the agent ran serve when the list has let
   rows = []
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
   await clock.settle()
-  expect(seen.records.map(r => r.slice(2))).toEqual([['agent', 'researcher', 'ag1', 'haiku', 'medium', '52000']])
+  expect(seen.records.map(r => r.slice(2, 8))).toEqual([['agent', 'researcher', 'ag1', 'haiku', 'medium', '52000']])
+})
+
+test('what a run spent goes on record as four whole numbers; no usage, no --spent', async () => {
+  expect(spentOf({ model: 'm', input_tokens: 10, output_tokens: 20.4, cache_read_input_tokens: 30 } as any)).toEqual({ in: 10, out: 20.4, read: 30, write: 0 })
+  expect(spentOf(undefined)).toBeNull()
+  expect(recordArgv('/p', 'reader', 'a1', 'haiku', 'medium', 41000.6, { in: 10, out: 20.4, read: 30, write: 0 }).slice(2)).toEqual(['agent', 'reader', 'a1', 'haiku', 'medium', '41001', '--spent', '10,20,30,0'])
+  expect(recordArgv('/p', 'reader', 'a1', 'haiku', 'medium', 41000, null).slice(2)).toEqual(['agent', 'reader', 'a1', 'haiku', 'medium', '41000'])
+  expect(recordArgv('/p', 'reader', 'a1', 'haiku', 'medium', 41000, { in: -1, out: 0, read: 0, write: 0 }).slice(2)).toEqual(['agent', 'reader', 'a1', 'haiku', 'medium', '41000'])
 })
 
 // ---- reports the module answers itself ----
 
 const REPORT = [
-  'last reading 11-15 10:00, 5 min ago (automatic, full), not measured now',
-  'not in it: context, extra usage · /pacing usage now measures',
+  'last reading 11-15 10:00, 5 min ago (automatic, full), not read now',
+  'not in it: context, extra usage · /pacing usage now takes a new one',
   '5-hour     ██░░░░░░░░░░░░░░░░░░  12 %  resets 13:00',
-  'All models ██████░░│░░░░░░░░░░░  30 % / 47 % pace · resets in 4d 2h',
+  'Weekly     ██████░░│░░░░░░░░░░░  30 % / 47 % pace · resets in 4d 2h',
   'Fable 5.2  ███████░│░░░░░░░░░░░  35 % / 47 % pace · read 11-15 10:00',
   '',
   'tier  model              takes now · level ahead',
@@ -2240,11 +2516,11 @@ const REPORT = [
   '1     Fable 5.2 high     the session: judgment, medium, routine,',
   '                         trivial work',
   '',
-  'All models at 30 % is 17 points under today\'s allowed 47 %.',
+  'The weekly meter at 30 % is 17 points under today\'s allowed 47 %.',
   '',
   'day 4 of 8 (calendar days), 2.9 days elapsed, 4.1 days to reset',
-  'All models used 30 %, delta -16.7, Fable 5.2 35 % -> ahead',
-  'do: the session model does nearly everything',
+  'Weekly used 30 %, delta -16.7, Fable 5.2 35 % -> ahead',
+  'do: the session\'s model does nearly everything',
   'next session: Fable 5.2 high',
 ]
 const stdout = (text: string, exitCode = 0) => ({ value: { exitCode, stdout: text, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
@@ -2258,11 +2534,11 @@ test('the usage report as the command shows it: the bars and the sheet in a code
   expect(text.split('\n').slice(1, -1)).toEqual(REPORT.slice(0, 12))
   expect(text).not.toContain('day 4 of 8')
   expect(text).not.toContain('Now:')
-  const over = REPORT.map(l => (l.startsWith('All models used') ? 'All models used 44 %, delta 3 -> over (raised by the trend)' : l.startsWith('do: ') ? 'do: medium tasks leave the session model too' : l))
-  expect(usageText(over.join('\n')).split('\n').at(-1)).toBe('Now: medium tasks leave the session model too')
+  const over = REPORT.map(l => (l.startsWith('Weekly used') ? 'Weekly used 44 %, delta 3 -> over (raised by the trend)' : l.startsWith('do: ') ? 'do: medium tasks leave the session\'s model too' : l))
+  expect(usageText(over.join('\n')).split('\n').at(-1)).toBe('Now: medium tasks leave the session\'s model too')
   // a model the session should leave: the fact and the row that offers it, never the steps
-  const out = REPORT.map(l => (l.startsWith('do: ') ? 'do: Fable 5.2 is out until the reset: this session belongs on Opus 5.5 high now; the Switch row offers it (without the hooks module: model menu Opus 5.5, effort high). the session model does nearly everything' : l))
-  expect(usageText(out.join('\n')).split('\n').at(-1)).toBe('Now: Fable 5.2 is out until the reset: this session belongs on Opus 5.5 high now; the Switch row offers it. the session model does nearly everything')
+  const out = REPORT.map(l => (l.startsWith('do: ') ? 'do: Fable 5.2 is out until the reset: this session belongs on Opus 5.5 high now; the Switch row offers it (without the hooks module: model menu Opus 5.5, effort high). the session\'s model does nearly everything' : l))
+  expect(usageText(out.join('\n')).split('\n').at(-1)).toBe('Now: Fable 5.2 is out until the reset: this session belongs on Opus 5.5 high now; the Switch row offers it. the session\'s model does nearly everything')
   expect(measureWhy('measure: the last reading is 31 min old\n')).toBe('the last reading is 31 min old')
   expect(measureWhy(REPORT.join('\n'))).toBeNull()
 })
@@ -2276,9 +2552,9 @@ test('the module registers its commands, and answers /pacing-usage with the repo
   on('command.register', (_: unknown, e: any) => (names.push(e.name), e.immediate && immediate.push(e.name), { value: { command: e.name } }))
   on('process.run', (_: unknown, e: any) => (runs.push([...e.argv]), stdout(REPORT.join('\n') + '\n')))
   await start($)
-  expect(names).toEqual(['pacing-status', 'pacing-usage', 'pacing-help', 'pacing-guide', 'pacing-agents'])
+  expect(names).toEqual(['pacing-status', 'pacing-usage', 'pacing-help', 'pacing-guide', 'pacing-doctor', 'pacing-saved'])
   // the three reports wait for a turn's end: answered mid-turn, their text would stay in the requests
-  expect(immediate).toEqual(['pacing-status', 'pacing-agents'])
+  expect(immediate).toEqual(['pacing-status'])
 
   const r = await run($, 'pacing-usage')
   expect(runs.length).toBe(1)
@@ -2304,12 +2580,12 @@ test('/pacing-usage with a reading too old to show: the module measures first wh
   expect(seen.runs[1]).toContain('--premium')
   expect(r.text.startsWith('```\nlast reading 11-15 10:00')).toBe(true)
   // the reading it took is the session's reading now
-  expect(status.at(-1)).toBe('Budget 180% · usage: Weekly 36% Fable 41%')
+  expect(status.at(-1)).toBe('Budget left: -16% · usage: Weekly 36% Fable 41%')
   // without the tool and with no window from the engine there is nothing to measure with
   fresh = false
   usage = null
   const none = await run($, 'pacing-usage')
-  expect(none.text).toBe('Pacing: no reading to show (the last reading is 45 min old). `/pacing usage now` measures.')
+  expect(none.text).toBe('Pacing: no reading to show (the last reading is 45 min old). `/pacing usage now` takes a new one.')
   expect(none.isTextDisplayOnly).toBe(true)
 })
 
@@ -2334,6 +2610,51 @@ test('/pacing-help and /pacing-guide show what config.mjs prints, whole and for 
   fail = true
   expect((await run($, 'pacing-help')).text).toBe('Pacing: the help could not be read. `/pacing help` asks the session for it.')
   expect((await run($, 'pacing-guide')).text).toBe('Pacing: the guide could not be read. `/pacing help full` asks the session for it.')
+})
+
+test('/pacing-doctor shows the self-check whole in a code block, a failed check too; /pacing-saved runs saved.mjs against the session\'s model', async ($, on) => {
+  engine(on)
+  const runs: string[][] = []
+  let code = 1
+  let text = 'ok    version     running 0.9.12\nFAIL  settings    config.json does not parse -> run /pacing reset\n\n1 failed check: see above.\n'
+  on('process.run', (_: unknown, e: any) => (runs.push([...e.argv]), stdout(text, code)))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  // doctor exits 1 on a failed check: its lines are shown all the same
+  const doc = await run($, 'pacing-doctor')
+  expect(runs[0][1].endsWith('/skills/pacing/scripts/doctor.mjs')).toBe(true)
+  expect(runs[0].length).toBe(2)
+  expect(doc.text).toBe('```\n' + text.trim() + '\n```')
+  expect(doc.isTextDisplayOnly).toBe(true)
+  text = ''
+  expect((await run($, 'pacing-doctor')).text).toBe('Pacing: the self-check could not run. `/pacing doctor` asks the session for it.')
+
+  code = 0
+  const line = 'Delegation this week: 2 tasks; on Opus 5.5 they would have cost 2.9× as much (about 66% less).'
+  text = line + '\n'
+  runs.length = 0
+  const sv = await run($, 'pacing-saved')
+  expect(runs[0][1].endsWith('/skills/pacing/scripts/saved.mjs')).toBe(true)
+  expect(runs[0].slice(2)).toEqual(['--session', 'claude-opus-5-5'])
+  expect(sv.text).toBe(line)
+  expect(sv.isTextDisplayOnly).toBe(true)
+  // detail: the table in a code block, its columns kept
+  const table = 'by role and model, against Opus 5.5:\n  role    model      tasks  tokens  saved\n  reader  Haiku 5.5      1       -    97%'
+  text = line + '\n\n' + table + '\n'
+  const det = await $.command.run({ command: 'pacing-saved', args: 'detail' } as any)
+  expect(runs[1].slice(2)).toEqual(['--session', 'claude-opus-5-5', '--detail'])
+  expect(det.text).toBe(line + '\n\n```\n' + table + '\n```')
+  // saved.mjs refusing the model: again without it; refusing that too: where to ask
+  code = 1
+  runs.length = 0
+  expect((await run($, 'pacing-saved')).text).toBe('Pacing: the savings could not be read. `/pacing saved` asks the session for it.')
+  expect(runs.map(r => r.slice(2))).toEqual([['--session', 'claude-opus-5-5'], []])
+})
+
+test('/pacing-status is for the person alone, as the other reports', async ($, on) => {
+  engine(on)
+  const r = await run($, 'pacing-status')
+  expect(r.text).toBe('Pacing: no automatic reading yet in this session. /pacing usage takes one now.')
+  expect(r.isTextDisplayOnly).toBe(true)
 })
 
 // ---- real progress: the parts an agent says it has finished ----
@@ -2362,29 +2683,20 @@ test('the parts off an agent\'s own call: `config.mjs part <done> <total>` in Ba
   expect(partText({})).toBe('')
 })
 
-test('part 2 of 4 shows where the estimate did, and goes first when the room shrinks', async () => {
+test('part 2 of 4 shows where the estimate did: the row, the toasts and /pacing-status; the line keeps the count alone', async () => {
   const a = { ...IMPL, part: { done: 2, total: 4, said: true } }
-  // the estimate is not shown beside it
-  expect(agentPart([a], T0, LINE_MAX)).toBe('⏳ implementer editing 2m part 2 of 4')
-  expect(agentPart([IMPL], T0, LINE_MAX)).toBe('⏳ implementer editing 2m ~60%')
-  // one character short: the part goes, before the step and the time
-  const whole = chars(agentPart([a], T0, LINE_MAX))
-  expect(agentPart([a], T0, whole - 1)).toBe('⏳ implementer editing 2m')
-  // an agent with no history shows its parts all the same
-  expect(agentPart([{ ...VERIFIER, part: { done: 1, total: 2 } }], T0, LINE_MAX)).toBe('⏳ verifier is running 30s part 1 of 2')
   // the row, the 5-minute toast and the status line with the budget
   expect(backgroundText([a], T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing 2m part 2 of 4')
   expect(progressText([a], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 2m part 2 of 4, about 2m left.')
   expect(progressText([a, VERIFIER], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 2m part 2 of 4; verifier "Run the suite" 30s.')
   // two that pass 120 with them: the part and the estimate go first, for both
   expect(progressText([a, READER], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 2m; reader "Read the test logs", searching 3m.')
-  // in the line, beside the budget and the weekly usage
-  expect(statusText(J77, [], null, T0, [a])).toBe('⏳ implementer editing 2m part 2 of 4 · Budget 77% · usage: Weekly 100%')
-  // two agents with parts pass 75 beside the budget: the parts go first, for both
-  expect(statusText(J77, [], null, T0, [a, { ...READER, part: { done: 1, total: 3 } }])).toBe('⏳ implementer editing 2m, ⏳ reader searching 3m · Budget 77%')
+  // in the line, the count alone
+  expect(statusText(J77, [], null, T0, [a])).toBe('⏳ 1 Subagent running · Budget left: 850K · usage: Weekly 100% Fable 100%')
+  expect(statusText(J77, [], null, T0, [a, { ...READER, part: { done: 1, total: 3 } }])).toBe('⏳ 2 Subagents running · Budget left: 850K · usage: Weekly 100% Fable 100%')
 })
 
-test('in a session: an agent\'s Bash call says its parts, and the line, the toast and /pacing-status show them in place of the estimate', async ($, on) => {
+test('in a session: an agent\'s Bash call says its parts, and the toast and /pacing-status show them in place of the estimate', async ($, on) => {
   const status = engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
@@ -2399,14 +2711,15 @@ test('in a session: an agent\'s Bash call says its parts, and the line, the toas
   await spawn($, 'pacing:reader')
   await clock.advance(3 * 60000)
   // no part said yet: the estimate by time, with its note
-  expect(status.at(-1)).toBe('⏳ reader is running 3m ~60% · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   expect((await second())[1]).toMatch(/^~ is a rough estimate/)
   // the main thread running the same command is nobody's progress
   await $.tool.call({ tool: 'Bash', command: 'node x/config.mjs part 3 4' } as any)
-  expect(status.at(-1)).toContain('~60%')
+  expect((await second())[0]).toContain('~60%')
   await $.tool.call({ tool: 'Bash', command: 'node "/p/skills/pacing/scripts/config.mjs" part 1 3', agentId: 'ag1' } as any)
   await clock.advance(5000)
-  expect(status.at(-1)).toBe('⏳ reader running 3m part 1 of 3 · Budget 50% · usage: Weekly 10% Fable 40%')
+  expect((await second())[0]).toBe('Running: reader: a task, running 3m part 1 of 3 (Haiku 5.5)')
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
   await $.tool.call({ tool: 'Grep', pattern: 'x', agentId: 'ag1' } as any)
   await $.tool.call({ tool: 'Bash', command: 'node "/p/skills/pacing/scripts/config.mjs" part 2 3', agentId: 'ag1' } as any)
   await clock.advance(2 * 60000 - 5000)
@@ -2415,266 +2728,78 @@ test('in a session: an agent\'s Bash call says its parts, and the line, the toas
   expect(await second()).toEqual(['Running: reader: a task, running 5m part 2 of 3 (Haiku 5.5)', 'Now: the default split'])
 })
 
-// ---- the agents panel ----
+// ---- running agents across a reload ----
 
-const PANE = {
-  plugin: 'pacing', component: 'Pane', requestId: PANEL, surface: 'desktop',
-  props: { title: 'Agents', isFocused: false, bodyColumns: 48, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
-} as const
-// the engine beneath for the panel: every open and close asked of it, the
-// panes it holds, whether a surface draws them, the module's store
-const panelEngine = (on: any, opts: { config?: string; placed?: () => boolean; store?: Record<string, unknown>; list?: () => any[] } = {}) => {
-  const seen = { opens: [] as any[], closes: [] as any[], up: false, toasts: [] as string[], n: 0, store: opts.store ?? {} as Record<string, any> }
-  on('agent.spawn', (_: unknown, e: any) => ({ model: e.model === 'opus' ? 'claude-opus-5-5' : 'claude-haiku-5-5', agentId: 'ag' + (++seen.n) }))
-  on('agent.list', () => ({ value: (opts.list ? opts.list() : []).map((a: any) => ({ description: '', type: 'x', ...a })) }))
-  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
-  on('fs.read', (_: unknown, e: any) => ({ value: opts.config !== undefined && /[\\/]\.claude[\\/]pacing[\\/]config\.json$/.test(String(e.path)) ? opts.config : '{}' }))
-  on('session.id', () => ({ value: 'local_s1' }))
+// the engine beneath for a reload: the session's id and the module's store
+const keptEngine = (on: any) => {
+  const store: Record<string, any> = {}
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
-  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000, tokens: 1000, percent: 0 }, rateLimits: [] } }))
   on('command.register', (_: unknown, e: any) => ({ value: { command: e.name } }))
-  on('store.get', (_: unknown, e: any) => ({ value: seen.store[e.key] }))
-  on('store.set', (_: unknown, e: any) => { seen.store[e.key] = e.value; return { value: undefined } })
-  on('ui.invalidate', () => ({ value: undefined }))
-  on('ui.toast', (_: unknown, e: any) => (seen.toasts.push(e.text), { value: undefined }))
-  on('ui.open', (_: unknown, e: any) => {
-    seen.opens.push({ id: e.id, title: e.title })
-    const placed = opts.placed ? opts.placed() : true
-    seen.up = placed
-    return { value: placed ? { isPlaced: true } : { isPlaced: false, reason: 'the terminal is 100 columns wide, an unasked pane needs 144' } }
-  })
-  on('ui.close', (_: unknown, e: any) => (seen.closes.push({ id: e.id, origin: e.origin && e.origin.kind }), seen.up = false, { value: undefined }))
-  on('ui.panes', () => ({ value: seen.up ? [{ id: PANEL, title: 'Agents', isShown: true, isFocused: false, isPlaced: true }] : [] }))
-  return seen
-}
-// the panel's rows as drawn now
-const paneRows = async ($: any, props: Record<string, unknown> = {}) => {
-  const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, ...props } })
-  const rows = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text as string)
-  await ui.unmount()
-  return rows
-}
-
-test('the panel as text: a header with the count and the budget, a row per running agent, then what this session finished', async () => {
-  const part = { ...IMPL, part: { done: 2, total: 4, said: true } }
-  const side = { id: 's', kind: 'session', type: 'pacing-s1', label: 'Task s1', description: 'Task s1', startedAt: T0 - 25000, step: null, runs: [] } as any
-  const done = [
-    { name: 'reader', task: 'Read the test logs', ms: 3 * 60000, tokens: 41000, outcome: 'The failing assertion is in auth.test.ts.', aborted: false },
-    { name: 'Task s0', session: true, ms: 35000 },
-    { name: 'verifier', task: 'Run the suite', ms: 40000, tokens: 0, outcome: '', aborted: true },
-  ]
-  expect(panelLines([part, READER, VERIFIER, side], done, J77, T0).map(l => l.text)).toEqual([
-    '4 Agents are running · Budget 77%',
-    '⏳ implementer: Auto-reload on plugin update',
-    '   editing · 2m · part 2 of 4 · about 2m left · Fable 5.2 high',
-    '⏳ reader: Read the test logs',
-    '   searching · 3m · ~60% · about 2m left · Haiku 5.5 medium',
-    '⏳ verifier: Run the suite',
-    '   running · 30s · Haiku 5.5 medium',
-    '⏳ Task s1 (side session)',
-    '   working · 25s',
-    ' ',
-    'Finished in this session',
-    '✗ verifier: Run the suite',
-    '   stopped after 40s',
-    '✓ Task s0 (side session)',
-    '   ended its turn after 35s',
-    '✓ reader: Read the test logs',
-    '   3m · 41k tokens · The failing assertion is in auth.test.ts.',
-  ])
-  // the detail under each name is dim, the names and the header are not
-  expect(panelLines([part], [], J77, T0).map(l => !!l.dim)).toEqual([false, false, true])
-  // one agent, no reading yet, nothing at all
-  expect(panelLines([part], [], null, T0)[0].text).toBe('1 Agent is running')
-  expect(panelLines([], [], J77, T0).map(l => l.text)).toEqual(['No agent is running · Budget 77%', 'Agents and side sessions this session starts show here.'])
-  expect(panelLines([], done, { ofBudget: null } as any, T0)[0].text).toBe('No agent is running · Budget -')
-  // only the last ten finished show, the newest first, and the rest are counted
-  const many = Array.from({ length: 13 }, (_, i) => ({ name: 'reader', task: 'task ' + i, ms: 1000, tokens: 0, outcome: '', aborted: false }))
-  const shown = panelLines([], many, null, T0).map(l => l.text)
-  expect(shown.filter(t => t.startsWith('✓ ')).length).toBe(DONE_SHOWN)
-  expect(shown[3]).toBe('✓ reader: task 12')
-  expect(shown.at(-1)).toBe('and 3 earlier')
-  // as a widget on the desktop app: the header and a line per agent
-  expect(panelLines([part, READER], done, J77, T0, true).map(l => l.text)).toEqual([
-    '2 Agents are running · Budget 77%', '⏳ implementer editing 2m part 2 of 4', '⏳ reader searching 3m ~60%'])
-  // an answer's first line, without markdown's marks, cut at 100
-  expect(outcomeOf('\n## Done\n\nAll **212** tests pass.')).toBe('Done')
-  expect(outcomeOf('- `npm test`: 3 failed')).toBe('npm test: 3 failed')
-  expect(outcomeOf('')).toBe('')
-  expect(chars(outcomeOf('x'.repeat(300)))).toBe(100)
-})
-
-test('auto: the panel opens when the first agent starts, shows it, and lists it once it has finished', async ($, on) => {
-  engine(on)
-  big(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = panelEngine(on, { list: () => [{ id: 'ag1', status: 'running' }] })
+  on('session.id', () => ({ value: 'local_s1' }))
+  on('store.get', (_: unknown, e: any) => ({ value: store[e.key] === undefined ? undefined : JSON.parse(JSON.stringify(store[e.key])) }))
+  on('store.set', (_: unknown, e: any) => { store[e.key] = JSON.parse(JSON.stringify(e.value)); return { value: undefined } })
+  on('store.delete', (_: unknown, e: any) => { delete store[e.key]; return { value: undefined } })
   on('tool.call', () => ({ result: {} }))
+  return store
+}
 
-  await $.session.measure(measure(10))
-  expect(seen.opens).toEqual([])
-  await spawn($, 'pacing:implementer', 'opus', false, 'Auto-reload on plugin update')
-  await clock.settle()
-  expect(seen.opens).toEqual([{ id: 'pacing-agents', title: 'Agents' }])
-  await $.tool.call({ tool: 'Edit', file_path: 'x', agentId: 'ag1' } as any)
-  await $.tool.call({ tool: 'Bash', command: 'node p/config.mjs part 1 2', agentId: 'ag1' } as any)
-  await clock.advance(2 * 60000)
-  for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual([
-      '1 Agent is running · Budget 50%',
-      '⏳ implementer: Auto-reload on plugin update',
-      '   running · 2m · part 1 of 2 · about 2m left · Opus 5.5',
-    ])
-    await ui.unmount()
-  }
-  // a second agent does not open it again
-  await spawn($, 'pacing:reader')
-  await clock.settle()
-  expect(seen.opens.length).toBe(1)
-  await $.turn.complete({ ...turn('claude-opus-5-5', 1, 'ag1'), answer: 'Changed readings.mjs.\nTests pass.' })
-  const rows = await paneRows($)
-  expect(rows[0]).toBe('1 Agent is running · Budget 50%')
-  expect(rows.slice(1, 3)).toEqual(['⏳ reader: a task', '   running · 0s · Haiku 5.5'])
-  expect(rows.slice(3, 6)).toEqual([' ', 'Finished in this session', '✓ implementer: Auto-reload on plugin update'])
-  expect(rows[6]).toMatch(/^ {3}2m · \d+k tokens · Changed readings\.mjs\.$/)
-  // as a widget: the glance
-  expect(await paneRows($, { placement: 'widget' })).toEqual(['1 Agent is running · Budget 50%', '⏳ reader is running 0s'])
-})
-
-test('closed by the person it stays closed for the session, a reload included; /pacing-agents opens it and closes it', async ($, on) => {
-  engine(on)
-  big(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = panelEngine(on)
-
-  await $.session.measure(measure(10))
-  await spawn($, 'pacing:reader')
-  await clock.settle()
-  expect(seen.opens.length).toBe(1)
-  // a second agent while it is up: nothing asked
-  await spawn($, 'pacing:implementer')
-  await clock.settle()
-  expect(seen.opens.length).toBe(1)
-  // the person's close mark: the engine's panes no longer hold it
-  seen.up = false
-  await spawn($, 'pacing:verifier')
-  await clock.settle()
-  expect(seen.opens.length).toBe(1)
-  expect(Object.keys(seen.store.panelClosed)).toEqual(['local_s1'])
-  await spawn($, 'pacing:researcher')
-  await clock.settle()
-  expect(seen.opens.length).toBe(1)
-  // a reload starts the module's memory over; the store still knows
-  await start($)
-  await clock.settle()
-  await spawn($, 'pacing:reader')
-  await clock.settle()
-  expect(seen.opens.length).toBe(1)
-  // the command opens it at any time
-  const opened = await run($, 'pacing-agents')
-  expect(opened.text).toBe('Pacing: the agents panel is open. /pacing-agents closes it.')
-  expect(opened.isTextDisplayOnly).toBe(true)
-  expect(seen.opens.length).toBe(2)
-  expect(seen.up).toBe(true)
-  // and closes it: closed for the session again
-  const closed = await run($, 'pacing-agents')
-  expect(closed.text).toBe('Pacing: the agents panel is closed, and stays closed in this session. /pacing-agents opens it again.')
-  expect(seen.closes.at(-1)).toEqual({ id: 'pacing-agents', origin: 'plugin' })
-  expect(seen.up).toBe(false)
-  await spawn($, 'pacing:implementer')
-  await clock.settle()
-  expect(seen.opens.length).toBe(2)
-  expect(Object.keys(seen.store.panelClosed)).toEqual(['local_s1'])
-})
-
-test('the note of a close is per session: another session opens it by itself, and an old note is let go', async ($, on) => {
-  engine(on)
-  big(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = panelEngine(on, { store: { panelClosed: { local_other: T0 - 60000, local_old: T0 - 8 * 24 * 3600000 } } })
-  await $.session.measure(measure(10))
-  await spawn($, 'pacing:reader')
-  await clock.settle()
-  expect(seen.opens.length).toBe(1)
-  // closed by the command here: this session's note beside the other's, the week-old one gone
-  await run($, 'pacing-agents')
-  expect(Object.keys(seen.store.panelClosed).sort()).toEqual(['local_other', 'local_s1'])
-})
-
-test('off: never by itself, and still by /pacing-agents', async ($, on) => {
-  engine(on)
-  big(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = panelEngine(on, { config: JSON.stringify({ agentsPanel: 'off' }) })
-  await $.session.measure(measure(10))
-  await spawn($, 'pacing:reader')
-  await clock.settle()
-  expect(seen.opens).toEqual([])
-  expect((await run($, 'pacing-agents')).text).toBe('Pacing: the agents panel is open. /pacing-agents closes it.')
-  expect(seen.opens.length).toBe(1)
-  expect(await paneRows($)).toEqual(['1 Agent is running · Budget 50%', '⏳ reader: a task', '   running · 0s · Haiku 5.5'])
-})
-
-test('an open no surface draws: nothing more is done, and the next agent\'s start asks again', async ($, on) => {
-  engine(on)
-  big(on)
-  const clock = mock.clock(on, { now: T0 })
-  let placed = false
-  const seen = panelEngine(on, { placed: () => placed })
-  await $.session.measure(measure(10))
-  await spawn($, 'pacing:reader')
-  await clock.settle()
-  expect(seen.opens.length).toBe(1)
-  expect(seen.closes).toEqual([])
-  expect(seen.toasts.filter(t => /panel/.test(t))).toEqual([])
-  // asked for by hand where nothing draws it: the reason, in one line
-  expect((await run($, 'pacing-agents')).text).toBe('Pacing: the agents panel cannot be drawn here (the terminal is 100 columns wide, an unasked pane needs 144). The status line and /pacing-status show the agents.')
-  placed = true
-  await spawn($, 'pacing:verifier')
-  await clock.settle()
-  expect(seen.opens.length).toBe(3)
-  // drawn now: the third agent asks nothing
-  await spawn($, 'pacing:implementer')
-  await clock.settle()
-  expect(seen.opens.length).toBe(3)
-})
-
-test('an engine without panes: the agents show in the line as before, and the command says so', async ($, on) => {
+test('a reload in the middle of a run: the agent keeps its role, step, time and task, in the line and in the next toast', async ($, on) => {
   const status = engine(on)
   big(on)
-  mock.clock(on, { now: T0 })
-  agentEngine(on, { list: () => [{ id: 'ag1', status: 'running' }] })
+  const clock = mock.clock(on, { now: T0 })
+  const seen = agentEngine(on, { list: () => [{ id: 'ag1', status: 'running' }] })
+  const store = keptEngine(on)
   await $.session.measure(measure(10))
-  await spawn($, 'pacing:reader')
-  expect(status.at(-1)).toBe('⏳ reader is running 0s · Budget 50% · usage: Weekly 10% Fable 40%')
-  expect((await run($, 'pacing-agents')).text).toBe('Pacing: the agents panel is not available here. The status line and /pacing-status show the agents.')
+  await spawn($, 'pacing:implementer', 'opus', false, 'Auto-reload on plugin update')
+  await $.tool.call({ tool: 'Edit', agentId: 'ag1' } as any)
+  await clock.advance(2 * 60000)
+  const before = status.at(-1)
+  expect(before).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
+  expect(store['agents:local_s1']).toEqual([{ id: 'ag1', type: 'pacing:implementer', description: 'Auto-reload on plugin update', model: 'claude-opus-5-5', background: false, startedAt: T0, step: 'editing' }])
+  // /reload-plugins: the module's memory of the agents starts over, and session.start runs again
+  const n = status.length
+  await start($)
+  await clock.settle()
+  // drawn again from what was kept, not left over
+  expect(status.length).toBeGreaterThan(n)
+  expect(status.at(-1)).toBe(before)
+  // its time goes on from its start, not from the reload
+  await clock.advance(3 * 60000)
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
+  // the next progress toast, 5 minutes after the reload, has its name, task and step
+  await clock.advance(2 * 60000)
+  expect(seen.toasts.at(-1)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 7m.')
+  // its end: the toast with the task, and the store let go
+  await $.turn.complete(turn('claude-opus-5-5', 1, 'ag1'))
+  await clock.settle()
+  expect(seen.toasts.at(-1)).toMatch(/^✅ implementer is done with "Auto-reload on plugin update" after 7m/)
+  expect(store['agents:local_s1']).toBe(undefined)
 })
 
-test('a side session that starts working brings the panel too, and shows in it; one already working at load does not open it', async ($, on) => {
-  engine(on)
+test('an agent the engine no longer runs at the reload is dropped; without its list, none comes back', async ($, on) => {
+  const status = engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
-  let running = true
-  const polls = sessionEngine(on, () => [row('s1', running)])
-  const opens: string[] = []
-  on('ui.open', (_: unknown, e: any) => (opens.push(e.id), { value: { isPlaced: true } }))
-  on('session.id', () => ({ value: 'local_main' }))
+  const live = new Set(['ag1', 'ag2'])
+  let list = true
+  agentEngine(on, { list: () => (list ? [...live].map(id => ({ id, status: 'running' })) : null) })
+  const store = keptEngine(on)
   await $.session.measure(measure(10))
-  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
-  await new Promise(r => setTimeout(r, 50))
-  expect(polls.polls).toBe(1)
-  expect(opens).toEqual([])
-  // its turn ends, then the session messages it again
-  running = false
-  await clock.advance(15000)
-  running = true
-  await $.tool.call({ tool: 'mcp__ccd_session_mgmt__send_message', sessionId: 's1', message: 'go on' } as any)
-  await clock.advance(5000)
+  await spawn($, 'pacing:reader', 'haiku', true)
+  await spawn($, 'pacing:verifier', 'haiku', true)
+  expect(store['agents:local_s1'].map((a: any) => a.id)).toEqual(['ag1', 'ag2'])
+  await clock.advance(60000)
+  live.delete('ag2')
+  await start($)
   await clock.settle()
-  expect(opens).toEqual(['pacing-agents'])
-  expect(await paneRows($)).toEqual(['1 Agent is running · Budget 50%', '⏳ Task s1 (side session)', '   working · 5s',
-    ' ', 'Finished in this session', '✓ Task s1 (side session)', '   ended its turn after 15s'])
+  expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget left: 10% · usage: Weekly 10% Fable 40%')
+  expect(store['agents:local_s1'].map((a: any) => a.id)).toEqual(['ag1'])
+  // an engine that cannot say which run: none is shown as running
+  list = false
+  await start($)
+  await clock.settle()
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('Budget left: 10% · usage: Weekly 10% Fable 40%')
 })
 
 // ---- a toast by its kind ----
@@ -2710,13 +2835,13 @@ test('every toast leads with the icon of its kind where "Pacing: " stood, and ke
   expect(texts[2][1]).toBe('✅ implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; nothing else is running.')
   expect(texts[3][1]).toBe('✅ side session Task s1 ended its turn after 35s; nothing else is running.')
   expect(texts[4][1]).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 2m ~60%, about 1m left.')
-  expect(texts[5][1]).toBe('⏳ 12 Agents are still running, the longest for 12m.')
+  expect(texts[5][1]).toBe('⏳ 12 Subagents are still running, the longest for 12m.')
   expect(texts[6][1]).toBe('🔁 this session now runs on Opus 5.5 high.')
   expect(texts[7][1]).toBe('❌ the switch did not take; the session still runs on Fable 5.2. The model menu does it: Opus 5.5, effort high.')
   expect(texts[8][1]).toBe('🔄 updated to 0.9.12 and reloaded.')
   expect(texts[9][1]).toBe('📦 Pacing 0.9.12 is installed: type /reload-plugins to load it.')
   expect(texts[10][1]).toBe('🗜️ compacted from 320k to 40k tokens.')
-  expect(texts[11][1]).toBe('🗜️ compacted. The status line shows the new size after the next turn.')
+  expect(texts[11][1]).toBe('🗜️ compacted.')
   expect(texts[12][1]).toBe('💤 this session is 420k tokens and sat idle 1 h 25 min, so its cache has lapsed and this turn stores it all again. After a break, /compact first is cheaper.')
   // a reading's state in one colour: stop or the model out, over the line, within it
   expect(levelIcon({ level: 'stop' })).toBe('🔴')
@@ -2753,19 +2878,19 @@ test('in a session: each toast with its icon, the routine ones for the engine\'s
   // (the look at the meters its end started is over)
   await clock.settle()
   // the level: over the line, the week nearly used, back under it
-  next = answer('over', 21, { do: 'medium tasks leave the session model too' })
+  next = answer('over', 21, { do: 'medium tasks leave the session\'s model too' })
   await $.session.measure(measure(21))
-  expect(shown.at(-1)).toEqual({ text: '⚠️ on budget -> over budget. medium tasks leave the session model too', ms: 15000 })
+  expect(shown.at(-1)).toEqual({ text: '⚠️ on budget -> over budget. medium tasks leave the session\'s model too', ms: 15000 })
   next = answer('stop', 96, { do: 'wrap up, the week is nearly used' })
   await $.session.measure(measure(96))
   expect(shown.at(-1)).toEqual({ text: '🔴 over budget -> stop. wrap up, the week is nearly used', ms: 15000 })
-  next = answer('ahead', 10, { do: 'the session model does nearly everything' })
+  next = answer('ahead', 10, { do: 'the session\'s model does nearly everything' })
   await $.session.measure(measure(10))
-  expect(shown.at(-1)).toEqual({ text: '🟢 stop -> under budget. the session model does nearly everything', ms: 15000 })
+  expect(shown.at(-1)).toEqual({ text: '🟢 stop -> under budget. the session\'s model does nearly everything', ms: 15000 })
   // the per-model meter over its line, the level as it was; then that model out
-  next = answer('ahead', 11, { premiumHeld: true, do: 'Fable 5.2\'s own meter is over its line' })
+  next = answer('ahead', 11, { premiumHeld: true, do: 'Fable 5.2\'s meter is over its budget line' })
   await $.session.measure(measure(11))
-  expect(shown.at(-1)).toEqual({ text: '⚠️ Fable 5.2\'s own meter is over its line', ms: 15000 })
+  expect(shown.at(-1)).toEqual({ text: '⚠️ Fable 5.2\'s meter is over its budget line', ms: 15000 })
   next = answer('ahead', 12, { premiumOut: true, do: 'Fable 5.2 is out until the reset' })
   await $.session.measure(measure(12))
   expect(shown.at(-1)).toEqual({ text: '🔴 Fable 5.2 is out until the reset', ms: 15000 })
@@ -2830,8 +2955,7 @@ test('the toasts with it: the 5-minute toast per agent, the start toast with the
   // it goes before who else runs does
   expect(startedText(IMPL, [IMPL, READER, VERIFIER])).toBe('▶️ implementer is running "Auto-reload on plugin update" on Fable 5.2 high; reader and verifier are also running.')
   expect(chars(startedText(IMPL, [IMPL, READER, VERIFIER]))).toBeLessThanOrEqual(MSG_MAX)
-  // the panel's row has it; the status line and the row above the prompt do not
-  expect(panelLines([hist], [], null, T0)[2].text).toBe('   editing · 12m · ~60% · about 8m left · Fable 5.2 high')
-  expect(agentPart([hist], T0, LINE_MAX)).toBe('⏳ implementer editing 12m ~60%')
+  // the status line and the row above the prompt do not have it
+  expect(agentPart([hist], T0, LINE_MAX)).toBe('⏳ 1 Subagent running')
   expect(backgroundText([hist], T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing 12m ~60%')
 })

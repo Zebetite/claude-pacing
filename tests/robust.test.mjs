@@ -161,10 +161,10 @@ describe('fewer calls, fewer lines', () => {
       '--categories', 'Messages=90000,System tools=25000,MCP tools=5000'];
     const full = dry(s, ...args).out, brief = dry(s, ...args, '--brief').out;
     assert.deepEqual(brief.trim().split(/\r?\n/), [
-      'All models used 22 %, delta +2, Fable 5.2 10 % -> over',
+      'Weekly used 22 %, delta +2, Fable 5.2 10 % -> over',
       'Fable 5.2 used 10 %, delta -10 -> ahead',
       'route: judgment, trivial -> Fable 5.2 high (the session); medium, routine -> Opus 5.5 medium; bulky -> Sonnet 5.5 medium; reader -> Haiku 5.5 medium; verifier -> Haiku 5.5 medium (plain runs; checks to judge -> Sonnet 5.5 medium)',
-      'do: medium tasks leave the session model too',
+      'do: medium tasks leave the session\'s model too',
       'effort: one step less effort on this session would save most, Fable 5.2 high -> medium; the Switch row offers it (without the hooks module: model menu Fable 5.2, effort medium); medium work still goes to Opus 5.5 medium',
       'next session: Fable 5.2 high',
     ]);
@@ -175,7 +175,7 @@ describe('fewer calls, fewer lines', () => {
     const brief = dry(s, '--all', '10', '--premium', '30', '--five', '90', '--five-reset', '2026-11-13T15:00:00Z', '--context-tokens', '340000',
       '--categories', 'Messages=90000,System tools=25000,MCP tools=40000', '--brief').out;
     for (const re of [/^5-hour window 90 %.*-> HOLD heavy work/m, /^context 340k tokens -> suggest compacting/m, /^fixed overhead .* -> MCP tools are 40k of it/m,
-      /^All models used .* Fable 5\.2 held$/m, /^do: Fable 5\.2's own meter is at throttle: this session belongs on Opus 5\.5 high now, and Fable 5\.2 is kept for judgment work; the Switch row offers it/m, /^upward: /m, /^route: judgment, medium, routine, trivial -> Opus 5\.5 high \(the session\)/m]) assert.match(brief, re);
+      /^Weekly used .* Fable 5\.2 held$/m, /^do: Fable 5\.2's meter is at throttle: this session belongs on Opus 5\.5 high now, and Fable 5\.2 is kept for judgment work; the Switch row offers it/m, /^upward: /m, /^route: judgment, medium, routine, trivial -> Opus 5\.5 high \(the session\)/m]) assert.match(brief, re);
     // and leaves out what only describes
     assert.doesNotMatch(brief, /^(day \d|allowance today|spend rate|trend:|tier {2}model)/m);
   }));
@@ -186,7 +186,7 @@ describe('fewer calls, fewer lines', () => {
     assert.match(r.out, /^settings\.json: the terminal CLI now defaults to Fable 5\.2 high/m);
     assert.ok(s.exists('state.json'));
     const l = s.budget(['last', '--brief', '--now', '2026-11-13T12:10:00Z']).out.trim().split(/\r?\n/);
-    assert.equal(l[0], 'last reading 11-13 12:00, 10 min ago, not measured now');
+    assert.equal(l[0], 'last reading 11-13 12:00, 10 min ago, not read now');
     assert.ok(l.some(x => x.startsWith('route: ')));
     assert.ok(l.length <= 7, l.join('\n'));
     assert.equal(s.budget(['last', '--brief', '--now', '2026-11-13T13:10:00Z']).out.trim(), 'measure: the last reading is 70 min old');

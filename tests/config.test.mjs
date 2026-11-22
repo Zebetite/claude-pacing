@@ -17,7 +17,7 @@ describe('the ladder', () => {
     assert.match(r.out, /^config.json created from the defaults$/m);
     assert.match(r.out, /^tier 1 {2}Fable 5.2 high {7}\[fable\] {2}the session: judgment work$/m);
     assert.match(r.out, /^tier 3 {2}Sonnet 5.5 medium {4}\[sonnet\] {2}subagents: bulky output$/m);
-    assert.match(r.out, /^per-model weekly meter: Fable 5.2; when it is full: Opus 5.5 high takes tier 1$/m);
+    assert.match(r.out, /^per-model meter: Fable 5.2; when it is full: Opus 5.5 high takes tier 1$/m);
     assert.deepEqual(cfgOf(s).tiers.map(t => t.model + ' ' + t.effort), ['fable high', 'opus medium', 'sonnet medium']);
   }));
   test('json prints the config', withHome(s => {
@@ -67,7 +67,7 @@ describe('the ladder', () => {
     s.config(['fallback', 'none']);
     c = cfgOf(s);
     assert.deepEqual([c.premium, c.fallback], [null, null]);
-    assert.match(s.config([]).out, /^per-model weekly meter: none; when it is full: none \(the remaining tiers move up\)$/m);
+    assert.match(s.config([]).out, /^per-model meter: none; when it is full: none \(the remaining tiers move up\)$/m);
   }));
   test('the offers to compact: on by default, off and on again, kept by reset', withHome(s => {
     s.config(['init']);
@@ -88,7 +88,7 @@ describe('the ladder', () => {
   }));
   test('the notices about running subagents: on by default, off and on again, kept by reset', withHome(s => {
     s.config(['init']);
-    assert.match(s.config([]).out, /^notices about running subagents: on$/m);
+    assert.match(s.config([]).out, /^toasts about running subagents: on$/m);
     s.config(['notify', 'off']);
     assert.equal(cfgOf(s).agentNotices, false);
     s.config(['reset']);
@@ -248,6 +248,16 @@ describe('kept agents', () => {
     const runs = fs.readFileSync(f, 'utf8').trim().split('\n').map(l => JSON.parse(l));
     assert.deepEqual(runs.map(r => [r.role, r.id, r.model, r.effort, r.tokens, r.resumed]),
       [['reader', 'a1', 'haiku', 'medium', 40000, false], ['reader', 'a1', 'haiku', 'medium', 52500, true]]);
+    assert.ok(runs.every(r => !('spent' in r)), 'a record without --spent carries none');
+  }));
+  test('agent --spent keeps what the task spent; a bad split is left out', withHome(s => {
+    assert.match(s.config(['agent', 'reader', 'a1', 'haiku', 'medium', '40000', '--spent', '1200,800,350000,9000']).out, /^recorded: reader a1, task 1, 40k tokens$/m);
+    assert.match(s.config(['agent', 'reader', 'a1', 'haiku', 'medium', '--spent', '0,0,0,0', '41000']).out, /^recorded: reader a1, task 2, 41k tokens$/m);
+    for (const bad of ['1,2,3', '1,2,3,-4', '1,2,x,4', '1.5,2,3,4']) assert.equal(s.config(['agent', 'reader', 'a1', 'haiku', 'medium', '42000', '--spent', bad]).code, 0);
+    const f = s.file('agents', s.project.split(/[^A-Za-z0-9._ -]+/).filter(Boolean).join('-') + '.jsonl');
+    const runs = fs.readFileSync(f, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+    assert.deepEqual(runs.map(r => r.spent), [{ in: 1200, out: 800, read: 350000, write: 9000 }, { in: 0, out: 0, read: 0, write: 0 }, undefined, undefined, undefined, undefined]);
+    assert.ok(runs.every(r => r.tokens >= 40000));
   }));
   test('the fifth task or 150k tokens says the next task goes to a fresh agent', withHome(s => {
     for (let i = 1; i <= 4; i++) assert.doesNotMatch(s.config(['agent', 'verifier', 'v1', 'sonnet', 'medium', '10k']).out, /fresh/);
@@ -327,35 +337,22 @@ describe('the offer to switch', () => {
   });
 });
 
-describe('the panel of the running agents', () => {
-  test('auto by default, also with no key; off and auto again, kept by reset, a bad value refused or dropped', withHome(s => {
+describe('the panel of the running agents, removed', () => {
+  test('an old config.json with agentsPanel loads without a word; panel is no command, and the guide no longer names it', withHome(s => {
     s.config(['init']);
-    assert.equal(cfgOf(s).agentsPanel, 'auto');
-    assert.match(s.config([]).out, /^live panel of the running agents \(\/pacing-agents\): auto$/m);
-    const { agentsPanel, ...without } = cfgOf(s);
-    s.writeConfig(without);
-    assert.match(s.config([]).out, /^live panel of the running agents \(\/pacing-agents\): auto$/m);
-    s.config(['panel', 'off']);
-    assert.equal(cfgOf(s).agentsPanel, 'off');
-    assert.match(s.config([]).out, /^live panel of the running agents \(\/pacing-agents\): off$/m);
-    s.config(['reset']);
-    assert.equal(cfgOf(s).agentsPanel, 'off');
-    s.config(['apply', 'panel', 'auto']);
-    assert.equal(cfgOf(s).agentsPanel, 'auto');
-    for (const bad of [['panel'], ['panel', 'on'], ['panel', 'maybe']]) {
-      const r = s.config(bad);
-      assert.equal(r.code, 1, bad.join(' '));
-      assert.equal(r.out.trim(), 'panel auto | panel off');
+    assert.equal(cfgOf(s).agentsPanel, undefined);
+    for (const old of ['off', 'auto', true]) {
+      s.writeConfig({ ...cfgOf(s), agentsPanel: old });
+      const out = s.config([]).out;
+      assert.doesNotMatch(out, /panel|config\.json: /i, String(old));
     }
-    s.writeConfig({ ...cfgOf(s), agentsPanel: true });
-    assert.match(s.config([]).out, /the panel of the running agents is not auto or off: the default is used/);
-    assert.match(s.config([]).out, /\(\/pacing-agents\): auto$/m);
+    const r = s.config(['panel', 'off']);
+    assert.equal(r.code, 1);
+    assert.doesNotMatch(r.out, /panel auto/);
+    const guide = fs.readFileSync(path.join(plugin, 'skills', 'pacing', 'GUIDE.md'), 'utf8');
+    assert.ok(!guide.includes('/pacing-agents'));
+    assert.ok(!guide.includes('/pacing panel'));
   }));
-  test('the guide names /pacing-agents and the setting', () => {
-    const guide = fs.readFileSync(path.join(plugin, 'skills', 'pacing', 'GUIDE.md'), 'utf8').replace(/\s+/g, ' ');
-    assert.ok(guide.includes('`/pacing-agents`'));
-    assert.ok(guide.includes('`/pacing panel auto`, `/pacing panel off`'));
-  });
 });
 
 describe('the reload at a new version', () => {

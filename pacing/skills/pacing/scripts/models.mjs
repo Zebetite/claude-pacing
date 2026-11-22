@@ -42,9 +42,16 @@ export const checkConfig = raw => {
   drop('verifier', helperOk, 'the verifier\'s model is not a known model and effort');
   drop('setNextModel', v => typeof v === 'boolean', 'the next-session switch is not on or off');
   drop('compactAsk', v => typeof v === 'boolean', 'the offers to compact are not on or off');
-  drop('agentNotices', v => typeof v === 'boolean', 'the notices about running subagents are not on or off');
+  drop('agentNotices', v => typeof v === 'boolean', 'the toasts about running subagents are not on or off');
   drop('switchAsk', v => typeof v === 'boolean', 'the offers to switch model or effort are not on or off');
   drop('autoReload', v => typeof v === 'boolean', 'the reload at a new version is not on or off');
-  drop('agentsPanel', v => v === 'auto' || v === 'off', 'the panel of the running agents is not auto or off');
   return { cfg: c, problems };
 };
+// Every key a config.json may hold: the ones checkConfig knows, the install
+// date, and the older primary/fallback pair it turns into a ladder. Any other
+// key is one no command reads (doctor.mjs names it), except a RETIRED one: a
+// setting since removed, left in older files and ignored. A new setting goes
+// in SETTINGS; a removed one moves to RETIRED.
+export const SETTINGS = ['tiers', 'lastDayWeight', 'premium', 'fallback', 'reader', 'verifier', 'setNextModel', 'compactAsk',
+  'agentNotices', 'switchAsk', 'autoReload', 'installed', 'primary'];
+export const RETIRED = ['agentsPanel'];

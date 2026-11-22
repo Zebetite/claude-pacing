@@ -21,7 +21,7 @@ describe('another session at work in the project', () => {
     assert.deepEqual(Object.keys(marks(s)), ['session-a']);
     const b = start(s, 'session-b');
     assert.equal(b.systemMessage, 'Pacing: Another session has been working in this project (last active under a minute ago): check before editing files here.');
-    assert.match(b.hookSpecificOutput.additionalContext, /ANOTHER SESSION has been working in this project folder \(last active under a minute ago\)\. Two sessions editing one checkout overwrite each other's work: before editing files here, check with the user whether that session is still at work\. A notice, not a block; parallel work on code belongs in separate git worktrees\.$/);
+    assert.match(b.hookSpecificOutput.additionalContext, /ANOTHER SESSION has been working in this project folder \(last active under a minute ago\)\. Two sessions editing one checkout overwrite each other's work: before editing files here, check with the user whether that session is still at work\. A warning, not a block; parallel work on code belongs in separate git worktrees\.$/);
     assert.deepEqual(Object.keys(marks(s)).sort(), ['session-a', 'session-b']);
   }));
   test('never of the session\'s own mark: a resume, or a second start, says nothing', withHome(s => {
@@ -90,7 +90,7 @@ describe('another session at work in the project', () => {
     start(s, 'session-a');
     s.write('state.json', JSON.stringify({ t: new Date().toISOString(), all: 36, line: 46.7, level: 'ahead', next: { model: 'fable', label: 'Fable 5.2', effort: 'high' }, reset: RESET }));
     const j = start(s, 'session-b');
-    assert.match(j.systemMessage, /^Pacing \(0 h ago\): all models 36 % used.*Check the model menu shows Fable 5\.2, effort high\. Another session has been working in this project \(/);
+    assert.match(j.systemMessage, /^Pacing \(0 h ago\): weekly meter 36 % used.*Check the model menu shows Fable 5\.2, effort high\. Another session has been working in this project \(/);
     assert.match(j.hookSpecificOutput.additionalContext, /Load the `pacing:route` skill once before the first delegation\. ANOTHER SESSION has been working/);
   }));
 });

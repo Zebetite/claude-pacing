@@ -22,8 +22,8 @@ level in the status line.
   `node <$.plugin.root>/skills/pacing/scripts/budget.mjs --all .. --reset ..
   --source hook --five .. --five-reset ..`, and shows one toast when the
   level changes. The status line shows
-  `Budget 77% · usage: Weekly 36% Fable 40%`
-  (before 0.9.5: `77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)`):
+  `Budget left: 850K · usage: Weekly 36% Fable 40%`
+  (before 0.9.13: `Budget 77% · ...`; before 0.9.5: `77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)`):
   the meter as a share of the line; the session's own use by tier, from
   every turn's tokens (`turn.complete`, subagents included) priced per
   model, in shares that add up to 100; the two meters. The status line is
@@ -548,3 +548,150 @@ level in the status line.
 - **Not checked live:** how the emoji draw in the app's toast box and in
   the band, and whether the terminal's notification bar names the plugin
   beside a toast.
+
+## Budget left in tokens (0.9.13)
+
+- **The text.** The user asked for `Budget left: 850K` (tokens, without the word)
+  in place of `Budget 77%`, negative past the line (`Budget left: -120K`). From
+  a million, M with one decimal (`1.2M`); under a thousand, `0K`. One
+  helper (`budgetText`) for the status line and
+  `/pacing-status`. Until a rate is learned, the points of the week:
+  `Budget left: 5%`; `Budget left: -` only with no figure at all.
+- **The rate.** Left in points is the line less the weekly meter; tokens
+  are points times the tokens per point. The module sums every token of
+  the session and its subagents (input, output, cache read and write) and
+  hands budget.mjs what was spent since the last reading that ran
+  (`--spent`). budget.mjs keeps `rate.json` beside the log:
+  `{ reset, from, to, tokens, carried }`. A new week starts the baseline
+  at its first reading (that reading's `--spent` dropped) and carries the
+  week before's rate when its meter rose 5 points or more. The rate now:
+  this week's from 5 points, else the carried one, else this week's from
+  2 points. `--dry` writes nothing; a damaged file is an empty one.
+- **It errs low.** Use by sessions without the plugin (another device,
+  the web) raises the meter with no tokens counted, so the rate is too
+  low and the figure shows less left than there is.
+- **The width.** The budget part is longer (17 characters against 10), so
+  while agents run the usage gives way sooner, and two agents with their
+  progress no longer fit: `⏳ implementer editing 2m, ⏳ reader searching
+  3m · Budget left: 850K`. `ofBudget` stays in the JSON for the
+  levels and other code.
+
+## A Reload button for a new version (0.9.13)
+
+- **The row.** The user wanted a button instead of typing. Where the
+  reload by itself did not replace this copy (refused, given up after 10
+  minutes, or this copy still runs after it), the band above the prompt
+  shows `📦 Pacing 0.9.13 is installed.` with `Reload` and `Not now`, in
+  the calm Switch row's style, after the urgent switch, the offer to
+  compact and the calm switch (one action row at a time). The toast "type
+  /reload-plugins" is gone from those cases.
+- **Reload.** The same run as by itself (`$.command.run`, the mark in the
+  store, the look RELOAD_SETTLE later). Refused: `/reload-plugins` goes
+  into the prompt box (`$.prompt.fill`) and a toast says
+  `📦 Press Enter to reload.`; where the box cannot be filled, the old line
+  to type it.
+- **Not now** hides the row for that version (this copy's memory, like the
+  Switch row's suggestions seen); the next version shows it again.
+- **`/pacing reload off`**: nothing runs by itself, and the row shows at
+  the first look that finds the new version.
+- **Not checked live:** whether the app lets a button's press run
+  `/reload-plugins` where it refuses the same call from a timer, and
+  whether `$.prompt.fill` reaches the box in the desktop app and the
+  terminal. The kit tests cover the row, both buttons, the fallback and
+  the setting.
+
+## The agents panel removed (0.9.13)
+
+- **The user's decision:** the panel (the side bar) goes. Gone from the
+  module: the `Pane` render hook, `$.ui.open` for `pacing-agents`,
+  `panelLines`, `autoPanel` and the `pn` memory, the close note in the
+  store (`panelClosed`), the `/pacing-agents` command, and the list of
+  finished runs (`done`, `outcomeOf`), which only the panel showed.
+- **The setting:** `/pacing panel auto|off` is no command any more. An
+  older `config.json` that still holds `agentsPanel` loads without a word:
+  checkConfig no longer looks at the key (models.mjs lists it in
+  `RETIRED`).
+- **What stays as it was:** the toasts, the status line, the row above the
+  prompt and `/pacing-status`, which carry every detail the panel showed
+  for running agents (the assignment, the step, the time, the progress,
+  the time left, the model and effort).
+
+## Running agents across a reload (0.9.13)
+
+- **Seen live:** after `/reload-plugins` (0.9.11 to 0.9.12) during an
+  implementer's run, the line and the toasts lost its role, step, time and
+  task: the module's `agents` map starts over at a reload.
+- **Kept:** what the line, the toasts and the row above the prompt need
+  of each running subagent (type, assignment, model, effort, background,
+  the time it started, step, parts, tokens) in `$.store` under
+  `agents:<session id>`. This plugin has no types file, so the store is
+  used the way the module already uses it (the reload mark, `agentRuns`).
+  Written when an agent starts, takes a new step or part, or ends, and
+  when the settle drops one; never on the 5-second refresh. The key goes
+  when none runs.
+- **Read back** at `session.start`: only the agents `$.agent.list()` still
+  runs (none without the list), with their first start time, so the time
+  and the estimate go on; the history for the estimate from `agentRuns`.
+  The next progress toast comes 5 minutes after the reload. Side sessions
+  are not kept: the poll at load finds them again.
+- **Not checked live:** that a real reload keeps `$.store` and the
+  session's id as the kit does, and that `$.agent.list()` answers at the
+  new copy's `session.start`.
+
+## The count alone in the line, the desktop app's width (0.9.13)
+
+- **Seen live:** the desktop app cut the plugin's status at about 35
+  visible characters (`⏳ implementer editing 5m, ⏳ impl…`): the 75 the
+  line was kept within never showed there.
+- **Decided:** the line shows only how many agents run, `⏳ 1 Subagent
+  running`, `⏳ 2 Subagents running`, side sessions counted in; who they
+  are, their step, time and progress stay in the toasts, the row above the
+  prompt and `/pacing-status`. Where it does not fit, "running" goes
+  (`⏳ 2 Subagents`), and with no room even for that the bare count
+  (`⏳2`, beside a budget as long as `-12.3M`).
+- **The room:** `$.session.surfaces()` (the engine has no
+  `$.ui.surface()`): 34 when `desktop` or `mobile` is among the surfaces,
+  75 for a terminal alone or where the engine does not say. Asked once and
+  kept, asked again on `session.attach` and `session.detach`; an empty
+  answer is asked again at the next measure. The order holds: the agents,
+  the budget whole, then the usage only as far as it fits whole, the
+  per-model figure first to go. With nothing running in the desktop app
+  the line is `Budget left: 850K`.
+
+## The Switch that read as a failure (0.9.13)
+
+- **Seen live:** Switch ran `/model claude-opus-5-5` and `/effort high`
+  and the session did switch, but the app's model menu still showed
+  "Fable 5.2 High", and the module reads effort from `CLAUDE_EFFORT`,
+  fixed at the session's start: the row would have offered the switch
+  again.
+- **Noted:** the module observes `command.run` for `model` and `effort`
+  (the button's and the person's), lets them through, and keeps what one
+  set that answered without an error in `$.store` under `switch:<session
+  id>`. The effort stands for the session; the model until the next
+  turn's usage names one. An alias (`/model opus`) is kept as the id the
+  session reports, where that agrees.
+- **After a press:** a read-back of `$.session.model()` that disagrees is
+  read again after 2 s; a `/model` that answered without an error is
+  trusted over it. The toast: `🔁 this session now runs on Opus 5.5 high;
+  the model menu may still show Fable 5.2.` (the second clause only when
+  the model changed).
+- **Not checked live:** whether the module's own `$.command.run` passes
+  through its own `command.run` hooks (the press notes what it set
+  itself either way), and what an error from `/model` looks like
+  (`exitCode` not 0 or `isError` is taken as one).
+
+## The self-check and the savings as commands, what a task spent (0.9.13)
+
+- **`/pacing-doctor`** runs `doctor.mjs` by `$.process.run` (it exits 1
+  on a failed check, where `scriptOut` gives nothing) and shows its lines
+  in a code block, for the person alone.
+- **`/pacing-saved`** runs `saved.mjs --session <the session's model>`
+  (`--detail` for `/pacing-saved detail`, its table in a code block);
+  `saved.mjs` counts every project's records by default, as the weekly
+  meter does, and `--project` narrows to one.
+- **What a task spent:** the module passes the run's own usage, its
+  requests summed, as `config.mjs agent ... --spent <in>,<out>,<read>,<write>`;
+  the record keeps `spent`, which `saved.mjs` prices exactly. The record's
+  `tokens` stays the agent's size at its last request.
+- **`/pacing-status`** is for the person alone too (`isTextDisplayOnly`).

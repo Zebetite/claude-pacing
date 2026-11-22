@@ -5,10 +5,10 @@ description: "Pace the weekly plan allowance over a ladder of models. Use whenev
 
 # Model pacing: reports and settings
 
-The **Weekly · all models** meter and the plan's per-model meter (Fable's
-by default, `premium` in the config) are paced on one day-by-day budget
+The weekly meter (**Weekly · all models**) and the per-model meter
+(Fable's by default, `premium` in the config) are paced on one day-by-day budget
 line; the level decides how far down the ladder of models work goes.
-This skill measures, reports and changes the settings; the rules for
+This skill takes readings, reports and changes the settings; the rules for
 delegating work are the `pacing:route` skill, loaded once per session
 before the first delegation. `${CLAUDE_SKILL_DIR}` is this skill's
 folder; the user's files are in `~/.claude/pacing`. As a plugin the skill
@@ -20,8 +20,8 @@ and never make a call this file does not ask for.
 
 **At session start:** the hook's line names a recommended model and says
 whether to tell the user about a switch. Use a fresh reading as it is:
-the hooks module takes the next ones, so measure only when asked or on a
-`measure:` line. A stale reading is the exception (no hooks module, as in
+the hooks module takes the next ones, so take one only when asked or on
+a `measure:` line. A stale reading is the exception (no hooks module, as in
 a terminal session without the app): the start line says what to run.
 
 ## 0. Arguments
@@ -31,7 +31,9 @@ a terminal session without the app): the start line says what to run.
 | `/pacing`, `usage`, no argument | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" last`: show its report as section 2 says; on a `measure:` line, sections 1 and 2 |
 | `usage now` | sections 1 and 2 |
 | `help full` ("usage help full") | answer in one line: "`/pacing-guide` shows the whole guide without spending tokens; if your Claude Code does not know that command, say so and I show it here." Only on that answer: `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" help full`, shown whole |
-| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `compact on\|off`, `notify on\|off`, `switch on\|off`, `reload on\|off`, `panel auto\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `reader <model> <effort>\|ladder`, `verifier <model> <effort>\|ladder`, `version`, `notes`, `agents`, `help` ("usage help"), `handover done` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result whole |
+| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `compact on\|off`, `notify on\|off`, `switch on\|off`, `reload on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `reader <model> <effort>\|ladder`, `verifier <model> <effort>\|ladder`, `version`, `notes`, `agents`, `help` ("usage help"), `handover done` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result whole |
+| `doctor` | `node "${CLAUDE_SKILL_DIR}/scripts/doctor.mjs"`, show the result whole |
+| `saved`, `saved detail` | `node "${CLAUDE_SKILL_DIR}/scripts/saved.mjs" [--detail]`, show the result whole |
 | `log`, `week` | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" log` (or `week`), show the result |
 | `setup` | read `${CLAUDE_SKILL_DIR}/SETUP.md` and follow it |
 | `handover` | read `${CLAUDE_SKILL_DIR}/HANDOVER.md` and follow it |
@@ -40,7 +42,7 @@ a terminal session without the app): the start line says what to run.
 `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" init`, and pass on what it
 prints as it stands. A `config.json:` line in any output: pass it on.
 
-## 1. Measure
+## 1. Take a reading
 
 `mcp__ccd_session_mgmt__get_usage` (no arguments; deferred: load with
 ToolSearch `select:mcp__ccd_session_mgmt__get_usage`). From
@@ -74,10 +76,10 @@ or this session's model is out or held. Then one line on what applies,
 the `do:` line in words, as in:
 
 ```
-All models 44 % used, budget line 41 %: over by 3; one step less effort would save most.
-All models 58 % used, budget line 41 %, reaches 100 % Wednesday: throttle. This session hands work to Opus 5.5 high subagents.
-Fable meter at 100 %: Fable is out until Thursday's reset.
-All models 96 %: stop. Extra usage is on (12.40 of 50.00 EUR this month): going on is charged; your call.
+Weekly 44 % used, budget line 41 %: over by 3; one step less effort would save most.
+Weekly 58 % used, budget line 41 %, reaches 100 % Wednesday: throttle. This session hands work to Opus 5.5 high subagents.
+Fable's meter at 100 %: Fable is out until Thursday's reset.
+Weekly 96 %: stop. Extra usage is on (12.40 of 50.00 EUR this month): going on is charged; your call.
 Context 340k tokens: compacting (/compact) at the next natural break makes every later turn cheaper; then we go on here, whatever the next task is.
 Fixed overhead 70k tokens on every turn, 40k of it MCP tools: switching off connectors you do not need saves up to 40k a turn.
 ```

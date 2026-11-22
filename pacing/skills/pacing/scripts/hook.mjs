@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MODELS, relabel } from './models.mjs';
-import { dataDir, projectRoot, pendingHandovers, ageText, markSession, unmarkSession, otherSessions } from './paths.mjs';
+import { dataDir, projectRoot, pendingHandovers, ageText, markSession, unmarkSession, otherSessions, recentHookReading } from './paths.mjs';
 import { updateJson } from './safe.mjs';
 
 // The one place that says how a waiting handover is picked up: the skills
@@ -70,7 +70,7 @@ try {
         + (o.t - o.since >= 60000 ? ', at work for ' + span(o.t - o.since) : '') + (others.length > 1 ? ', and ' + (others.length - 1) + ' more' : '');
       const visible = 'Another session has been working in this project (' + facts + '): check before editing files here.';
       const context = 'ANOTHER SESSION has been working in this project folder (' + facts + '). Two sessions editing one checkout overwrite each other\'s work:'
-        + ' before editing files here, check with the user whether that session is still at work. A notice, not a block; parallel work on code belongs in separate git worktrees.';
+        + ' before editing files here, check with the user whether that session is still at work. A warning, not a block; parallel work on code belongs in separate git worktrees.';
       handoverVisible = [handoverVisible, visible].filter(Boolean).join(' ');
       handoverContext = [handoverContext, context].filter(Boolean).join(' ');
     }
@@ -109,9 +109,9 @@ const trend = s.trend ? ', trend ' + (s.trend.rate >= 0 ? '+' : '') + s.trend.ra
 const premLabel = s.premiumModel && MODELS[s.premiumModel] ? MODELS[s.premiumModel].label : 'Fable';
 // the per-model meter, paced on the same line, may have set the level or
 // moved the session off its model
-const facts = 'all models ' + s.all + ' % used, budget line ' + s.line + ' %, level ' + s.level
-  + (s.levelBy === 'premium' ? ' (set by the ' + premLabel + ' meter at ' + s.premium + ' %)' : '')
-  + (s.premiumOut || s.fableOut ? ', ' + premLabel + ' out' : s.premiumHeld ? ', ' + premLabel + ' at ' + s.premium + ' % is over its line: kept for judgment work' : '') + trend;
+const facts = 'weekly meter ' + s.all + ' % used, budget line ' + s.line + ' %, level ' + s.level
+  + (s.levelBy === 'premium' ? ' (set by ' + premLabel + '\'s meter at ' + s.premium + ' %)' : '')
+  + (s.premiumOut || s.fableOut ? ', ' + premLabel + ' out' : s.premiumHeld ? ', ' + premLabel + ' at ' + s.premium + ' % is over its budget line: kept for judgment work' : '') + trend;
 // a reading the hooks module took after a turn, not one the session asked for
 const auto = s.source === 'hook' ? ', automatic' : '';
 // A reading without the per-model meter carries the figure of the last full
@@ -122,33 +122,24 @@ const auto = s.source === 'hook' ? ', automatic' : '';
 // place a change of this session's model or effort is offered, so neither
 // the user nor the session is given steps for it. It runs here when the last
 // reading, or any reading of the last 24 h, is one it took.
-const moduleRuns = (() => {
-  if (s.source === 'hook') return true;
-  try {
-    const log = path.join(dataDir, 'log.jsonl'), size = fs.statSync(log).size, fd = fs.openSync(log, 'r');
-    const buf = Buffer.alloc(Math.min(size, 65536));
-    fs.readSync(fd, buf, 0, buf.length, size - buf.length);
-    fs.closeSync(fd);
-    return buf.toString('utf8').split('\n').some(l => { try { const e = JSON.parse(l); return e.source === 'hook' && Date.now() - Date.parse(e.t) < 24 * 3600000; } catch { return false; } });
-  } catch { return false; }
-})();
+const moduleRuns = s.source === 'hook' || recentHookReading() !== null;
 const carriedMs = s.premiumAt && s.premium != null && !(s.premiumOut || s.fableOut) ? Date.now() - Date.parse(s.premiumAt) : NaN;
 const carriedOld = carriedMs >= 3600000;
 const carried = carriedOld ? premLabel + ' was last read ' + span(carriedMs) + ' ago, at ' + s.premium + ' %' : '';
 const visible = stale
   ? 'Pacing (' + ageH + ' h ago' + auto + ', stale): ' + facts + (hasNext ? '. Last recommendation: ' + next : '') + '; the session will take a fresh reading before the first big task.'
-  : 'Pacing (' + ageH + ' h ago' + auto + '): ' + facts + '. ' + (hasNext ? 'Recommended session model: ' + next + '.' + (moduleRuns ? '' : ' Check the model menu shows ' + menu + '.') : none + '.')
+  : 'Pacing (' + ageH + ' h ago' + auto + '): ' + facts + '. ' + (hasNext ? 'Recommended model for this session: ' + next + '.' + (moduleRuns ? '' : ' Check the model menu shows ' + menu + '.') : none + '.')
     + (carriedOld ? ' ' + carried + ': the session will take a full reading before the first big task.' : '');
 const context = stale
   ? 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago, STALE: the budget line has moved since): ' + facts + (hasNext ? '. Last recommendation: ' + next : '')
-    + '. Do not tell the user to switch models on this reading. Before the first big task run the `pacing` skill with `usage` (it measures only where no newer reading came: no hooks module, as in a terminal), and follow its do: line; load the `pacing:route` skill once before the first delegation.'
+    + '. Do not tell the user to switch models on this reading. Before the first big task run the `pacing` skill with `usage` (it takes a reading only where no newer one came: no hooks module, as in a terminal), and follow its do: line; load the `pacing:route` skill once before the first delegation.'
   : 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago): ' + facts + '. '
-    + (hasNext ? 'Recommended session model: ' + next
+    + (hasNext ? 'Recommended model for this session: ' + next
       + (moduleRuns
         ? '. The pacing hooks module runs here: if you run on another model or effort, its Switch row above the prompt offers the change; do not tell the user to switch, nor how.'
         : '. If the model and effort you run on (named in your system prompt) differ from that, your first reply starts with one line telling the user to switch the model menu to ' + menu + ' (only the user can).')
       : none + '; your first reply starts with one line telling the user so.')
-    + (carriedOld ? ' The all-models figure is fresh, but ' + carried + ': before the first big task run the `pacing` skill with `usage` (it measures only where no newer reading came: no hooks module, as in a terminal).'
-      : ' This reading is fresh: use it; do not measure unasked.')
+    + (carriedOld ? ' The weekly meter\'s figure is fresh, but ' + carried + ': before the first big task run the `pacing` skill with `usage` (it takes a reading only where no newer one came: no hooks module, as in a terminal).'
+      : ' This reading is fresh: use it; take no reading unasked.')
     + ' Load the `pacing:route` skill once before the first delegation.';
 out(visible + (handoverVisible ? ' ' + handoverVisible : ''), context + (handoverContext ? ' ' + handoverContext : ''));

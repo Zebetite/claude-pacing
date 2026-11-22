@@ -12,10 +12,10 @@ of tokens as easily before the reset. That means it uses better models automatic
 you have more usage left. You can custom set how many tiers you want and
 set exactly what model and effort each tier should use.
 
-4 different agent roles (reader, verifier, implementer and researcher)
-and each stay with the session and keep notes per project, and a long
-session hands its work over to a new one. A status line shows the budget
-and each tier’s share.
+4 role agents (reader, verifier, implementer and researcher) each
+stay with the session and keep notes per project, and a long
+session hands its work over to a new one. A status line shows what is left
+of the budget and the usage.
 
 The plugin lives in [`pacing/`](pacing/); its [README](pacing/README.md)
 has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
@@ -24,23 +24,27 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 
 - **Tiers of models.** By default Fable 5.2 high runs the session, and
   Opus 5.5 medium and Sonnet 5.5 medium take work as subagents. While
-  Fable's own weekly meter is full, Opus 5.5 high takes the top place.
+  Fable's meter is full, Opus 5.5 high takes the top place.
   The number of tiers and each tier's model and effort are yours to set.
 - **A budget line for every day.** The weekly meter is compared with a
-  line that steps up at midnight. Ahead of it, the top model does nearly
+  budget line that steps up at midnight. Ahead of it, the top model does nearly
   everything; past it, more work moves down the tiers. The logged trend
-  can raise the level before the meter gets there. Fable's own meter is
-  paced on the same line while Fable runs the session, so a long session
+  can raise the level before the meter gets there. Fable's meter is
+  paced on the same budget line while Fable runs the session, so a long session
   cannot drain it unseen.
 - **A status line after every turn** (new in 0.8):
 
   ```
-  Budget 77% · usage: Weekly 36% Fable 40%
+  Budget left: 850K · usage: Weekly 36% Fable 40%
   ```
 
-  The weekly meter as a share of today's line, then the usage of the
-  weekly meters. `/pacing-status` shows the whole line in words, with how
-  this session's own use splits over the tiers (subagents included).
+  What is left under today's budget line, in tokens, then the usage of the
+  weekly meters; while subagents run, how many first (`⏳ 2 Subagents
+  running`). In the desktop app, which cuts a plugin's status at about 35
+  characters, the line keeps within 34 (`⏳ 2 Subagents · Budget left:
+  850K`). `/pacing-status` shows the whole status line in words, with
+  how this session's own use splits over the ladder's models
+  (subagents included).
   It comes from readings the plugin takes by itself after a turn, on a
   Claude Code version with hooks modules; older versions run the rest of
   the plugin as before.
@@ -52,7 +56,7 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   what the next one needs; the next session's start line names the file.
   From 300 000 tokens the skill suggests compacting at a natural break,
   and a prompt sent after an hour's pause in such a session gets one
-  notice that the cache has lapsed.
+  toast that the cache has lapsed.
 - **A start line in every new session** with the last reading and the
   recommended model, which can also become the default for new sessions.
 - **Weekly summaries** (`/pacing week`), and at "over" a suggestion to
@@ -75,11 +79,12 @@ Updates: turn on auto-update for this marketplace under `/plugin` →
 Marketplaces (it is off by default for marketplaces you add yourself), or
 run `/plugin marketplace update claude-pacing` and `claude plugin update
 pacing@claude-pacing`. A running session loads the new version by itself once it
-is idle (`/pacing reload off` turns that off; then type `/reload-plugins`).
+is idle (`/pacing reload off` turns that off; then the Reload row above the
+prompt offers it).
 
 Requirements: Node.js 18 or later on the PATH of the shell Claude Code
 uses, and a Claude plan with usage limits (the plugin reads the usage
-card's weekly meters). With a plan that has no per-model weekly meter, run
+card's weekly meters). With a plan that has no per-model meter, run
 `/pacing:pacing premium none` once.
 
 ## Tests

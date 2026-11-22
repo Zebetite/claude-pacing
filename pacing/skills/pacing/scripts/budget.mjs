@@ -11,7 +11,10 @@
 // The week is 7 days ending at --reset; the last 24 h weigh config.lastDayWeight
 // (1.5 by default), the rest 1. The line is a step at local midnight: the whole
 // of the current calendar day's allowance counts as available from its start.
-// --dry: compute only (no log entry, no state.json, no settings.json change).
+// --dry: compute only (no log entry, no state.json, no rate.json, no settings.json change).
+// --spent <tokens>: what this session spent since its previous reading (input,
+// output, cache read and write, all models, its subagents' too), from the
+// hooks module: it learns the tokens per point of the weekly meter (rate.json).
 // --source hook: an automatic reading from the plugin's hooks module (after a
 // turn). Without --premium it has no per-model meter, so it carries that
 // figure over from the last full reading of the same week (a lower bound: a
@@ -36,6 +39,7 @@ fs.mkdirSync(dataDir, { recursive: true });
 const cfgFile = path.join(dataDir, 'config.json');
 const logFile = path.join(dataDir, 'log.jsonl');
 const stateFile = path.join(dataDir, 'state.json');
+const rateFile = path.join(dataDir, 'rate.json');
 const settingsFile = path.join(os.homedir(), '.claude', 'settings.json');
 
 // a missing file is a first run (the defaults); a damaged one or a value no
@@ -123,9 +127,9 @@ const summarise = (w, until) => {
   return { last, readings: es.length, shares, over, peak };
 };
 const stamp = t => new Date(t).toLocaleString('sv-SE').slice(0, 16);
-const crossedText = s => (!s.peak ? 'no line logged'
-  : s.over.length ? 'line crossed on ' + s.over.length + ' of ' + s.readings + ' readings (peak ' + r1(s.peak.d) + ' points over, ' + stamp(s.peak.e.t) + ')'
-    : r1(-s.peak.d) === 0 ? 'line never crossed (touched it)' : 'line never crossed (closest ' + r1(-s.peak.d) + ' points under)');
+const crossedText = s => (!s.peak ? 'no budget line logged'
+  : s.over.length ? 'budget line crossed on ' + s.over.length + ' of ' + s.readings + ' readings (peak ' + r1(s.peak.d) + ' points over, ' + stamp(s.peak.e.t) + ')'
+    : r1(-s.peak.d) === 0 ? 'budget line never crossed (touched it)' : 'budget line never crossed (closest ' + r1(-s.peak.d) + ' points under)');
 
 if (argv[0] === 'week') {
   const n = Number(argv[1]) || 2;
@@ -185,7 +189,7 @@ if (argv[0] === 'last') {
     ...(s.five != null && s.fiveReset && Date.parse(s.fiveReset) > at.getTime() ? ['--five', String(s.five), '--five-reset', s.fiveReset] : []));
 }
 
-const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'context-tokens', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry', 'source', 'categories', 'brief'];
+const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'context-tokens', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry', 'source', 'categories', 'brief', 'spent'];
 const opt = {};
 const unknown = [];
 for (let i = 0; i < argv.length; i++) {
@@ -201,6 +205,7 @@ const usage = () => {
   console.log('usage: node budget.mjs --all <pct> --reset <ISO> [--premium <pct>] [--five <pct>] [--five-reset <ISO>] [--session <model>]');
   console.log('                      [--context <pct>] [--context-tokens <n>] [--categories "<name>=<tokens>,..."] [--brief]');
   console.log('                      [--extra-spent <amount> --extra-limit <amount> [--extra-currency <code>]] [--now <ISO>] [--dry] [--source skill|hook]');
+  console.log('                      [--spent <tokens>]');
   console.log('       node budget.mjs last [--brief] [--now <ISO>] | log [n] | week [n]');
   console.log('       a meter the plan does not have: pass - for its percent');
   process.exit(1);
@@ -474,12 +479,12 @@ if (fromState) {
   if (premWhy) { print('measure: ' + premWhy); process.exit(0); }
   // the block says what it rests on, within WIDTH like every line of it
   console.log('last reading ' + when(new Date(fromState.t)).slice(5) + ', ' + mins(fromState.age) + ' ago'
-    + (fromState.source === 'hook' ? (fromState.full ? ' (automatic, full)' : ' (automatic)') : '') + ', not measured now');
-  console.log('not in it: context, extra usage · /pacing usage now measures');
+    + (fromState.source === 'hook' ? (fromState.full ? ' (automatic, full)' : ' (automatic)') : '') + ', not read now');
+  console.log('not in it: context, extra usage · /pacing usage now takes a new one');
 }
 [
   barRow('5-hour', five, fiveReset ? 'resets ' + clock(fiveReset) : ''),
-  barRow('All models', used, '/ ' + Math.round(budget) + ' % pace · resets in ' + resetsIn(reset - now), budget),
+  barRow('Weekly', used, '/ ' + Math.round(budget) + ' % pace · resets in ' + resetsIn(reset - now), budget),
   // the per-model bar carries the same line; a carried figure says when it was read
   prem !== null ? barRow(premLabel, prem, premOut ? 'out until the reset'
     : '/ ' + Math.round(budget) + ' % pace' + (premFrom ? ' · read ' + when(new Date(premFrom.at)).slice(5) : ''), premOut ? undefined : budget) : null,
@@ -508,7 +513,7 @@ ladder.forEach((t, i) => {
 });
 if (readerTier && ladder.length && level !== 'stop') sheet.push(['r', name(readerTier), 'the reader agent: bulky reading (logs, searches, unfamiliar code)']);
 if (verifierTier && ladder.length && level !== 'stop') sheet.push(['v', name(verifierTier), 'the verifier: plain runs of tests, builds, checks']);
-if (premOut) tiers.filter(t => t.model === premium).forEach(t => sheet.push(['-', name(t), 'out until the reset: its own meter is at 100 %']));
+if (premOut) tiers.filter(t => t.model === premium).forEach(t => sheet.push(['-', name(t), 'out until the reset: its meter is at 100 %']));
 if (premHeld) tiers.filter(t => t.model === premium).forEach(t => sheet.push(['-', name(t), 'kept for judgment: one contained hard task at a time, as a subagent']));
 // the last column wraps within WIDTH, its continuation lines under its start
 const widths = sheet[0].map((_, c) => Math.max(...sheet.map(r => r[c].length)));
@@ -525,26 +530,26 @@ sheet.slice(1).forEach(r => sheetRow(r).forEach(l => console.log(l)));
 const cmp = d => { const p = Math.abs(Math.round(d)); return d < 0 ? p + ' points under' : d > 0 ? p + ' points over' : 'exactly on'; };
 const compare = cmp(delta);
 const premRead = premFrom ? ' (read ' + when(new Date(premFrom.at)) + ')' : '';
-const premWhy = premLevel ? premLabel + '\'s own meter at ' + Math.round(prem) + ' %' + premRead + ' is ' + cmp(premDelta) + ' the same line'
+const premWhy = premLevel ? premLabel + '\'s meter at ' + Math.round(prem) + ' %' + premRead + ' is ' + cmp(premDelta) + ' the same budget line'
   + (premTrend && premTrend.bumped ? ', and its trend projects ' + Math.round(premTrend.projected) + ' % at the reset' : '') : '';
 const t1 = ladder[0] ? 'tier 1 ' + name(ladder[0]) : 'tier 1';
 const t2s = ladder[1] ? 'tier 2 ' + name(ladder[1]) + ' subagents' : 'tier 2 subagents';
 const because = {
-  'ahead': 'more than 5 points under the line is "ahead", so every class of work stays on ' + t1 + '.',
-  'on pace': 'within 5 points under the line is "on pace", so routine work goes to ' + t2s + '; judgment, medium and trivial work stay on ' + t1 + '.',
-  'over': 'up to 5 points over the line is "over", so medium and routine work go to ' + t2s + '; judgment and trivial work stay on ' + t1 + '.',
-  'throttle': 'more than 5 points over the line is "throttle", so every class of work goes to ' + t2s + ' and the session does only what they would get wrong.',
+  'ahead': 'more than 5 points under the budget line is "ahead", so every class of work stays on ' + t1 + '.',
+  'on pace': 'within 5 points under the budget line is "on pace", so routine work goes to ' + t2s + '; judgment, medium and trivial work stay on ' + t1 + '.',
+  'over': 'up to 5 points over the budget line is "over", so medium and routine work go to ' + t2s + '; judgment and trivial work stay on ' + t1 + '.',
+  'throttle': 'more than 5 points over the budget line is "throttle", so every class of work goes to ' + t2s + ' and the session does only what they would get wrong.',
   'stop': 'at 95 % or more the week is nearly used: "stop", wrap up.',
 };
-const allWhy = 'All models at ' + Math.round(used) + ' % is ' + compare + ' today\'s allowed ' + Math.round(budget) + ' %'
+const allWhy = 'The weekly meter at ' + Math.round(used) + ' % is ' + compare + ' today\'s allowed ' + Math.round(budget) + ' %'
   + (trend && trend.bumped ? ', and the trend projects ' + Math.round(trend.projected) + ' % at the reset, which raises the level' : '');
 let why = (levelBy === 'premium'
-  ? premWhy + ': "' + level + '", worse than all models alone ("' + levelBefore + '", ' + compare + '), and ' + premLabel + ' runs tier 1, so that meter sets the level: '
+  ? premWhy + ': "' + level + '", worse than the weekly meter alone ("' + levelBefore + '", ' + compare + '), and ' + premLabel + ' runs tier 1, so that meter sets the level: '
   : allWhy + ': ')
   + because[level]
   + (ladder.length > 1 && level !== 'stop' ? ' Bulky output goes to the lowest tier at every level' + (readerTier ? ', bulky reading to the reader on ' + name(readerTier) : '') + (verifierTier ? ', plain test runs to the verifier on ' + name(verifierTier) : '') + ', so it stays out of the session\'s context.' : '')
   // with every tier on the premium model and no fallback, nothing takes tier 1
-  + (premOut ? ' ' + premLabel + '\'s own meter is at 100 %, so it left the ladder until the reset'
+  + (premOut ? ' ' + premLabel + '\'s meter is at 100 %, so it left the ladder until the reset'
     + (ladder[0] ? ' and ' + name(ladder[0]) + ' takes tier 1.' : ' and no model is left.') : '')
   + (premHeld ? ' ' + premWhy + ': "throttle" for that meter, so the session moves to ' + name(ladder[0]) + ' at tier 1 and keeps '
     + premLabel + ' for judgment work, one contained hard task at a time.' : '');
@@ -553,9 +558,9 @@ wrap(why, WIDTH).forEach(l => console.log(l));
 console.log('');
 console.log('day ' + dayNo + ' of ' + dayCount + ' (calendar days), ' + r1(elapsed) + ' days elapsed, ' + r1(left) + ' days to reset');
 console.log('allowance today ' + r1(todayAllowance) + ' %, budget line now ' + r1(budget) + ' % (counted to ' + (endOfToday === reset.getTime() ? 'the reset' : 'midnight') + ')');
-console.log('All models used ' + r1(used) + ' %, delta ' + (delta >= 0 ? '+' : '') + r1(delta)
+console.log('Weekly used ' + r1(used) + ' %, delta ' + (delta >= 0 ? '+' : '') + r1(delta)
   + (prem !== null ? ', ' + premLabel + ' ' + r1(prem) + ' %' : '') + ' -> ' + level + (trend && trend.bumped ? ' (raised by the trend)' : '')
-  + (levelBy === 'premium' ? ' (set by the ' + premLabel + ' meter)' : '') + (premOut ? ', ' + premLabel + ' out' : premHeld ? ', ' + premLabel + ' held' : ''));
+  + (levelBy === 'premium' ? ' (set by ' + premLabel + '\'s meter)' : '') + (premOut ? ', ' + premLabel + ' out' : premHeld ? ', ' + premLabel + ' held' : ''));
 if (premLevel) {
   console.log(premLabel + ' used ' + r1(prem) + ' %' + (premFrom ? ' (read ' + when(new Date(premFrom.at)) + ', carried over)' : '')
     + ', delta ' + (premDelta >= 0 ? '+' : '') + r1(premDelta) + ' -> ' + premLevel + (premTrend && premTrend.bumped ? ' (raised by its trend)' : '')
@@ -611,7 +616,7 @@ const hoursToReset = Math.max(0, (reset - now) / HOUR);
 if (hoursToReset > 0 && used < 100) {
   const todayLeft = budget - used;
   console.log('spend rate: up to ' + r1((100 - used) / hoursToReset) + ' %/h until the reset lands at 100 %'
-    + (todayLeft > 0 ? '; today\'s line leaves ' + r1(todayLeft) + ' % headroom' : '; today\'s line is ' + r1(-todayLeft) + ' % behind'));
+    + (todayLeft > 0 ? '; today\'s budget line leaves ' + r1(todayLeft) + ' % headroom' : '; today\'s budget line is ' + r1(-todayLeft) + ' % behind'));
 }
 if (extraSpent !== null && extraLimit !== null) {
   console.log(extraOn
@@ -685,14 +690,14 @@ if (!ladder.length) {
   // left out of an automatic reading, which only the module reads.
   const offered = t => '; the Switch row offers it' + (auto ? '' : ' (without the hooks module: model menu ' + t.label + ', effort ' + t.effort + ')');
   const notes = {
-    'ahead': 'the session model does nearly everything',
+    'ahead': 'the session\'s model does nearly everything',
     'on pace': 'the default split',
-    'over': 'medium tasks leave the session model too',
+    'over': 'medium tasks leave the session\'s model too',
     'throttle': 'no manual change now: the session dispatches everything to ' + name(t2) + ' subagents and does itself only what they would get wrong. The next session belongs on ' + name(t2) + offered(t2),
     'stop': extraOn ? 'the week is nearly used; from 100 % the work is charged to extra usage, so go on only with the user\'s word' : 'wrap up, the week is nearly used',
   };
   const switchNow = premOut ? premLabel + ' is out until the reset: this session belongs on ' + name(pick(1)) + ' now' + offered(pick(1)) + '. '
-    : premHeld ? premLabel + '\'s own meter is at throttle: this session belongs on ' + name(pick(1)) + ' now, and ' + premLabel + ' is kept for judgment work' + offered(pick(1)) + '. ' : '';
+    : premHeld ? premLabel + '\'s meter is at throttle: this session belongs on ' + name(pick(1)) + ' now, and ' + premLabel + ' is kept for judgment work' + offered(pick(1)) + '. ' : '';
   console.log('do: ' + switchNow + notes[level]);
   // At "over" the cheapest lever comes first: one step less effort on the
   // session's own model saves on every turn and keeps the work where it is.
@@ -711,7 +716,7 @@ if (!ladder.length) {
   } else if (session && ladder.indexOf(session) > 0 && ladder[0].model !== session.model && !premAway) {
     console.log('upward: this session runs on ' + name(session) + '; one contained hard task with a clear deliverable may go to ' + aName(ladder[0]) + ' subagent');
   } else if (sessionModel && !session) {
-    console.log('note: the session model "' + opt.session + '" is not on the ladder');
+    console.log('note: the session\'s model "' + opt.session + '" is not on the ladder');
   }
   console.log('next session: ' + name(sessionTier));
 }
@@ -811,7 +816,7 @@ if (opt.brief && !auto) {
     parts.push('reader -> ' + name(readerTier || pick('L')));
     parts.push('verifier -> ' + name(verifierTier || pick('L')) + (verifierTier ? ' (plain runs; checks to judge -> ' + name(pick('L')) + ')' : ''));
   }
-  const keep = l => /^(All models used |last reading |last week:|first run:|config.json: |do: |effort: |upward: |note: |next session: |settings.json|desktop app preset)/.test(l)
+  const keep = l => /^(Weekly used |last reading |last week:|first run:|config.json: |do: |effort: |upward: |note: |next session: |settings.json|desktop app preset)/.test(l)
     || (premLabel && l.startsWith(premLabel + ' used '))
     || (/^(5-hour window|fixed overhead|context) /.test(l) && l.includes(' -> '))
     || (level === 'stop' && l.startsWith('extra usage: '));
@@ -876,11 +881,54 @@ const FULL_AGE = HOUR, FULL_AGE_HELD = 3 * HOUR, FULL_MOVED = 2;
 const needFull = !(auto && premium && premTop) || premOut || fullAuto ? null
   : prem === null ? 'no ' + premLabel + ' reading this week yet'
     : premAgeMs !== null && premAgeMs >= (premHeld ? FULL_AGE_HELD : FULL_AGE) ? 'the ' + premLabel + ' figure is ' + mins(premAgeMs) + ' old'
-      : !premHeld && allMoved !== null && allMoved >= FULL_MOVED ? 'all models moved ' + r1(allMoved) + ' points since the ' + premLabel + ' meter was read'
+      : !premHeld && allMoved !== null && allMoved >= FULL_MOVED ? 'the weekly meter moved ' + r1(allMoved) + ' points since ' + premLabel + '\'s meter was read'
+        : null;
+// ---- tokens per point of the weekly meter, for "Budget left: 850K".
+//      rate.json holds this week's baseline (from: the meter at the week's
+//      first reading, to: the highest since) and the tokens the sessions
+//      reported (--spent) since then; a new week keeps the week before's rate
+//      (carried) when its meter rose 5 points or more. The first reading of a
+//      week drops its --spent: those tokens were spent before the baseline.
+//      Use by sessions without the hooks module (another device, the web)
+//      raises the meter with no tokens counted, so the rate errs low and the
+//      figure shows less left than there is. Rate now: this week's from a
+//      rise of 5 points, else the carried one, else this week's from 2 points.
+//      A damaged or missing file is an empty one; a failed write is no error. ----
+const RISE_MIN = 5, RISE_EARLY = 2;
+const spentArg = opt.spent === undefined ? NaN : Number(opt.spent);
+const spent = Number.isFinite(spentArg) && spentArg > 0 ? spentArg : 0;
+const fin = v => typeof v === 'number' && Number.isFinite(v);
+const rateNext = text => {
+  let cur = null;
+  try { cur = text ? JSON.parse(text) : null; } catch { cur = null; }
+  if (!cur || typeof cur !== 'object' || Array.isArray(cur)) cur = {};
+  const carried = fin(cur.carried) && cur.carried > 0 ? cur.carried : null;
+  const at = Date.parse(cur.reset);
+  const whole = fin(cur.from) && fin(cur.to) && fin(cur.tokens);
+  // a late reading of a week before the file's leaves it alone
+  if (whole && at > reset.getTime() + HOUR) return { ...cur, carried };
+  if (whole && Math.abs(at - reset) <= HOUR) return { ...cur, to: Math.max(cur.to, used), tokens: cur.tokens + spent, carried };
+  const rise = whole ? cur.to - cur.from : 0;
+  return { reset: opt.reset, from: used, to: used, tokens: 0, carried: rise >= RISE_MIN && cur.tokens > 0 ? cur.tokens / rise : carried };
+};
+let rateState = null;
+try {
+  const text = fs.existsSync(rateFile) ? fs.readFileSync(rateFile, 'utf8') : null;
+  rateState = rateNext(text);
+  if (!opt.dry) {
+    const stands = updateFile(rateFile, t => { const next = JSON.stringify(rateNext(t)) + '\n'; return next === t ? null : next; });
+    rateState = JSON.parse(stands);
+  }
+} catch { /* the rate stays as computed, or unknown */ }
+const rateRise = rateState ? rateState.to - rateState.from : 0;
+const rate = !rateState ? null
+  : rateRise >= RISE_MIN && rateState.tokens > 0 ? rateState.tokens / rateRise
+    : rateState.carried ? rateState.carried
+      : rateRise >= RISE_EARLY && rateState.tokens > 0 ? rateState.tokens / rateRise
         : null;
 if (auto) {
   const doLine = said.find(l => l.startsWith('do: '));
-  // For the status line: the meter as a share of the budget line, and what the
+  // For the status line: what is left under the budget line, and what the
   // module needs to split the session's use by tier: each model's prices, and
   // its tier number on the ladder in force now (with the fallback on top
   // while the per-model meter is out or held). A usage record names a model,
@@ -905,14 +953,27 @@ if (auto) {
   if (readerCfg && readerCfg !== 'ladder' && idOf(readerCfg) && !tierOf[idOf(readerCfg)]) tierOf[idOf(readerCfg)] = last + 1;
   if (verifierCfg && verifierCfg !== 'ladder' && idOf(verifierCfg) && !tierOf[idOf(verifierCfg)]) tierOf[idOf(verifierCfg)] = Math.max(last, ...Object.values(tierOf)) + 1;
   for (const id of Object.keys(tierOf)) if (!agentTierOf[id]) agentTierOf[id] = tierOf[id];
+  // each of those tier numbers as the user reads it, the model with its
+  // effort (/pacing-status names models, not tier numbers): the ladder's at
+  // that place, else the configured tier's, the reader's or the verifier's
+  const tierNames = {};
+  const nameAt = (n, t) => { if (n && t && MODELS[t.model] && !tierNames[n]) tierNames[n] = MODELS[t.model].label + ' ' + t.effort; };
+  ladder.forEach((t, i) => nameAt(i + 1, t));
+  tiers.forEach((t, i) => nameAt(i + 1, t));
+  if (readerCfg && readerCfg !== 'ladder') nameAt(tierOf[idOf(readerCfg)], readerCfg);
+  if (verifierCfg && verifierCfg !== 'ladder') nameAt(tierOf[idOf(verifierCfg)], verifierCfg);
   const prices = Object.fromEntries(Object.values(MODELS).map(m => [m.id, m.price]));
-  print(JSON.stringify({ level, all: r1(used), line: r1(budget), ofBudget: budget > 0 ? Math.round(100 * used / budget) : null, tierOf, agentTierOf, prices,
+  print(JSON.stringify({ level, all: r1(used), line: r1(budget), ofBudget: budget > 0 ? Math.round(100 * used / budget) : null,
+    // what is left under today's line, in points of the week and in tokens
+    tokensPerPoint: rate !== null ? Math.round(rate) : null,
+    left: { points: r1(budget - used), tokens: rate !== null ? Math.round((budget - used) * rate) : null },
+    tierOf, agentTierOf, tierNames, prices,
     premium: prem === null ? null : r1(prem), premiumOut: premOut, premiumLabel: premLabel,
     premiumAt: premFrom ? premFrom.at : null, premiumLevel: premLevel, premiumHeld: premHeld, levelBy,
     premiumOfBudget: premLevel && budget > 0 ? Math.round(100 * prem / budget) : null,
     premiumEstimate: premEstimate, needFull, full: fullAuto,
     // what the session should run on, and at "over" the effort one step
-    // lower on tier 1: the hooks module offers them as a Switch button
+    // lower on tier 1: the hooks module offers them in its Switch row
     recommend: sessionTier ? { model: MODELS[sessionTier.model].id, label: sessionTier.label, effort: sessionTier.effort } : null,
     effortStep: ladder.length && level === 'over' && !premAway && EFFORTS.indexOf(ladder[0].effort) > 0
       ? { model: MODELS[ladder[0].model].id, label: ladder[0].label, effort: EFFORTS[EFFORTS.indexOf(ladder[0].effort) - 1] } : null,

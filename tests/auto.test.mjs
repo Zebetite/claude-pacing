@@ -26,7 +26,7 @@ describe('budget.mjs --source hook', () => {
       assert.equal(j.line, 20);
       assert.equal(j.logged, true);
       assert.equal(j.premiumOut, false);
-      assert.equal(j.do, 'the session model does nearly everything');
+      assert.equal(j.do, 'the session\'s model does nearly everything');
       assert.equal(j.ofBudget, 50);
     } finally { s.cleanup(); }
   });
@@ -43,6 +43,8 @@ describe('budget.mjs --source hook', () => {
       const j = auto(s, 10, NOW, ['--dry']);
       assert.deepEqual(j.tierOf, { 'claude-fable-5-2': 1, 'claude-opus-5-5': 2, 'claude-sonnet-5-5': 3, 'claude-haiku-5-5': 4 });
       assert.deepEqual(j.prices['claude-opus-5-5'], [4, 20, 0.2, 5]);
+      // each of those places by name, the model with its effort, for /pacing-status
+      assert.deepEqual(j.tierNames, { 1: 'Fable 5.2 high', 2: 'Opus 5.5 medium', 3: 'Sonnet 5.5 medium', 4: 'Haiku 5.5 medium' });
       // the reader and the verifier on the ladder take no tier of their own;
       // a model twice on the ladder keeps its first place
       s.config(['reader', 'ladder']);
@@ -240,7 +242,7 @@ describe('the per-model meter, paced from a carried figure', () => {
       assert.equal(j.level, 'ahead');
       assert.equal(j.levelBy, 'all');
       assert.equal(j.premiumHeld, true);
-      assert.match(j.do, /^Fable 5\.2's own meter is at throttle: this session belongs on Opus 5\.5 high now, and Fable 5\.2 is kept for judgment work; the Switch row offers it\. /);
+      assert.match(j.do, /^Fable 5\.2's meter is at throttle: this session belongs on Opus 5\.5 high now, and Fable 5\.2 is kept for judgment work; the Switch row offers it\. /);
       assert.doesNotMatch(j.do, /model menu|SWITCH/);
       assert.equal(log(s).at(-1).premiumHeld, true);
     } finally { s.cleanup(); }
@@ -321,7 +323,7 @@ describe('a carried per-model figure is not a current one', () => {
     try {
       s.budget(['--all', '10', '--premium', '12', '--reset', RESET, '--now', NOW]);
       assert.equal(auto(s, 11, at(20)).needFull, null, 'a point on, 20 min: not yet');
-      assert.equal(auto(s, 12, at(25)).needFull, 'all models moved 2 points since the Fable 5.2 meter was read');
+      assert.equal(auto(s, 12, at(25)).needFull, 'the weekly meter moved 2 points since Fable 5.2\'s meter was read');
       assert.equal(auto(s, 10, at(60)).needFull, 'the Fable 5.2 figure is 60 min old');
     } finally { s.cleanup(); }
   });
@@ -380,7 +382,7 @@ describe('a carried per-model figure is not a current one', () => {
         premiumModel: 'fable', premium: 71, premiumAt: new Date(Date.now() - 15 * 3600000).toISOString(), premiumHeld: true, next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } }));
       const j = JSON.parse(s.hook().out);
       assert.match(j.systemMessage, /Fable 5\.2 was last read 15 h ago, at 71 %: the session will take a full reading before the first big task\.$/);
-      assert.match(j.hookSpecificOutput.additionalContext, /The all-models figure is fresh, but Fable 5\.2 was last read 15 h ago, at 71 %: before the first big task run the `pacing` skill with `usage` \(it measures only where no newer reading came: no hooks module, as in a terminal\)\./);
+      assert.match(j.hookSpecificOutput.additionalContext, /The weekly meter's figure is fresh, but Fable 5\.2 was last read 15 h ago, at 71 %: before the first big task run the `pacing` skill with `usage` \(it takes a reading only where no newer one came: no hooks module, as in a terminal\)\./);
       assert.doesNotMatch(j.hookSpecificOutput.additionalContext, /This reading is fresh/);
       // read 20 minutes ago: nothing to add
       const st = JSON.parse(s.read('state.json'));
@@ -535,7 +537,7 @@ describe('an automatic reading that read every meter itself: full', () => {
       assert.ok(rows[0].endsWith('ahead  (auto)'), rows[0]);
       assert.ok(rows[1].endsWith('on pace (Fable 5.2)  (auto, full)'), rows[1]);
       const r = s.budget(['last', '--now', at(50)]);
-      assert.equal(r.out.split(/\r?\n/)[0], 'last reading 11-13 12:40, 10 min ago (automatic, full), not measured now');
+      assert.equal(r.out.split(/\r?\n/)[0], 'last reading 11-13 12:40, 10 min ago (automatic, full), not read now');
       // its per-model bar is the figure as read, with no "read" mark of an older time
       assert.match(r.out, /^Fable 5\.2 .* 15 % \/ 20 % pace · read 11-13 12:40$/m);
     } finally { s.cleanup(); }

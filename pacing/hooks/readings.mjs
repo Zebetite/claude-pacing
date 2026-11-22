@@ -5,7 +5,7 @@
 // line, and answers in one JSON line. The status line shows the result, each
 // tier marked by a coloured circle, and a change of level one toast:
 //
-//   77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)
+//   Budget left: 850K, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)
 //
 // The tier shares are this session's own use: every turn's tokens, the
 // subagents' included (turn.complete), priced per model and summed by the
@@ -129,7 +129,7 @@ export const nowText = (tokens, lapsed) => (lapsed
   : 'This session is ' + kTok(tokens) + ' tokens, and its cache lapses in about ' + Math.round(LAPSE_LEAD / 60000) + ' minutes. Then the next turn stores all of it again. Compacting now is cheaper.');
 export const compactedText = (before, after) => (before && after
   ? ICON.compacted + ' compacted from ' + kTok(before) + ' to ' + kTok(after) + ' tokens.'
-  : ICON.compacted + ' compacted. The status line shows the new size after the next turn.');
+  : ICON.compacted + ' compacted.');
 // the setting in config.json: on unless it says false
 export const compactAskOf = text => { try { return JSON.parse(text).compactAsk !== false; } catch { return true; } };
 // read when an offer is due, so a change applies at once; any failure: on
@@ -145,8 +145,10 @@ async function compactAskOn($) {
 // computes from given figures and logs nothing. `m` is every meter the
 // module read itself (usageOf): the per-model figure (- where the plan has
 // no such window), the context and its categories, extra usage, and the
-// session's model, as the skill's own reading hands them over.
-export const readingArgv = (root, all, reset, five, fiveReset, dry, m = null, session = null) => ["node", root + "/skills/pacing/scripts/budget.mjs",
+// session's model, as the skill's own reading hands them over. `spent`: the
+// tokens this session spent since its last reading that ran (budget.mjs
+// learns the tokens per point of the weekly meter from them).
+export const readingArgv = (root, all, reset, five, fiveReset, dry, m = null, session = null, spent = 0) => ["node", root + "/skills/pacing/scripts/budget.mjs",
   "--all", String(all), "--reset", reset, "--source", "hook",
   ...(typeof five === "number" ? ["--five", String(five), ...(fiveReset ? ["--five-reset", fiveReset] : [])] : []),
   ...(m ? ["--premium", m.premium === null ? "-" : String(m.premium),
@@ -155,6 +157,7 @@ export const readingArgv = (root, all, reset, five, fiveReset, dry, m = null, se
     ...(m.categories ? ["--categories", m.categories] : []),
     ...(m.extra ? ["--extra-spent", String(m.extra.spent), "--extra-limit", String(m.extra.limit), ...(m.extra.currency ? ["--extra-currency", m.extra.currency] : [])] : []),
     ...(session ? ["--session", session] : [])] : []),
+  ...(!dry && spent > 0 ? ["--spent", String(Math.round(spent))] : []),
   ...(dry ? ["--dry"] : [])];
 // the last reading budget.mjs stored for the start line (state.json), or null
 async function storedReading($) {
@@ -256,20 +259,26 @@ async function limitsNow($) {
 // One logged reading by budget.mjs, answered as its JSON line, or null. With
 // every meter where the usage tool answers; else, or should budget.mjs
 // refuse those figures, from the two windows the engine gave (`week`,
-// `five`), where it gave any.
-async function runReading($, week, five, session) {
+// `five`), where it gave any. `spend` ({ total, sent }: the session's tokens
+// so far and as far as a reading took them) hands budget.mjs the tokens
+// since, and counts them sent once a reading ran.
+async function runReading($, week, five, session, spend = null) {
+  const total = spend ? spend.total : 0;
+  const spent = spend ? total - spend.sent : 0;
   const run = async argv => {
     const r = await $.process.run(argv, { timeoutMs: 20000 });
-    return r.exitCode === 0 ? JSON.parse(r.stdout.trim().split('\n').pop()) : null;
+    const j = r.exitCode === 0 ? JSON.parse(r.stdout.trim().split('\n').pop()) : null;
+    if (j && spend) spend.sent = total;
+    return j;
   };
   const plain = () => (week && week.resetsAt
-    ? run(readingArgv($.plugin.root, week.percentUsed, week.resetsAt, five && five.percentUsed, five && five.resetsAt, false)) : null);
+    ? run(readingArgv($.plugin.root, week.percentUsed, week.resetsAt, five && five.percentUsed, five && five.resetsAt, false, null, null, spent)) : null);
   const m = await metersNow($);
   if (!m) return plain();
   const own = m.five !== null;
   let j = null;
   try {
-    j = await run(readingArgv($.plugin.root, m.all, m.reset, own ? m.five : five && five.percentUsed, own ? m.fiveReset : five && five.resetsAt, false, m, session));
+    j = await run(readingArgv($.plugin.root, m.all, m.reset, own ? m.five : five && five.percentUsed, own ? m.fiveReset : five && five.resetsAt, false, m, session, spent));
   } catch { /* the plain one */ }
   return j || plain();
 }
@@ -279,7 +288,7 @@ async function runReading($, week, five, session) {
 function sayLevel($, was, j) {
   if (!was || was.fromLoad) return;
   if (j.level !== was.level) {
-    $.ui.toast(levelIcon(j) + ' ' + levelPhrase(was.level) + ' -> ' + levelPhrase(j.level) + (j.levelBy === 'premium' && j.premiumLabel ? ' (' + j.premiumLabel.split(' ')[0] + ' meter)' : '') + '. ' + (j.do || ''), { timeoutMs: TOAST_LONG });
+    $.ui.toast(levelIcon(j) + ' ' + levelPhrase(was.level) + ' -> ' + levelPhrase(j.level) + (j.levelBy === 'premium' && j.premiumLabel ? ' (' + j.premiumLabel.split(' ')[0] + '\'s meter)' : '') + '. ' + (j.do || ''), { timeoutMs: TOAST_LONG });
   } else if (!!j.premiumHeld !== !!was.premiumHeld) {
     $.ui.toast(levelIcon(j) + ' ' + (j.do || ''), { timeoutMs: TOAST_LONG });
   }
@@ -356,7 +365,7 @@ export const fullReadingAsk = j => (j && j.needFull
 
 // A session another session started (a side session in the desktop app)
 // says so up front, with the tier of the model it runs on:
-//   ⚪Tier 2 Sub Agent - 77% of budget, ⚪Tier 2[90%] 🟤Tier 4[10%], (36% Weekly, 40% Fable)
+//   ⚪Tier 2 Sub Agent - Budget left: 850K, ⚪Tier 2[90%] 🟤Tier 4[10%], (36% Weekly, 40% Fable)
 // `self` is that tier ('Other' off the ladder), or null for any other session.
 // `now` (ms) dates a carried per-model figure: "71% Fable 15h ago, est. 90%".
 // The status line, compact. The desktop app gives it what is left of the
@@ -364,7 +373,7 @@ export const fullReadingAsk = j => (j && j.needFull
 // an ellipsis: about 33 characters while a turn runs. So what matters comes
 // first and a cut takes only the tail:
 //   a side session's own tier   🟡T1 sub
-//   the budget share            Budget 107%
+//   what is left of the budget  Budget left: 850K
 //   the session's tier split    🟡T1 45% ⚪T2 55%
 //   the meters                  week 48% Fable 71% (2h old est 80%)
 // `/pacing-status` shows the whole line in the long form (fullText).
@@ -375,6 +384,25 @@ export const HEAD_MAX = 33;
 // "ahead" read as spending ahead of the budget, the opposite of its meaning.
 const PHRASE = { 'ahead': 'under budget', 'on pace': 'on budget', 'over': 'over budget', 'throttle': 'far over budget', 'stop': 'stop' };
 export const levelPhrase = level => PHRASE[level] || level || '';
+// What is left under today's budget line, wherever it shows: in tokens, by
+// the tokens per point of the weekly meter budget.mjs learned from what the
+// sessions spent ("Budget left: 850K", "1.2M" from a million, "-120K"
+// past the line, "0K" under a thousand either way). The rate errs low (use
+// on another device raises the meter with no tokens counted), so the figure
+// shows less than there is. Until a rate is learned, the points of the week
+// ("Budget left: 5%"); "-" only with no figure at all.
+export const tokensText = n => {
+  const a = Math.abs(n);
+  if (a < 1000) return '0K';
+  const k = Math.round(a / 1000);
+  return (n < 0 ? '-' : '') + (k < 1000 ? k + 'K' : (a / 1e6).toFixed(1) + 'M');
+};
+export const budgetText = j => {
+  const left = j && j.left && typeof j.left === 'object' ? j.left : {};
+  if (typeof left.tokens === 'number') return 'Budget left: ' + tokensText(left.tokens);
+  const points = typeof left.points === 'number' ? left.points : j && typeof j.line === 'number' && typeof j.all === 'number' ? j.line - j.all : null;
+  return 'Budget left: ' + (points !== null ? Math.round(points) + '%' : '-');
+};
 
 // ---- subagents at work ----
 // The session's own subagents, from the engine's events: agent.spawn starts
@@ -383,23 +411,28 @@ export const levelPhrase = level => PHRASE[level] || level || '';
 // pending nor running is gone. The main thread's turn ending ends every
 // foreground agent (the turn waited for them); a new or resumed session
 // starts with none. While any run:
-//   the status line leads with them, the whole line within LINE_MAX, in
-//   steps: each agent with what it is doing, its time and its progress (no
-//   assignment: that is the toasts', the row's, the panel's and
-//   /pacing-status's), then less and less of that, then names, then the count;
-//   never without the count, and the budget share always shows;
+//   the status line leads with their count, "⏳ 2 Subagents running" (side
+//   sessions counted in), and nothing more of them: who they are, what they
+//   do, their time and progress are the toasts', the row's and
+//   /pacing-status's;
 //   a toast when one starts and when one ends, and every 5 minutes while
 //   any runs (`/pacing notify off` quiets the toasts);
 //   a background agent still running after the turn ended gets a row in the
 //   band above the prompt, under the offer to compact, never over it.
 // Toasts and the row are one line each, within MSG_MAX.
-// While agents run the whole line keeps within LINE_MAX: a line of 75
-// characters was seen whole in the desktop app's footer, and a module cannot
-// learn the room it really has (it varies with the window and what else
-// stands there; one screenshot showed 33 before the ellipsis during a turn).
-// So the order is the agents, the budget share, the usage: a cut by the app
-// takes the least important end.
+// The whole status line keeps within the room the surface gives it. The
+// desktop app cuts the plugin's status at about 35 visible characters (seen
+// live: "⏳ implementer editing 5m, ⏳ impl…"), so where the desktop app or
+// the mobile app draws the session, LINE_MAX_NARROW; in a terminal alone (or
+// where the engine does not say), LINE_MAX: a line of 75 was seen whole. The
+// surfaces come from $.session.surfaces(), asked again when one attaches or
+// detaches. The order is the agents, the budget left, the usage: a cut takes
+// the least important end.
 export const LINE_MAX = 75;
+export const LINE_MAX_NARROW = 34;
+export const NARROW = ['desktop', 'mobile'];
+// the room for the line on these surfaces (the narrowest of them counts)
+export const lineMaxOf = surfaces => (Array.isArray(surfaces) && surfaces.some(x => NARROW.includes(x)) ? LINE_MAX_NARROW : LINE_MAX);
 export const MSG_MAX = 120;
 // While anything runs the line is redrawn every REFRESH_EVERY from what the
 // module knows (no cost); the agents are settled from the engine's list every
@@ -461,7 +494,7 @@ const estText = (a, now) => (est(a, now) == null ? '' : '~' + est(a, now) + '%')
 // The module sees every tool call of an agent with the agent's id, which is
 // where the step comes from, and reads the two numbers off the command.
 // Then "part 2 of 4" shows wherever the estimate "~60%" would: the line, the
-// row, the 5-minute toast, the panel, /pacing-status; and in the same place
+// row, the 5-minute toast, /pacing-status; and in the same place
 // in what gives way without room (first). An agent that never says a part
 // keeps the estimate by time. Where an agent keeps the build's own to-do
 // list (TodoWrite, the whole list in each call) and said no part itself, the
@@ -484,7 +517,7 @@ export const partText = a => (a && a.part ? 'part ' + a.part.done + ' of ' + a.p
 // what shows of an agent's progress: its parts, else the estimate
 const progText = (a, now) => partText(a) || estText(a, now);
 // ---- an estimate of the time left ----
-// For the 5-minute toast and the panel, from what the module has already:
+// For the 5-minute toast, from what the module has already:
 //   with parts said and one or more done: the time run so far, per part
 //   done, times the parts left;
 //   else, from RUNS_NEEDED finished runs of that agent type on: the median
@@ -545,30 +578,19 @@ const shrinks = (agents, more = {}) => {
   out.push({ time: 1 }, {});
   return out.map(parts => ({ ...parts, ...more }));
 };
-// "2 Agents", "2 Agents are running": the count, only for more than one;
+// "2 Subagents", "2 Subagents are running": the count, as the status line
+// words it (subagentsText), only for more than one;
 // `word` goes before "running" ("still", "also")
-export const countText = list => list.length + (list.length === 1 ? ' Agent' : ' Agents');
+export const countText = list => subagentsText(list.length);
 export const runningText = (list, word = '') => countText(list) + (list.length === 1 ? ' is ' : ' are ') + (word ? word + ' ' : '') + 'running';
-// The status line's agent part. No assignment there: with it the line was
-// too long, and the toasts, the row above the prompt, the panel and
-// /pacing-status say it. Each agent by its name, what it is doing, its time
-// and its progress, "⏳ implementer editing 2m part 2 of 4" (before a step
-// is known, "⏳ implementer is running 2m"); then less of each, for all of
-// them at each step and from the right: the progress, the step, the time
-// and "is running" with it, leaving the names, "⏳ reader, ⏳ researcher";
-// then, with more than one, the count as a sentence, "⏳ 2 Agents are
-// running", and last the bare count, "⏳ 2 Agents". "Agent" stands for a
-// named single agent only where a lone side session's title does not fit
-// even alone.
-const LINE_PARTS = [{ step: 1, time: 1, est: 1 }, { step: 1, time: 1 }, { time: 1 }, {}];
+// The status line's agent part: the count alone, "⏳ 1 Subagent running",
+// "⏳ 2 Subagents running", side sessions counted in; where that does not
+// fit, without "running": "⏳ 2 Subagents"; with no room even for that, "⏳2".
+export const subagentsText = n => n + (n === 1 ? ' Subagent' : ' Subagents');
 export const agentPart = (agents, now, room) => {
   const n = agents.length;
   if (!n) return '';
-  return firstFit([
-    ...LINE_PARTS.map(parts => agents.map(a => '⏳ ' + detail(a, now, parts)).join(', ')),
-    ...(n > 1 ? ['⏳ ' + runningText(agents), '⏳ ' + countText(agents)] : agents[0].kind === 'session' ? ['⏳ 1 Agent is running', '⏳ 1 Agent'] : []),
-    '⏳' + n,
-  ], room);
+  return firstFit(['⏳ ' + subagentsText(n) + ' running', '⏳ ' + subagentsText(n), '⏳' + n], room);
 };
 // who else runs, for a toast: by name for one or two, a count for more
 const others = (list, word) => (list.length === 0 ? 'nothing else is running'
@@ -645,13 +667,57 @@ async function liveAgents($) {
 // at its end, should the list have let it go by then) and its effort.
 async function settleAgents($, agents, now) {
   const live = await liveAgents($);
+  let dropped = false;
   for (const [id, a] of agents) {
     if (a.kind === 'session' || a.provisional) continue;
-    if (live ? !live.has(id) : now - a.startedAt > STALE_AGENT) { agents.delete(id); continue; }
+    if (live ? !live.has(id) : now - a.startedAt > STALE_AGENT) { agents.delete(id); dropped = true; continue; }
     const row = live && live.get(id);
     if (row && row.tokenCount > 0) a.tokens = row.tokenCount;
     if (row && !a.effort && EFFORT_ORDER.includes(row.effort)) a.effort = row.effort;
   }
+  if (dropped) await keepAgents($, agents);
+}
+
+// ---- running agents across a reload ----
+// A reload starts this module's memory over, and a subagent already at work
+// was then known by nothing: the line and the toasts lost its role, its
+// assignment, its time and its step. So what they need of each running
+// subagent is kept in $.store under the session's id ('agents:<id>'):
+// written when one starts, takes a new step or part, or ends (never on the
+// refresh), the key deleted when none runs. At the load it is read back,
+// only the agents $.agent.list() still runs; without the list, none. The
+// time it started is the first one, so the time and the estimate go on.
+// Side sessions are not kept: the poll at load finds them again.
+const KEPT = ['id', 'type', 'description', 'model', 'effort', 'background', 'startedAt', 'step', 'part', 'tokens'];
+async function agentsKey($) { try { const id = await $.session.id(); return id ? 'agents:' + id : null; } catch { return null; } }
+async function keepAgents($, agents) {
+  try {
+    const key = await agentsKey($);
+    if (!key) return;
+    const list = [...agents.values()].filter(a => !a.provisional && a.kind !== 'session')
+      .map(a => Object.fromEntries(KEPT.filter(k => a[k] !== undefined && a[k] !== null).map(k => [k, a[k]])));
+    if (list.length) await $.store.set(key, list); else await $.store.delete(key);
+  } catch { /* no store or no id: this copy's own memory */ }
+}
+// the kept agents the engine still runs, into `agents`; how many came back
+async function restoreAgents($, agents) {
+  try {
+    const key = await agentsKey($);
+    const got = key ? await $.store.get(key) : null;
+    if (!Array.isArray(got) || !got.length) return 0;
+    const live = await liveAgents($);
+    if (!live) return 0;
+    let history = null;
+    try { history = await $.store.get('agentRuns'); } catch { /* no history */ }
+    let n = 0;
+    for (const k of got) {
+      if (!k || typeof k !== 'object' || typeof k.id !== 'string' || typeof k.type !== 'string' || typeof k.startedAt !== 'number' || !live.has(k.id) || agents.has(k.id)) continue;
+      const runs = history && typeof history === 'object' && Array.isArray(history[k.type]) ? history[k.type] : [];
+      agents.set(k.id, { ...k, background: !!k.background, step: k.step || null, runs });
+      n++;
+    }
+    return n;
+  } catch { return 0; }
 }
 
 // ---- side sessions this session started ----
@@ -714,6 +780,25 @@ async function tick($, st) {
     if (await noticesOn($)) $.ui.toast(progressText(st.list(), t));
   }
 }
+// the room for the status line, from the surfaces that draw the session
+// (lineMaxOf), into st.max: asked once and kept (st.surfaces) until one
+// attaches or detaches; an answer of none is asked again next time, an
+// engine without the call keeps LINE_MAX. Whether it changed.
+async function learnSurfaces($, st) {
+  if (st.surfaces) return false;
+  let list;
+  try { list = await $.session.surfaces(); } catch { st.surfaces = []; return false; }
+  if (!Array.isArray(list) || !list.length) return false;
+  st.surfaces = list;
+  const was = st.max;
+  st.max = lineMaxOf(list);
+  return st.max !== was;
+}
+// the line drawn again as it stands, by the engine's clock
+async function redrawLine($, st) {
+  const line = st.lineNow(await $.clock.now());
+  if (line !== undefined) $.ui.status(line);
+}
 // this session's id, as the app's records and list_sessions name it
 async function hostOf($, st) {
   if (st.host) return st.host;
@@ -740,8 +825,6 @@ async function pollSessions($, st, t) {
     if (a.kind === 'session' && !ids.has(id)) {
       st.agents.delete(id);
       changed = true;
-      // for the panel: a side session's turn that ended
-      keepDone(st.done, { name: nameOf(a), session: true, ms: t - a.startedAt });
       if (notify) $.ui.toast(sessionDoneText(a, t - a.startedAt, st.list()), { timeoutMs: TOAST_LONG });
     }
   }
@@ -752,9 +835,6 @@ async function pollSessions($, st, t) {
     const since = st.watchSince && t - st.watchSince <= WATCH_FOR ? st.watchSince : t;
     st.agents.set(r.sessionId, { id: r.sessionId, kind: 'session', type: r.name || r.title || 'session', label: shortTitle(r), description: r.title, startedAt: since, background: true, runs: [], step: null });
     changed = true;
-    // one that started now brings the panel as an agent's start does; one
-    // already at work when the module loaded does not
-    if (!quiet) autoPanel($, st.pn);
     if (notify) $.ui.toast(sessionStartedText(r, st.list()));
   }
   st.quiet = false;
@@ -777,9 +857,59 @@ async function switchOn($) {
     return JSON.parse(await $.fs.read(home + '/.claude/pacing/config.json')).switchAsk !== false;
   } catch { return true; }
 }
-// the effort the session runs at, where the engine says (CLAUDE_EFFORT)
-async function effortNow($) {
+// the effort the session runs at: as last set in it (`ss`, see "the
+// session's model and effort as last set"), else where the engine says
+// (CLAUDE_EFFORT, fixed at the session's start)
+async function effortNow($, ss = null) {
+  if (ss && ss.effort) return ss.effort;
   try { const v = await $.env.get('CLAUDE_EFFORT'); return typeof v === 'string' && v ? v : null; } catch { return null; }
+}
+
+// ---- the session's model and effort as last set ----
+// /model and /effort switch the session at once, but what the module reads
+// lags: CLAUDE_EFFORT is fixed at the session's start, and the app's model
+// menu and the turn's usage name the old model until the next turn. A live
+// press of Switch ran both and the session did switch, yet it read as a
+// switch that had failed, and the row would have offered it again. So the
+// module notes what each of the two commands set when it ran without an
+// error, pressed or typed (command.run), in `ss` ({ model, effort }), kept in
+// $.store under the session's id ('switch:<id>') so a reload keeps it. The
+// effort stands for the session; the model until the next turn's usage names
+// one. A model given by an alias ("opus") is noted as the id the session
+// reports, where that agrees.
+async function switchKey($) { try { const id = await $.session.id(); return id ? 'switch:' + id : null; } catch { return null; } }
+async function keepSwitch($, ss) {
+  try {
+    const key = await switchKey($);
+    if (!key) return;
+    if (ss.model || ss.effort) await $.store.set(key, { model: ss.model, effort: ss.effort }); else await $.store.delete(key);
+  } catch { /* no store or no id: this copy's own memory */ }
+}
+async function restoreSwitch($, ss) {
+  try {
+    const key = await switchKey($);
+    const got = key ? await $.store.get(key) : null;
+    if (!got || typeof got !== 'object') return;
+    if (!ss.model && typeof got.model === 'string' && got.model) ss.model = got.model;
+    if (!ss.effort && EFFORT_ORDER.includes(got.effort)) ss.effort = got.effort;
+  } catch { /* none kept */ }
+}
+// a /model or /effort that ran: what it set, into `ss`; whether it noted anything
+export const commandFailed = r => !!r && ((typeof r.exitCode === 'number' && r.exitCode !== 0) || r.isError === true);
+async function noteSet($, ss, command, args) {
+  const v = String(args || '').trim().toLowerCase();
+  if (command === 'effort') {
+    if (!EFFORT_ORDER.includes(v)) return false;
+    ss.effort = v;
+  } else if (/^claude-[a-z]+-\d+-\d+/.test(v)) ss.model = v;
+  else if (/^[a-z]+$/.test(v)) {
+    let id = null;
+    try { id = await $.session.model(); } catch { /* not known */ }
+    if (typeof id !== 'string' || !id.startsWith('claude-' + v + '-')) return false;
+    ss.model = id;
+  } else return false;
+  await keepSwitch($, ss);
+  return true;
 }
 
 // ---- each finished task of a role agent, on record ----
@@ -801,6 +931,9 @@ async function effortNow($) {
 //           gives), asked once as the run ends; else the last figure the
 //           refresh saw while it ran. The run's own usage is not it: that is
 //           every request summed, many times the agent's size.
+//   spent   that usage, the run's requests summed, as input, output, cache
+//           read and cache write (--spent): what the task cost, which
+//           saved.mjs prices. Left out where the run reported no usage.
 // Without a model config.mjs knows, an effort or a token count there is no
 // record: a guessed one would say "start a fresh agent" at the wrong time.
 // The command says when the role's next task goes to a fresh agent (five
@@ -811,7 +944,10 @@ const ROLES = ['reader', 'implementer', 'verifier', 'researcher'];
 export const roleFor = type => { const m = /^(?:pacing:)?([a-z]+)$/.exec(String(type || '')); return m && ROLES.includes(m[1]) ? m[1] : null; };
 // "claude-haiku-5-5", "haiku" -> "haiku"
 export const shortModel = id => { const m = /^(?:claude-)?([a-z]+)/.exec(String(id || '').toLowerCase()); return m ? m[1] : null; };
-export const recordArgv = (root, role, id, model, effort, tokens) => ['node', root + '/skills/pacing/scripts/config.mjs', 'agent', role, id, model, effort, String(Math.round(tokens))];
+// what a run's usage spent, { in, out, read, write }, or null without usage
+export const spentOf = u => (u ? { in: u.input_tokens || 0, out: u.output_tokens || 0, read: u.cache_read_input_tokens || 0, write: u.cache_creation_input_tokens || 0 } : null);
+export const recordArgv = (root, role, id, model, effort, tokens, spent = null) => ['node', root + '/skills/pacing/scripts/config.mjs', 'agent', role, id, model, effort, String(Math.round(tokens)),
+  ...(spent && ['in', 'out', 'read', 'write'].every(k => amount(spent[k])) ? ['--spent', ['in', 'out', 'read', 'write'].map(k => Math.round(spent[k])).join(',')] : [])];
 // "the next implementer task goes to a fresh agent (5 tasks or 150k tokens reached)", from the command's answer; or null
 export const freshOf = out => { const m = /the next \w+ task goes to a fresh agent(?: \([^)\n]*\))?/.exec(String(out || '')); return m ? m[0] : null; };
 export const freshNote = lines => (lines.length
@@ -820,26 +956,27 @@ export const freshNote = lines => (lines.length
 // what the engine's list says of one agent, whatever its status; null without it
 async function agentRow($, id) { try { return (await $.agent.list()).find(a => a.id === id) || null; } catch { return null; } }
 // the record of one finished task; answers the line about a fresh agent, or null
-async function recordAgent($, a, usage) {
+async function recordAgent($, a, usage, ss = null) {
   try {
     const role = roleFor(a.type);
     if (!role) return null;
     const row = await agentRow($, a.id);
     const model = shortModel((usage && usage.model) || (row && row.model) || a.model);
-    const effort = [a.effort, row && row.effort, await effortNow($)].find(v => EFFORT_ORDER.includes(v));
+    const effort = [a.effort, row && row.effort, await effortNow($, ss)].find(v => EFFORT_ORDER.includes(v));
     const tokens = row && row.tokenCount > 0 ? row.tokenCount : a.tokens;
     if (!model || !effort || !(tokens > 0)) return null;
-    const r = await $.process.run(recordArgv($.plugin.root, role, a.id, model, effort, tokens), { timeoutMs: 20000 });
+    const r = await $.process.run(recordArgv($.plugin.root, role, a.id, model, effort, tokens, spentOf(usage)), { timeoutMs: 20000 });
     return r.exitCode === 0 ? freshOf(r.stdout) : null;
   } catch { return null; }
 }
 
 // ---- reports the module answers itself ----
-// /pacing-usage, /pacing-help and /pacing-guide run the same scripts the
-// skill runs and show their output as the command's own, as /pacing-status
-// does: no model call. A command's text is drawn as markdown, so the usage
-// report (bars and a table in fixed-width columns) goes in a fenced code
-// block, as the skill shows it, and the help and the guide, markdown
+// /pacing-usage, /pacing-help, /pacing-guide, /pacing-doctor and
+// /pacing-saved run the same scripts the skill runs and show their output as
+// the command's own, as /pacing-status does: no model call. A command's
+// text is drawn as markdown, so the usage report (bars and a table in
+// fixed-width columns), the self-check and the savings table go in a fenced
+// code block, as the skill shows them, and the help and the guide, markdown
 // themselves, as they are. Each is marked for the person alone
 // (isTextDisplayOnly): the session never reads it, so the guide's 30 000
 // characters cost nothing on later turns. None is `immediate`: a command
@@ -860,125 +997,10 @@ export const usageText = out => {
   const lines = String(out || '').replace(/\r/g, '').split('\n');
   const end = lines.findIndex(l => /^day \d+ of \d+/.test(l));
   const block = (end < 0 ? lines : lines.slice(0, end)).join('\n').trim();
-  const level = (lines.find(l => l.startsWith('All models used ')) || '').split(' -> ')[1] || '';
+  const level = (lines.find(l => /^(Weekly|All models) used /.test(l)) || '').split(' -> ')[1] || '';
   const now = (lines.find(l => l.startsWith('do: ')) || '').slice(4).replace(/ \(without the hooks module: [^)]*\)/g, '');
   return '```\n' + block + '\n```' + (now && (/^(over|throttle|stop)/.test(level) || now.includes('Switch row')) ? '\nNow: ' + now : '');
 };
-
-// ---- the agents panel ----
-// A pane of the engine's ($.ui.open, drawn by a ui.render hook on `Pane`),
-// for what the status line has no room for: a header with the count and the
-// budget share, a row per running agent and working side session (name and
-// assignment; under it the step, the time, the progress, the time left by
-// estimate, the model and effort where known), and under them the agents this session finished
-// (name and assignment; how long, the run's tokens, the first line of its
-// answer where it gave one). Redrawn with the status line: every 5 seconds
-// while anything runs, and at every agent event.
-// With `agentsPanel` "auto" in config.json (the default, also when absent)
-// it opens when an agent or a side session starts; once the person closed
-// it (its close mark, or /pacing-agents) it stays closed for the session,
-// which a reload must not forget: kept in $.store by the session's id.
-// /pacing-agents opens or closes it at any time. "off": never by itself.
-// An open that no surface draws ({ isPlaced: false }: a narrow terminal, no
-// surface attached) is left as it is, and the next agent's start asks again.
-// No Box has a width: a width must be a whole number or a whole percentage,
-// and one of zero is refused.
-export const PANEL = 'pacing-agents';
-export const PANEL_TITLE = 'Agents';
-export const DONE_KEPT = 50;
-export const DONE_SHOWN = 10;
-const PANEL_FORGET = 7 * 24 * 60 * 60 * 1000;
-export const OUTCOME_MAX = 100;
-// the first line of an agent's answer, without markdown's marks; '' for none
-export const outcomeOf = text => {
-  const line = String(text || '').split('\n').map(l => l.replace(/^[\s#>*-]+/, '').replace(/[*`]/g, '').trim()).find(Boolean) || '';
-  return cut(line, OUTCOME_MAX);
-};
-// The panel as lines of text, each { text, dim }. `glance` is the small form
-// (a widget on the desktop app): the header and a line per agent.
-export const panelLines = (agents, done, j, now, glance = false) => {
-  const head = (agents.length ? runningText(agents) : 'No agent is running') + (j ? ' · Budget ' + (j.ofBudget != null ? j.ofBudget + '%' : '-') : '');
-  const out = [{ text: head }];
-  if (glance) {
-    for (const a of agents.slice(0, 4)) out.push({ text: '⏳ ' + detail(a, now, { step: 1, time: 1, est: 1 }) });
-    if (agents.length > 4) out.push({ text: 'and ' + (agents.length - 4) + ' more', dim: true });
-    return out;
-  }
-  for (const a of agents) {
-    out.push({ text: '⏳ ' + nameOf(a) + (a.kind === 'session' ? ' (side session)' : taskOf(a) ? ': ' + taskOf(a) : '') });
-    out.push({ text: '   ' + [a.step || (a.kind === 'session' ? 'working' : 'running'), dur(now - a.startedAt), progText(a, now), leftText(a, now), runOn(a)].filter(Boolean).join(' · '), dim: true });
-  }
-  if (done.length) {
-    out.push({ text: ' ' }, { text: 'Finished in this session' });
-    const shown = done.slice(-DONE_SHOWN).reverse();
-    for (const d of shown) {
-      out.push({ text: (d.aborted ? '✗ ' : '✓ ') + d.name + (d.session ? ' (side session)' : d.task ? ': ' + d.task : '') });
-      out.push({ text: '   ' + [(d.aborted ? 'stopped after ' : d.session ? 'ended its turn after ' : '') + dur(d.ms), d.tokens ? kTok(d.tokens) + ' tokens' : '', d.outcome].filter(Boolean).join(' · '), dim: true });
-    }
-    if (done.length > shown.length) out.push({ text: 'and ' + (done.length - shown.length) + ' earlier', dim: true });
-  } else if (!agents.length) {
-    out.push({ text: 'Agents and side sessions this session starts show here.', dim: true });
-  }
-  return out;
-};
-// one more finished run for the panel, the oldest let go past DONE_KEPT
-function keepDone(done, entry) { done.push(entry); if (done.length > DONE_KEPT) done.splice(0, done.length - DONE_KEPT); }
-// whether the person closed the panel in this session, and the note of it
-async function closedBefore($) {
-  try {
-    const id = await $.session.id();
-    const all = id ? await $.store.get('panelClosed') : null;
-    return !!(all && typeof all === 'object' && all[id]);
-  } catch { return false; }
-}
-async function noteClosed($, closed) {
-  try {
-    const id = await $.session.id();
-    if (!id) return;
-    const got = await $.store.get('panelClosed');
-    const all = got && typeof got === 'object' ? { ...got } : {};
-    const now = await $.clock.now();
-    for (const k of Object.keys(all)) if (!(now - all[k] < PANEL_FORGET)) delete all[k];
-    if (closed) all[id] = now; else delete all[id];
-    await $.store.set('panelClosed', all);
-  } catch { /* no store or no id: this copy's own memory */ }
-}
-// open it, or retitle the open one; `pn` is the copy's memory of the panel
-// ({ open, closed, opening }). Answers what the engine said, or null.
-async function openPanel($, pn) {
-  try {
-    const r = await $.ui.open({ id: PANEL, title: PANEL_TITLE });
-    pn.open = !!(r && r.isPlaced);
-    return r || null;
-  } catch { pn.open = false; return null; }
-}
-// An agent or a side session started: the panel opens by itself, unless it
-// is up, the person closed it in this session, or the setting is "off".
-// The person's close is heard in two ways: the engine's `ui.close` with the
-// origin `person` (see register), and here, where a panel this copy saw
-// drawn is no longer among the engine's panes though this copy did not close
-// it. One that is listed but waits undrawn was not closed: it is asked for
-// again.
-async function autoPanel($, pn) {
-  if (pn.closed || pn.opening) return;
-  pn.opening = true;
-  try {
-    if ((await configOf($)).agentsPanel === 'off') return;
-    if (pn.closed === null) pn.closed = await closedBefore($);
-    if (pn.closed) return;
-    let panes = null;
-    try { panes = await $.ui.panes(); } catch { /* an engine without the list: this copy's own memory */ }
-    const mine = panes ? panes.find(p => p.id === PANEL) : null;
-    if (panes ? mine && mine.isPlaced : pn.open) { pn.open = true; return; }
-    if (pn.open && panes && !mine) {
-      pn.open = false;
-      pn.closed = true;
-      await noteClosed($, true);
-      return;
-    }
-    await openPanel($, pn);
-  } catch { /* the next start asks again */ } finally { pn.opening = false; }
-}
 
 // ---- an offer to switch the session's model or effort ----
 // The reading recommends what the session should run on. Where the session
@@ -1004,7 +1026,7 @@ export const switchOffer = (j, curModel, curEffort) => {
   if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumOut)
     return make('out', rec, name + ' is out until the reset. Switch this session to ' + rec.label + ' ' + rec.effort + '.');
   if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumHeld)
-    return make('held', rec, name + '\'s own meter is over its line. Switch to ' + rec.label + ' ' + rec.effort + '; ' + name.split(' ')[0] + ' stays for hard tasks.');
+    return make('held', rec, name + '\'s meter is over its budget line. Switch to ' + rec.label + ' ' + rec.effort + '; ' + name.split(' ')[0] + ' stays for hard tasks.');
   if (rec && (!sameModel(curModel, rec.model) || (curEffort && curEffort !== rec.effort && !j.effortStep)))
     return make('model', rec, 'This week\'s budget suggests ' + rec.label + ' ' + rec.effort + ' for this session.');
   const step = j.effortStep;
@@ -1012,35 +1034,43 @@ export const switchOffer = (j, curModel, curEffort) => {
     return make('effort', step, 'Over budget: one step less effort saves the most. Switch to ' + step.label + ' ' + step.effort + '.');
   return null;
 };
-export const switchedText = (target, nowModel, nowEffort) => (sameModel(nowModel, target.model)
-  ? ICON.switched + ' this session now runs on ' + modelLabel(nowModel) + (nowEffort ? ' ' + nowEffort : target.effort ? ' ' + target.effort : '') + '.'
+// After a press. `was`: the model before it; where the model changed, the
+// app's model menu may go on naming that one for a while, and the toast says
+// so. A read-back that disagrees right after the press is read again after
+// READ_BACK_LAG; a command that ran without an error is trusted over it.
+export const READ_BACK_LAG = 2000;
+export const switchedText = (target, nowModel, nowEffort, was = null) => (sameModel(nowModel, target.model)
+  ? ICON.switched + ' this session now runs on ' + modelLabel(nowModel) + (nowEffort ? ' ' + nowEffort : target.effort ? ' ' + target.effort : '')
+    + (typeof was === 'string' && was && !sameModel(was, target.model) ? '; the model menu may still show ' + modelLabel(was) : '') + '.'
   : ICON.failed + ' the switch did not take; the session still runs on ' + modelLabel(nowModel) + '. The model menu does it: ' + target.label + ', effort ' + target.effort + '.');
-// The head is the weekly meter's level and share. The per-model meter shows
-// as its week's usage among the meters and nowhere else: a share of its line
-// ("Fable held 158%") read as usage over 100 %. When that meter set the
-// level, the head has the share alone, without the level's word, which
-// would not match the weekly share beside it.
+// The head is what is left under the weekly meter's line, without the
+// level's word. The per-model meter shows as its week's usage among the
+// meters and nowhere else: a share of its line ("Fable held 158%") read as
+// usage over 100 %.
 // A side session (one another session started, `spawned`) shows no per-model
 // meter at all: the figure is the account's, its session on the per-model
 // model is the one that started it, and in a side session's narrow line it
 // read as the side session's own use.
 const sideOf = (j, self) => self !== null || j.spawned === true;
-// The compact line: the budget share, then the usage meters, with no tiers
-// (the tier split is /pacing-status's, in the long form):
-//   Budget 77% · usage: Weekly 36%, Fable 40%
+// The compact line: what is left of the budget (budgetText), then the usage
+// meters, with no tiers (the tier split is /pacing-status's, in the long form):
+//   Budget left: 850K · usage: Weekly 36% Fable 40%
 // A side session leads with a plain "sub" and shows no per-model meter.
 // While subagents run (`agents`, see "subagents at work"), the line leads
-// with them and the whole line stays within LINE_MAX: "sub" if it costs the
-// agents nothing, the agents (shrunk in steps, never without their count),
-// the budget share (always), then the usage only as far as it fits whole,
-// the per-model figure going before the weekly one.
+// with their count. The whole line stays within `max` (LINE_MAX, or
+// LINE_MAX_NARROW where the desktop app draws it): "sub" if it costs the
+// agents nothing, the agents' count (without "running" where that does not
+// fit), the budget part (always, whole), then the usage only as far as it
+// fits whole, the per-model figure going before the weekly one:
+//   ⏳ 2 Subagents · Budget left: 850K                 (the desktop app)
+//   ⏳ 1 Subagent running · Budget left: 850K · usage: Weekly 36% Fable 40%
 // `mix` is no longer drawn here; it stays in the signature for fullText's sake.
-export const statusText = (j, mix, self = null, now = Date.now(), agents = []) => {
+export const statusText = (j, mix, self = null, now = Date.now(), agents = [], max = LINE_MAX) => {
   const side = sideOf(j, self);
   const name = j.premiumLabel && !side ? j.premiumLabel.split(' ')[0] : null;
-  // the weekly meter's share of today's budget line, without a word on it:
-  // over 100 % is over. The toast on a change of level says the rest.
-  const level = 'Budget ' + (j.ofBudget != null ? j.ofBudget + '%' : '-');
+  // what is left under today's budget line, without a word on the level:
+  // under zero is over. The toast on a change of level says the rest.
+  const level = budgetText(j);
   const sub = side ? 'sub' : null;
   const weekly = 'usage: Weekly ' + Math.round(j.all) + '%';
   let usage = weekly;
@@ -1048,21 +1078,34 @@ export const statusText = (j, mix, self = null, now = Date.now(), agents = []) =
   // /pacing-status's, and a stale one still brings the note asking for a
   // full reading
   if (j.premium != null && name) usage += ' ' + name + ' ' + Math.round(j.premium) + '%';
+  let line = [sub, level].filter(Boolean).join(' · ');
   if (agents.length) {
-    // the agents' fixed share: what the budget share leaves. "sub" goes
-    // first only where it costs the agents no step of their detail.
-    const room = LINE_MAX - chars(level) - 3;
+    // the agents' share: what the budget part leaves. "sub" goes first only
+    // where it costs the agents no word.
+    const room = max - chars(level) - 3;
     const lead = agentPart(agents, now, room);
     const withSub = sub && agentPart(agents, now, room - chars(sub) - 3) === lead;
-    const line = [withSub ? sub : null, lead, level].filter(Boolean).join(' · ');
-    for (const more of [usage, weekly]) if (chars(line + ' · ' + more) <= LINE_MAX) return line + ' · ' + more;
-    return line;
+    line = [withSub ? sub : null, lead, level].filter(Boolean).join(' · ');
   }
-  return [sub, level, usage].filter(Boolean).join(' · ');
+  for (const more of [usage, weekly]) if (chars(line + ' · ' + more) <= max) return line + ' · ' + more;
+  return line;
 };
 
-// the long form, as the line read before 0.9.5: for /pacing-status
-export const fullText = (j, mix, self = null, now = Date.now()) => {
+// a tier number as the user reads it: the model with its effort, as
+// budget.mjs names it (tierNames); from an older budget.mjs, the model alone
+// by tierOf; "Other" off the ladder
+export const tierName = (j, tier) => {
+  if (tier === 'Other') return 'Other';
+  const names = j && j.tierNames && typeof j.tierNames === 'object' ? j.tierNames : {};
+  if (typeof names[tier] === 'string' && names[tier]) return names[tier];
+  const ids = Object.entries((j && j.tierOf) || {}).filter(([, n]) => n === tier).map(([id]) => modelLabel(id));
+  return ids.length ? [...new Set(ids)].join(' / ') : 'Tier ' + tier;
+};
+// the long form, as the line read before 0.9.5: for /pacing-status. Models
+// by name and effort, never a tier number: "🟡Fable 5.2 high 80%"; a side
+// session leads with the model it runs on (`model`, its id, names one off
+// the ladder): "⚪side session on Opus 5.5 medium".
+export const fullText = (j, mix, self = null, now = Date.now(), model = null) => {
   const side = sideOf(j, self);
   const meters = [Math.round(j.all) + '% Weekly'];
   // the engine never hands a plugin the per-model meter: its figure is carried
@@ -1075,28 +1118,28 @@ export const fullText = (j, mix, self = null, now = Date.now()) => {
       + (old ? ' ' + ageText(age) + ' ago' + (j.premiumEstimate != null && Math.round(j.premiumEstimate) > Math.round(j.premium) ? ', est. ' + Math.round(j.premiumEstimate) + '%' : '') : ''));
   }
   const parts = [];
-  // the weekly meter's share of its line; the per-model meter shows as its
-  // usage among the meters only (see statusText)
+  // what is left under the weekly meter's line; the per-model meter shows as
+  // its usage among the meters only (see statusText)
   // (the "Now:" line /pacing-status adds says what to do about it)
-  const share = j.ofBudget != null ? 'Budget ' + j.ofBudget + '%' : null;
-  if (self !== null) parts.push(square(self) + (self === 'Other' ? 'Other' : 'Tier ' + self) + ' Sub Agent' + (share ? ' - ' + share : ''));
+  const share = budgetText(j);
+  if (self !== null) parts.push(square(self) + 'side session on ' + (self === 'Other' && model ? modelLabel(model) : tierName(j, self)) + (share ? ' - ' + share : ''));
   else if (share) parts.push(share);
-  if (mix.length) parts.push(mix.map(x => square(x.tier) + (x.tier === 'Other' ? 'Other' : 'Tier ' + x.tier) + '[' + x.share + '%]').join(' '));
+  if (mix.length) parts.push(mix.map(x => square(x.tier) + tierName(j, x.tier) + ' ' + x.share + '%').join(' '));
   parts.push('(' + meters.join(', ') + ')');
   return parts.join(', ');
 };
 
 // the status line from a reading. A side session leads with its own tier, by
 // the model its main thread runs on; a model off the ladder is Other.
-export const lineOf = (j, model, tokens, agentTokens, now, full = false, agents = []) => {
+export const lineOf = (j, model, tokens, agentTokens, now, full = false, agents = [], max = LINE_MAX) => {
   const prices = j.prices || {}, tierOf = j.tierOf || {};
   const child = j.spawned === true && typeof model === 'string' && model !== '';
   const id = child ? idOf(model, prices) : null;
   const self = child ? (id && tierOf[id]) || 'Other' : null;
-  if (full) return fullText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now)
+  if (full) return fullText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now, child ? model : null)
     + (agents.length ? '\nRunning: ' + agents.map(a => (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { task: TASK_MAX, time: 1, est: 1, step: 1 }) + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.kind === 'session' && a.description ? ', ' + a.description : '')).join('; ')
       + (agents.some(a => !partText(a) && estText(a, now)) ? '\n~ is a rough estimate from how long that kind of agent usually takes, not a measure of the work done.' : '') : '');
-  return statusText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now, agents);
+  return statusText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now, agents, max);
 };
 
 // ---- a new version: the session reloads its plugins by itself ----
@@ -1113,19 +1156,26 @@ export const lineOf = (j, model, tokens, agentTokens, now, full = false, agents 
 //   the copy the reload brings says so at its load, "🔄 updated to
 //   0.9.11 and reloaded." (a mark the copy that asked left in $.store under
 //   the session's id tells it; the mark goes once it is said);
-//   a run the engine rejects: "Pacing 0.9.11 is installed: type
-//   /reload-plugins to load it.", once per version.
+//   a run the engine rejects: a row above the prompt, "📦 Pacing 0.9.11 is
+//   installed." with Reload and Not now (see "the Reload row").
 // A reload starts changed modules only: a version that left this file as it
 // was keeps this copy running. So RELOAD_SETTLE after the command ran, the
 // copy that asked looks once more. Its own file on disk as it was loaded:
 // it is the new version's code, and says "updated". Its file changed and it
-// still runs: the reload did not take, and the person is asked to type it.
+// still runs: the reload did not take, and the Reload row offers it.
 // Never a second attempt for a version: a fresh copy takes the version on
 // disk as its own, and a copy that stays remembers what it asked for.
 // A manifest that does not read or names no version (half-written during a
 // sync) is no change, and is read again at the next look. A side session
 // nobody types in is left alone: it loads the new version at its next start.
-// `/pacing reload off` turns it off.
+// `/pacing reload off` turns the attempt by itself off: then the row shows
+// at once, and nothing runs until Reload is pressed.
+// The Reload row: in the band above the prompt, like the Switch row, until
+// this copy is replaced or Not now is pressed (that version only; the next
+// one shows it again). Reload runs /reload-plugins as above; where the
+// engine refuses it, the command goes into the prompt box and a toast says
+// "📦 Press Enter to reload.", so one key is left; where even that fails,
+// the line to type it.
 export const RELOAD_CHECK_EVERY = 5 * 60 * 1000;
 export const RELOAD_AFTER_TURN = 2 * 1000;
 export const RELOAD_SETTLE = 10 * 1000;
@@ -1135,6 +1185,8 @@ export const RELOAD_GIVE_UP = 10 * 60 * 1000;
 export const versionOf = text => { try { const v = JSON.parse(text).version; return typeof v === 'string' && v ? v : null; } catch { return null; } };
 export const reloadedText = version => ICON.updated + ' updated to ' + version + ' and reloaded.';
 export const reloadAskText = version => ICON.waiting + ' Pacing ' + version + ' is installed: type /reload-plugins to load it.';
+export const reloadRowText = version => ICON.waiting + ' Pacing ' + version + ' is installed.';
+export const RELOAD_ENTER = ICON.waiting + ' Press Enter to reload.';
 // whether the reload at a new version is on (config.json's autoReload; on unless false)
 async function reloadOn($) {
   try {
@@ -1150,12 +1202,33 @@ async function codeOnDisk($) { try { return await $.fs.read($.plugin.root + '/ho
 async function reloadKey($) { try { const id = await $.session.id(); return id ? 'reload:' + id : null; } catch { return null; } }
 function say($, text) { try { $.ui.toast(text, { timeoutMs: TOAST_LONG }); } catch { /* an engine without toasts */ } }
 async function unmark($, key) { if (key) { try { await $.store.delete(key); } catch { /* no store */ } } }
+// the Reload row for a version, unless Not now was pressed for it
+function offerReload($, rl, version) {
+  if (rl.dismissed.has(version)) return;
+  rl.row = version;
+  redraw($);
+}
+// /reload-plugins in the prompt box for the person to send, and the toast
+// that says so; where the box cannot be filled, the line to type it
+async function fillReload($, version) {
+  try {
+    const r = await $.prompt.fill({ text: '/reload-plugins', mode: 'replace' });
+    if (r && r.isFilled === false) throw new Error('not filled');
+    say($, RELOAD_ENTER);
+  } catch { say($, reloadAskText(version)); }
+}
 // /reload-plugins as if typed. Started, never awaited: it is queued until
-// the session is idle, and may never answer the copy it unloads.
-async function runReload($, rl, key, version) {
+// the session is idle, and may never answer the copy it unloads. `pressed`:
+// the person pressed Reload, so a refusal fills the prompt box instead of
+// offering the row again.
+async function runReload($, rl, key, version, pressed = false) {
   try { await $.command.run({ command: 'reload-plugins' }); } catch {
-    // rejected, or an engine without the call: the person types it
-    if (rl.asked && rl.asked.version === version) { rl.asked = null; await unmark($, key); say($, reloadAskText(version)); }
+    // rejected, or an engine without the call: the row, or the box filled
+    if (rl.asked && rl.asked.version === version) {
+      rl.asked = null;
+      await unmark($, key);
+      if (pressed) await fillReload($, version); else offerReload($, rl, version);
+    }
     return;
   }
   // it ran and this copy still runs: one more look says which it is
@@ -1191,17 +1264,34 @@ async function look($, rl) {
       // the mark gone: a fresh copy has taken over and said so
       if (key && !mark) return;
       await unmark($, key);
-      if (ran && rl.code !== null && (await codeOnDisk($)) === rl.code) { rl.loaded = version; say($, reloadedText(version)); }
-      else say($, reloadAskText(version));
+      if (ran && rl.code !== null && (await codeOnDisk($)) === rl.code) { rl.loaded = version; rl.row = null; redraw($); say($, reloadedText(version)); }
+      else offerReload($, rl, version);
       return;
     }
     if (disk === rl.loaded || disk === rl.acted) return;
-    if (!rl.free() || !(await reloadOn($))) return;
-    rl.acted = disk;
-    rl.asked = { version: disk, at: await $.clock.now(), ran: false };
-    if (key) { try { await $.store.set(key, { version: disk, at: rl.asked.at }); } catch { /* no store: this copy's own memory */ } }
+    // off: the row at once, nothing by itself
+    if (!(await reloadOn($))) { if (rl.row !== disk) offerReload($, rl, disk); return; }
+    if (!rl.free()) return;
+    await askReload($, rl, key, disk);
     runReload($, rl, key, disk).catch(() => { /* said already, or the next look */ });
   } catch { /* the next look */ } finally { rl.looking = false; }
+}
+// a reload this copy asks for: once per version, with the mark the copy it
+// brings finds in the store
+async function askReload($, rl, key, version) {
+  rl.acted = version;
+  rl.row = null;
+  let at = Date.now();
+  try { at = await $.clock.now(); } catch { /* the system's clock */ }
+  rl.asked = { version, at, ran: false };
+  if (key) { try { await $.store.set(key, { version, at }); } catch { /* no store: this copy's own memory */ } }
+}
+// Reload pressed in the row: the same run, a refusal filling the prompt box
+async function pressReload($, rl, version) {
+  redraw($);
+  const key = await reloadKey($);
+  await askReload($, rl, key, version);
+  await runReload($, rl, key, version, true);
 }
 
 /** @type {import('claude-code').Register} */
@@ -1211,6 +1301,8 @@ export const register = on => {
   // tokens per model id: the session's own turns, and its subagents'
   const tokens = {};
   const agentTokens = {};
+  // all of them in one sum, and how much of it a reading has handed budget.mjs
+  const spend = { total: 0, sent: 0 };
   let last = null;
   let reading = null;
   let running = false;
@@ -1227,6 +1319,11 @@ export const register = on => {
   // the desktop app's own record of the session). The model it runs on: its
   // main thread's last turn.
   let sessionModel = null;
+  // the session's model and effort as last set by /model and /effort (see
+  // "the session's model and effort as last set"): the model until the next
+  // turn's usage names one
+  const ss = { model: null, effort: null };
+  const modelNow = () => ss.model || sessionModel;
   // the offer to compact: the one in the band ({ level, tokens }) or null, the
   // size at each level's last offer, and whether a person has typed here
   let offer = null;
@@ -1253,28 +1350,24 @@ export const register = on => {
   // a role whose next task goes to a fresh agent: the line for the session,
   // by role, until the next prompt carries it
   const fresh = new Map();
-  // the runs this session's agents finished, for the panel, and the panel as
-  // this copy knows it: drawn, closed by the person (null: not asked yet),
-  // an open under way
-  const done = [];
-  const pn = { open: false, closed: null, opening: false };
   const runningAgents = () => [...agents.values()].sort((x, y) => x.startedAt - y.startedAt);
   // the status line as it stands, with the agents when any run
   const lineNow = now => {
     const list = runningAgents();
-    if (reading) return lineOf(reading, sessionModel, tokens, agentTokens, now, false, list);
-    return list.length ? agentPart(list, now, LINE_MAX) : undefined;
+    if (reading) return lineOf(reading, sessionModel, tokens, agentTokens, now, false, list, st.max);
+    return list.length ? agentPart(list, now, st.max) : undefined;
   };
-  const st = { agents, timer: null, settledAt: 0, polledAt: 0, watchUntil: 0, progressAt: 0, host: null, children: 0, quiet: false, watchSince: 0,
-    list: runningAgents, lineNow, reading: () => reading, done, pn };
+  const st = { agents, timer: null, settledAt: 0, polledAt: 0, watchUntil: 0, progressAt: 0, host: null, children: 0, quiet: false, watchSince: 0, max: LINE_MAX, surfaces: null,
+    list: runningAgents, lineNow, reading: () => reading };
   const stopTick = () => stopTickOf(st);
 
   // the reload at a new version (see "a new version"): what the looks read
   // and write. The version and the text this copy was loaded as, the version
   // it asked a reload for and that request while it is open ({ version, at,
   // ran }), whether a main-thread turn runs, whether the band was last drawn
-  // under a survey, the timers, and whether a reload may run now.
-  const rl = { loaded: null, code: null, acted: null, asked: null, busy: false, survey: false, looking: false, timer: null, afterTurn: null,
+  // under a survey, the timers, whether a reload may run now, the version
+  // the Reload row offers (null: none) and the versions Not now dismissed.
+  const rl = { loaded: null, code: null, acted: null, asked: null, busy: false, survey: false, looking: false, timer: null, afterTurn: null, row: null, dismissed: new Set(),
     free: () => attended && !rl.busy && !rl.survey && !runningAgents().some(a => a.kind !== 'session') };
 
   // a main-thread turn runs from here to its turn.complete: no reload meanwhile
@@ -1299,8 +1392,6 @@ export const register = on => {
         startTick($, st);
         $.ui.status(lineNow(now));
         redraw($);
-        // the panel with it; never waited for
-        autoPanel($, pn);
       }
     } catch { /* the spawn shows it */ }
     try { return await next(e); } finally {
@@ -1322,7 +1413,7 @@ export const register = on => {
         const moved = step !== a.step || part !== (a.part || null);
         a.step = step;
         a.part = part;
-        if (moved) redraw($);
+        if (moved) { redraw($); keepAgents($, agents); }
       }
     } catch { /* no step known */ }
     const toSession = !e.agentId && (e.tool === 'mcp__ccd_session__start_session' || e.tool === 'mcp__ccd_session_mgmt__send_message'
@@ -1356,11 +1447,11 @@ export const register = on => {
         if (!e.resume && roleFor(type)) fresh.delete(roleFor(type));
         if (!agents.size) st.progressAt = now;
         agents.set(a.id, a);
+        keepAgents($, agents);
         startTick($, st);
         // in the line at once; its history for the estimate after
         $.ui.status(lineNow(now));
         redraw($);
-        autoPanel($, pn);
         try { const all = await $.store.get('agentRuns'); if (all && typeof all === 'object' && Array.isArray(all[type])) a.runs = all[type]; } catch { /* no history */ }
         if (await noticesOn($)) $.ui.toast(startedText(a, runningAgents()));
       }
@@ -1373,13 +1464,14 @@ export const register = on => {
   // runs, under a survey, and over a subagent's transcript.
   // One action row at a time, by urgency: a switch away from a model that is
   // out or held, then the offer to compact, then a calm switch (another
-  // model, or one step less effort). The background agents' row goes under it.
+  // model, or one step less effort), then the Reload row (see "a new
+  // version"). The background agents' row goes under it.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const p = e.props || {};
     // for the reload at a new version: never under a survey
     if (!(p.view && p.view.agentId) && (!e.plugin || e.plugin === 'pacing')) rl.survey = !!p.hasSurvey;
     const background = runningAgents().filter(a => a.background);
-    if ((!offer && !sw && !background.length) || p.hasSurvey || p.isWorking || (p.view && p.view.agentId) || (e.plugin && e.plugin !== 'pacing')) return next(e);
+    if ((!offer && !sw && !rl.row && !background.length) || p.hasSurvey || p.isWorking || (p.view && p.view.agentId) || (e.plugin && e.plugin !== 'pacing')) return next(e);
     const { Box, Text, Button } = $.ui.resolve(e);
     let now = Date.now();
     if (background.length) { try { now = await $.clock.now(); } catch { /* the system's clock */ } }
@@ -1394,11 +1486,20 @@ export const register = on => {
         Button({ key: 'pacing-switch', label: 'Switch', variant: target.urgent ? 'primary' : 'secondary', onPress: async () => {
           sw = null;
           redraw($);
-          let ran = true;
+          let ran = true, was = null, modelAsked = false, modelRan = null;
           try {
-            const was = await $.session.model();
-            if (!sameModel(was, target.model)) await $.command.run({ command: 'model', args: target.model });
-            if (target.effort && (await effortNow($)) !== target.effort) await $.command.run({ command: 'effort', args: target.effort });
+            was = ss.model || (await $.session.model());
+            if (!sameModel(was, target.model)) {
+              modelAsked = true;
+              modelRan = await $.command.run({ command: 'model', args: target.model });
+              if (commandFailed(modelRan)) throw new Error('refused');
+              ss.model = target.model;
+            }
+            if (target.effort && (await effortNow($, ss)) !== target.effort) {
+              if (commandFailed(await $.command.run({ command: 'effort', args: target.effort }))) throw new Error('refused');
+              ss.effort = target.effort;
+            }
+            await keepSwitch($, ss);
           } catch { ran = false; }
           if (!ran) {
             // the command as text in the box, for the user to send
@@ -1406,14 +1507,39 @@ export const register = on => {
             $.ui.toast(ICON.switched + ' press Enter to switch to ' + target.label + (target.effort ? '; then set effort ' + target.effort + ' in the model menu' : '') + '.', { timeoutMs: TOAST_LONG });
             return;
           }
+          // the read-back: one that disagrees is read again after a moment;
+          // a /model that answered without an error is trusted over it
+          const effort = await effortNow($, ss);
+          const tell = nowModel => {
+            const model = sameModel(nowModel, target.model) || (modelRan && !commandFailed(modelRan)) ? target.model : nowModel;
+            $.ui.toast(switchedText(target, model, effort, was), sameModel(model, target.model) ? undefined : { timeoutMs: TOAST_LONG });
+          };
+          let nowModel = null;
+          try { nowModel = await $.session.model(); } catch { /* no read-back */ }
+          if (sameModel(nowModel, target.model) || !modelAsked) { tell(sameModel(was, target.model) ? target.model : nowModel); return; }
           try {
-            const nowModel = await $.session.model();
-            $.ui.toast(switchedText(target, nowModel, await effortNow($)), sameModel(nowModel, target.model) ? undefined : { timeoutMs: TOAST_LONG });
-          } catch { /* no read-back */ }
+            $.clock.after(READ_BACK_LAG, async () => {
+              let again = nowModel;
+              try { again = await $.session.model(); } catch { /* the first read stands */ }
+              try { tell(again); } catch { /* no toast */ }
+            });
+          } catch { tell(nowModel); }
         } }),
         Button({ key: 'pacing-switch-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { sw = null; redraw($); } }),
       ] });
       return stack(switchRow);
+    }
+    if (!offer && rl.row) {
+      const version = rl.row;
+      const reloadRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
+        Text({ dimColor: true, children: reloadRowText(version) }),
+        Button({ key: 'pacing-reload', label: 'Reload', variant: 'secondary', onPress: () => {
+          rl.row = null;
+          pressReload($, rl, version).catch(() => { /* said already, or the next look */ });
+        } }),
+        Button({ key: 'pacing-reload-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { rl.dismissed.add(version); rl.row = null; redraw($); } }),
+      ] });
+      return stack(reloadRow);
     }
     if (!offer) return Box({ flexDirection: 'column', children: [agentRow] });
     const shown = offer;
@@ -1468,33 +1594,55 @@ export const register = on => {
     return r;
   });
 
+  // a surface attached or detached: the room for the line asked again
+  on('session.attach', async ($, e, next) => {
+    const r = await next(e);
+    try { st.surfaces = null; if (await learnSurfaces($, st)) await redrawLine($, st); } catch { /* the next measure */ }
+    return r;
+  });
+  on('session.detach', async ($, e, next) => {
+    const r = await next(e);
+    try { st.surfaces = null; if (await learnSurfaces($, st)) await redrawLine($, st); } catch { /* the next measure */ }
+    return r;
+  });
+
+  // /model and /effort, pressed or typed: what they set, once they ran
+  // without an error (see "the session's model and effort as last set")
+  on('command.run', { command: 'model' }, async ($, e, next) => {
+    const r = await next(e);
+    try { if (!commandFailed(r)) await noteSet($, ss, 'model', e.args); } catch { /* not noted */ }
+    return r;
+  });
+  on('command.run', { command: 'effort' }, async ($, e, next) => {
+    const r = await next(e);
+    try { if (!commandFailed(r)) await noteSet($, ss, 'effort', e.args); } catch { /* not noted */ }
+    return r;
+  });
+
   // the whole line, which the footer cuts: /pacing-status, at any time.
-  // A new or resumed session runs no agents of this module's knowing.
+  // A new or resumed session runs no agents of this module's knowing; after
+  // a reload, the ones kept in the store that the engine still runs come back.
   on('session.start', async ($, e, next) => {
     agents.clear();
     stopTick();
-    // the panel's list is this session's; whether its person closed the
-    // panel is asked again (a reload keeps the answer in the store)
-    done.length = 0;
     fresh.clear();
-    pn.closed = null;
+    st.surfaces = null;
     try {
       await $.command.register({ name: 'pacing-status', description: 'Pacing: the whole status line, and what to do now.', immediate: true });
     } catch { /* an engine without commands: the line alone */ }
     // the reports the module answers itself (see "reports the module answers
-    // itself"), and the panel's switch; each by itself, so one the engine
-    // refuses does not take the others with it
+    // itself"), each by itself, so one the engine refuses does not take the
+    // others with it
     for (const c of [
       { name: 'pacing-usage', description: 'Pacing: the usage bars and what each tier takes now.' },
       { name: 'pacing-help', description: 'Pacing: the short help.' },
       { name: 'pacing-guide', description: 'Pacing: the whole guide.' },
-      { name: 'pacing-agents', description: 'Pacing: open or close the agents panel.', immediate: true },
+      { name: 'pacing-doctor', description: 'Pacing: is it working here, and what to do if not.' },
+      { name: 'pacing-saved', description: 'Pacing: what agents on cheaper models saved this week.' },
     ]) {
       try { await $.command.register(c); } catch { /* an engine without commands */ }
     }
     const result = await next(e);
-    // a panel a reload left up is still this copy's to draw
-    (async () => { pn.open = (await $.ui.panes()).some(p => p.id === PANEL && p.isPlaced); })().catch(() => { /* an engine without panes */ });
     // A fresh line at load (a new session, a reload, a new version): the
     // status line kept what the module drew before, which may be old facts
     // and old code's words for up to half an hour. With the meters the last
@@ -1506,12 +1654,13 @@ export const register = on => {
     (async () => {
       let now;
       try { now = await $.clock.now(); } catch { now = Date.now(); }
+      await learnSurfaces($, st);
       const { week, five } = await limitsNow($);
       const known = !!(week && week.resetsAt);
       if (running) return;
       running = true;
       try {
-        let j = await runReading($, week, five, sessionModel);
+        let j = await runReading($, week, five, sessionModel, spend);
         const logged = !!j;
         if (!j && !known) {
           const st = await storedReading($);
@@ -1529,7 +1678,23 @@ export const register = on => {
       } finally { running = false; }
     })().catch(() => { /* a failure draws nothing new */ });
     // the side sessions already working (a reload mid-work): in the line, no toast
+    // the subagents a reload found at work, with what was known of them (see
+    // "running agents across a reload"): in the line and the next toast as before
+    (async () => {
+      const n = await restoreAgents($, agents);
+      await keepAgents($, agents);
+      if (!n) return;
+      const now = await $.clock.now();
+      for (const a of agents.values()) if (a.effort) keptEffort.set(a.id, a.effort);
+      st.progressAt = now;
+      startTick($, st);
+      $.ui.status(lineNow(now));
+      redraw($);
+    })().catch(() => { /* none known, as before */ });
     (async () => { st.quiet = true; await pollSessions($, st, await $.clock.now()); })().catch(() => { /* none known */ });
+    // the model and effort last set in this session, should a reload have
+    // started this memory over
+    restoreSwitch($, ss).catch(() => { /* none kept */ });
     // the version this copy was loaded as, and from here a slow look at the
     // one on disk (see "a new version")
     look($, rl);
@@ -1540,12 +1705,12 @@ export const register = on => {
     return result;
   });
   on('command.run', { command: 'pacing-status' }, async ($) => {
-    if (!reading) return { text: 'Pacing: no automatic reading yet in this session. /pacing usage reads now.' };
+    if (!reading) return { text: 'Pacing: no automatic reading yet in this session. /pacing usage takes one now.', isTextDisplayOnly: true };
     // ages and run times as of now, by the engine's clock where it has one
     let now;
     try { now = await $.clock.now(); } catch { now = Date.now(); }
     const text = lineOf(reading, sessionModel, tokens, agentTokens, now, true, runningAgents());
-    return { text: 'Pacing: ' + text + (reading.do ? '\nNow: ' + reading.do : '') };
+    return { text: 'Pacing: ' + text + (reading.do ? '\nNow: ' + reading.do : ''), isTextDisplayOnly: true };
   });
   // The report of `budget.mjs last`: the bars and the tier sheet. Where the
   // last reading is too old to show, the module takes one itself first, if
@@ -1560,7 +1725,7 @@ export const register = on => {
           let now;
           try { now = await $.clock.now(); } catch { now = Date.now(); }
           const { week, five } = await limitsNow($);
-          const j = await runReading($, week, five, sessionModel);
+          const j = await runReading($, week, five, sessionModel, spend);
           if (j) {
             last = { pct: week && week.resetsAt ? week.percentUsed : j.all, at: now };
             sayLevel($, reading, j);
@@ -1572,7 +1737,7 @@ export const register = on => {
       }
       if (out === null) return show('Pacing: the report could not be made. `/pacing usage` asks the session for it.');
       const why = measureWhy(out);
-      return show(why ? 'Pacing: no reading to show (' + why + '). `/pacing usage now` measures.' : usageText(out));
+      return show(why ? 'Pacing: no reading to show (' + why + '). `/pacing usage now` takes a new one.' : usageText(out));
     } catch { return show('Pacing: the report could not be made. `/pacing usage` asks the session for it.'); }
   });
   // the short help and the whole guide, as config.mjs prints them (markdown)
@@ -1586,53 +1751,32 @@ export const register = on => {
     try { out = await scriptOut($, 'config.mjs', ['help', 'full']); } catch { /* said below */ }
     return { text: out && out.trim() ? out.trim() : 'Pacing: the guide could not be read. `/pacing help full` asks the session for it.', isTextDisplayOnly: true };
   });
-  // the agents panel, opened or closed by the person at any time. Closed
-  // this way it stays closed for the session, as by its own close mark;
-  // opened this way it is the person's again to close.
-  on('command.run', { command: 'pacing-agents' }, async ($) => {
-    const show = text => ({ text, isTextDisplayOnly: true });
+  // the self-check, whole, in a code block: its lines are columns. Run
+  // directly: it exits 1 on a failed check, where scriptOut would give nothing.
+  on('command.run', { command: 'pacing-doctor' }, async ($) => {
+    let out = '';
     try {
-      let up = pn.open;
-      try { up = (await $.ui.panes()).some(p => p.id === PANEL && p.isPlaced); } catch { /* this copy's own memory */ }
-      if (up) {
-        await $.ui.close({ id: PANEL });
-        pn.open = false;
-        pn.closed = true;
-        await noteClosed($, true);
-        return show('Pacing: the agents panel is closed, and stays closed in this session. /pacing-agents opens it again.');
-      }
-      pn.closed = false;
-      await noteClosed($, false);
-      const r = await openPanel($, pn);
-      if (r && r.isPlaced) return show('Pacing: the agents panel is open. /pacing-agents closes it.');
-      // no answer at all: an engine without panes
-      if (!r) return show('Pacing: the agents panel is not available here. The status line and /pacing-status show the agents.');
-      return show('Pacing: the agents panel cannot be drawn here' + (r.reason ? ' (' + r.reason + ')' : '') + '. The status line and /pacing-status show the agents.');
-    } catch { return show('Pacing: the agents panel is not available here. The status line and /pacing-status show the agents.'); }
+      const r = await $.process.run(['node', $.plugin.root + '/skills/pacing/scripts/doctor.mjs'], { timeoutMs: 20000 });
+      out = String((r && r.stdout) || '').replace(/\r/g, '').trim();
+    } catch { /* said below */ }
+    return { text: out ? '```\n' + out + '\n```' : 'Pacing: the self-check could not run. `/pacing doctor` asks the session for it.', isTextDisplayOnly: true };
   });
-  // The panel's body: the lines of panelLines, one Text each, the detail dim.
-  on('ui.render', { component: 'Pane', requestId: PANEL }, async ($, e, next) => {
-    if (e.plugin && e.plugin !== 'pacing') return next(e);
-    // drawn, so it is up: also one that waited undrawn and was seated later
-    pn.open = true;
-    const { Box, Text } = $.ui.resolve(e);
-    let now;
-    try { now = await $.clock.now(); } catch { now = Date.now(); }
-    const lines = panelLines(runningAgents(), done, reading, now, !!(e.props && e.props.placement === 'widget'));
-    return Box({ flexDirection: 'column', children: lines.map(l => Text(l.dim ? { dimColor: true, children: l.text } : { children: l.text })) });
-  });
-  // the panel closing: by the person's own mark it stays closed for the session
-  on('ui.close', async ($, e, next) => {
-    const r = await next(e);
+  // what delegating saved this week, against the model the session runs on;
+  // `detail` adds the table by role and model, in a code block (columns)
+  on('command.run', { command: 'pacing-saved' }, async ($, e) => {
+    const detail = /\bdetail\b/.test(String((e && e.args) || ''));
+    let model = modelNow();
+    if (!model) { try { model = await $.session.model(); } catch { /* saved.mjs takes the recommended one */ } }
+    let out = null;
     try {
-      if (e.id === PANEL) {
-        pn.open = false;
-        if (e.origin && e.origin.kind === 'person') { pn.closed = true; await noteClosed($, true); }
-      }
-    } catch { /* this copy's own memory */ }
-    return r;
+      const args = detail ? ['--detail'] : [];
+      // a model saved.mjs does not know: the one the reading recommends
+      out = (typeof model === 'string' && model ? await scriptOut($, 'saved.mjs', ['--session', model, ...args]) : null) ?? (await scriptOut($, 'saved.mjs', args));
+    } catch { /* said below */ }
+    if (!out || !out.trim()) return { text: 'Pacing: the savings could not be read. `/pacing saved` asks the session for it.', isTextDisplayOnly: true };
+    const [line, ...rest] = out.trim().split('\n\n');
+    return { text: line + (rest.length ? '\n\n```\n' + rest.join('\n\n') + '\n```' : ''), isTextDisplayOnly: true };
   });
-
   on('prompt.submit', async ($, e, next) => {
     try {
       // only a prompt that starts a turn after a pause, typed by the user; a
@@ -1692,7 +1836,11 @@ export const register = on => {
     const result = await next(e);
     if (!e.agentId) {
       try { lastTurnAt = await $.clock.now(); } catch { /* no clock: no warning */ }
-      if (e.usage && e.usage.model) sessionModel = e.usage.model;
+      // the turn's own model: from here it, not the one last set, is the model
+      if (e.usage && e.usage.model) {
+        sessionModel = e.usage.model;
+        if (ss.model) { ss.model = null; keepSwitch($, ss); }
+      }
       // a natural break: one look at the version on disk, once the turn is
       // over (a timer: /reload-plugins cannot run from inside this hook)
       rl.busy = false;
@@ -1711,32 +1859,32 @@ export const register = on => {
       t.out += u.output_tokens || 0;
       t.read += u.cache_read_input_tokens || 0;
       t.write += u.cache_creation_input_tokens || 0;
+      spend.total += (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
     }
     // a subagent's run ended: one toast, and the line without it
     if (e.agentId && agents.has(e.agentId)) {
       try {
         const a = agents.get(e.agentId);
         agents.delete(e.agentId);
+        keepAgents($, agents);
         const now = await $.clock.now();
         if (!agents.size) stopTick();
         $.ui.status(lineNow(now));
         redraw($);
         const spent = u ? (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) : 0;
-        // for the panel: what it was, how long, the run's tokens, its answer's first line
-        keepDone(done, { name: nameOf(a), task: taskOf(a), ms: now - a.startedAt, tokens: spent, outcome: outcomeOf(e.answer), aborted: !!e.isAborted });
         // Its task on record, and the meters after its work: started, never
         // waited for, so the agent's answer is not held. A reading only when
         // the last one is AGENT_GAP old.
         (async () => {
           if (!e.isAborted) {
-            const line = await recordAgent($, a, u);
+            const line = await recordAgent($, a, u, ss);
             if (line) fresh.set(roleFor(a.type), line);
           }
           if (running || (last && now - last.at < AGENT_GAP)) return;
           running = true;
           try {
             const { week, five } = await limitsNow($);
-            const j = await runReading($, week, five, sessionModel);
+            const j = await runReading($, week, five, sessionModel, spend);
             if (j) {
               last = { pct: week && week.resetsAt ? week.percentUsed : j.all, at: now };
               sayLevel($, reading, j);
@@ -1766,7 +1914,9 @@ export const register = on => {
     // for them); the engine's list settles the rest
     if (!e.agentId && agents.size) {
       try {
+        const before = agents.size;
         for (const [id, a] of agents) if (!a.background) agents.delete(id);
+        if (agents.size !== before) keepAgents($, agents);
         await settleAgents($, agents, await $.clock.now());
         if (!agents.size) stopTick();
         redraw($);
@@ -1781,9 +1931,9 @@ export const register = on => {
     // once per suggestion; one that no longer needs it loses the row.
     if (!e.agentId && attended && reading) {
       try {
-        let model = sessionModel;
+        let model = modelNow();
         if (!model) { try { model = await $.session.model(); } catch { /* not known */ } }
-        const o = (await switchOn($)) ? switchOffer(reading, model, await effortNow($)) : null;
+        const o = (await switchOn($)) ? switchOffer(reading, model, await effortNow($, ss)) : null;
         if (!o || (sw && sw.key !== o.key)) { if (sw) { sw = null; redraw($); } }
         if (o && !switchSeen.has(o.key)) { switchSeen.add(o.key); sw = o; redraw($); }
       } catch { /* an engine without the band: the start line says it */ }
@@ -1832,7 +1982,7 @@ export const register = on => {
         running = true;
         last = { pct: week.percentUsed, at: now };
         // every meter where the app's usage tool answers, else these two windows
-        const j = await runReading($, week, limits.find(r => r.kind === 'five_hour'), sessionModel);
+        const j = await runReading($, week, limits.find(r => r.kind === 'five_hour'), sessionModel, spend);
         if (j) {
           sayLevel($, reading, j);
           reading = j;
@@ -1852,7 +2002,8 @@ export const register = on => {
             if (typeof m === 'string' && idOf(m, reading.prices || {})) model = m;
           } catch { /* not known yet */ }
         }
-        $.ui.status(lineOf(reading, model, tokens, agentTokens, now, false, runningAgents()));
+        await learnSurfaces($, st);
+        $.ui.status(lineOf(reading, model, tokens, agentTokens, now, false, runningAgents(), st.max));
       }
     } catch {
       // a reading is a convenience: a missing node, a timeout or a bad line

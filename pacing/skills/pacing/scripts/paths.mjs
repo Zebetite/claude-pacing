@@ -39,6 +39,25 @@ export const ageText = f => {
   return h < 1 ? 'under an hour ago' : h < 48 ? Math.round(h) + ' h ago' : Math.round(h / 24) + ' days ago';
 };
 
+// When the hooks module last took a reading (log.jsonl, source 'hook'), as a
+// time in ms, if that was in the 24 h before `now`; else null. Where it runs,
+// its Switch row is the one place a change of the session's model or effort
+// is offered (hook.mjs, doctor.mjs). Only the log's last 64 KB is read: a
+// day's readings are a few KB.
+export const recentHookReading = (now = Date.now()) => {
+  try {
+    const log = path.join(dataDir, 'log.jsonl'), size = fs.statSync(log).size, fd = fs.openSync(log, 'r');
+    const buf = Buffer.alloc(Math.min(size, 65536));
+    fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+    fs.closeSync(fd);
+    let last = null;
+    for (const l of buf.toString('utf8').split('\n')) {
+      try { const e = JSON.parse(l), t = Date.parse(e.t); if (e.source === 'hook' && now - t < 24 * 3600000 && (last === null || t > last)) last = t; } catch { /* a cut-off line */ }
+    }
+    return last;
+  } catch { return null; }
+};
+
 // config.json, read and checked (models.mjs checkConfig). `missing`: no file
 // yet, a first run; `damaged`: the file does not parse, and the defaults
 // stand in until a command rewrites it.

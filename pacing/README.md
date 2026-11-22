@@ -11,9 +11,9 @@ you have more usage left. You can custom set how many tiers you want and
 what model and effort should be on every tier.
 
 The default tiers are Fable 5.2 high for the session, Opus 5.5 medium and
-Sonnet 5.5 medium for subagents; while Fable's own meter is full, Opus
-5.5 high takes the top place. The budget line is drawn against the
-**Weekly · all models** meter, and against Fable's own meter while Fable
+Sonnet 5.5 medium for subagents; while Fable's meter is full, Opus 5.5
+high takes the top place. The budget line is drawn against the weekly
+meter (**Weekly · all models**), and against Fable's meter while Fable
 runs the session. `skills/pacing/GUIDE.md` explains the
 rules; `skills/pacing/SKILL.md` (reports and settings) and
 `skills/route/SKILL.md` (delegating work) are what Claude follows.
@@ -28,9 +28,9 @@ rules; `skills/pacing/SKILL.md` (reports and settings) and
 | `skills/pacing/GUIDE.md`, `BRIEF.md` | the user guide, and the standing brief for subagents, which `config.mjs start` prints for each agent with its notes and the user's own rules |
 | `skills/pacing/SETUP.md`, `HANDOVER.md` | the steps for `setup` and for writing a handover, read only when needed so that `SKILL.md` stays short |
 | `agents/*.md` | the four role agents the session delegates to and keeps for its whole run: `reader`, `verifier`, `implementer`, `researcher` |
-| `skills/pacing/scripts/*.mjs` | `budget.mjs` (the rule), `config.mjs` (the ladder), `hook.mjs` (session start), `models.mjs` (the model table), `paths.mjs` (where a project's notes and handovers live), `safe.mjs` (writes that several sessions can make at once without losing one) |
+| `skills/pacing/scripts/*.mjs` | `budget.mjs` (the rule), `config.mjs` (the ladder), `hook.mjs` (session start), `models.mjs` (the model table), `paths.mjs` (where a project's notes and handovers live), `safe.mjs` (writes that several sessions can make at once without losing one), `doctor.mjs` (the self-check: is pacing working here, and what to do if not), `saved.mjs` (what handing work to agents on cheaper models saved this week) |
 | `hooks/hooks.json` | a SessionStart hook that shows the last reading and the recommended model, and says when another session has been at work in the project; a SessionEnd hook that takes this session's mark off the project |
-| `hooks/readings.json`, `readings.mjs` | automatic readings after a turn, a status line with the budget and each tier's share, and a notice when a large session resumes after an hour's pause, through a hooks module, on a Claude Code version that has them; an older one reads the file's empty `hooks` block and skips the module. `readings.test.ts` tests it (`claude plugin test`) |
+| `hooks/readings.json`, `readings.mjs` | automatic readings after a turn, a status line with what is left of the budget and how many subagents run (within 34 characters in the desktop app, which cuts it at about 35), the reports `/pacing-status`, `/pacing-usage`, `/pacing-doctor` and `/pacing-saved` without a model call, and a toast when a large session resumes after an hour's pause, through a hooks module, on a Claude Code version that has them; an older one reads the file's empty `hooks` block and skips the module. `readings.test.ts` tests it (`claude plugin test`) |
 
 The scripts run with `node` (Node.js 18 or later), which must be on the
 PATH of the shell Claude Code uses.
@@ -57,7 +57,7 @@ standalone install of this skill (`~/.claude/skills/pacing`) if there is
 one. Run `/pacing:pacing setup` to confirm or change the ladder, then pick
 the top tier in the session's model menu (the skill cannot switch a
 running session's model). On a plan whose usage card has no per-model
-weekly meter (no "Weekly · Fable" or similar line), run `/pacing:pacing
+meter (no "Weekly · Fable" or similar line), run `/pacing:pacing
 premium none` once; on a plan that meters another model, name it
 (`premium opus`).
 
@@ -68,7 +68,7 @@ folder, which an update replaces:
 
 | file | what |
 |---|---|
-| `config.json` | the ladder, the last-day weight, the per-model meter and its fallback, the reader's model, the next-session switch and the other settings (`compact`, `notify`, `switch`, `reload`, `panel`) |
+| `config.json` | the ladder, the last-day weight, the per-model meter and its fallback, the reader's model, the next-session switch and the other settings (`compact`, `notify`, `switch`, `reload`) |
 | `log.jsonl`, `state.json` | the readings, and the last one for the hook |
 | `BRIEF.local.md` | the user's own rules for subagents (never part of the plugin) |
 | `notes/<project>/<role>.md` | what each role agent learned about a project, a line per fact, for the next agent of that role |

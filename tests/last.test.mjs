@@ -27,8 +27,8 @@ describe('budget.mjs last', () => {
       const r = last(s, at(10));
       assert.equal(r.code, 0, r.out);
       const b = block(r.out);
-      assert.equal(b[0], 'last reading 11-13 12:00, 10 min ago, not measured now');
-      assert.equal(b[1], 'not in it: context, extra usage · /pacing usage now measures');
+      assert.equal(b[0], 'last reading 11-13 12:00, 10 min ago, not read now');
+      assert.equal(b[1], 'not in it: context, extra usage · /pacing usage now takes a new one');
       assert.ok(b.some(l => l.startsWith('5-hour ')), '5-hour bar carried');
       assert.ok(b.some(l => /^Fable 5\.2 .* · read 11-13 12:00$/.test(l)), 'the per-model figure says when it was read');
       for (const l of b) assert.ok(l.length <= 68, l);
@@ -65,7 +65,7 @@ describe('budget.mjs last', () => {
       reading(s, 10, NOW, ['--premium', '2']);
       s.budget(['--all', '12', '--reset', RESET, '--now', at(40), '--source', 'hook']);
       const r = last(s, at(50));
-      assert.match(block(r.out)[0], /^last reading 11-13 12:40, 10 min ago \(automatic\), not measured now$/);
+      assert.match(block(r.out)[0], /^last reading 11-13 12:40, 10 min ago \(automatic\), not read now$/);
       assert.match(r.out, /^Fable 5\.2 used 2 % \(read 2026-11-13 12:00, carried over\)/m);
       // the automatic reading is 21 min old, but the figure it carries is past an hour
       assert.equal(last(s, at(61)).out.trim(), 'measure: Fable 5.2\'s meter was read 61 min ago');
@@ -81,7 +81,7 @@ describe('budget.mjs last', () => {
     const t = sandbox();
     try {
       reading(t, 10, NOW, ['--premium', '10']);
-      assert.match(last(t, at(25)).out, /not measured now/, 'the skill\'s own reading, 25 min old');
+      assert.match(last(t, at(25)).out, /not read now/, 'the skill\'s own reading, 25 min old');
     } finally { t.cleanup(); }
   });
   test('no per-model figure in the week: measure, unless the plan has none or another model is tier 1', () => {
@@ -90,10 +90,10 @@ describe('budget.mjs last', () => {
       s.budget(['--all', '10', '--reset', RESET, '--now', NOW, '--source', 'hook']);
       assert.equal(last(s, at(5)).out.trim(), 'measure: Fable 5.2\'s meter is not in the last reading');
       s.config(['set', '1', 'opus', 'high']);
-      assert.match(last(s, at(5)).out, /not measured now/);
+      assert.match(last(s, at(5)).out, /not read now/);
       s.config(['reset']);
       s.config(['premium', 'none']);
-      assert.match(last(s, at(5)).out, /not measured now/);
+      assert.match(last(s, at(5)).out, /not read now/);
     } finally { s.cleanup(); }
   });
 });

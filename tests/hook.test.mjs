@@ -27,7 +27,7 @@ test('no reading and no handover: prints nothing', withHome(s => {
 test('a fresh reading names the model, under its current label', withHome(s => {
   state(s);
   const j = parse(s.hook());
-  assert.match(j.systemMessage, /^Pacing \(0 h ago\): all models 36 % used, budget line 46.7 %, level ahead\. Recommended session model: Fable 5.2 high\./);
+  assert.match(j.systemMessage, /^Pacing \(0 h ago\): weekly meter 36 % used, budget line 46.7 %, level ahead\. Recommended model for this session: Fable 5.2 high\./);
   assert.equal(j.hookSpecificOutput.hookEventName, 'SessionStart');
   assert.match(j.hookSpecificOutput.additionalContext, /switch the model menu to Fable 5.2, effort high/);
   assert.match(j.hookSpecificOutput.additionalContext, /This reading is fresh/);
@@ -65,9 +65,9 @@ test('where the hooks module runs, its Switch row offers the switch: no steps fo
   // the last reading was the module's own
   state(s, { source: 'hook', next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
   let j = parse(s.hook());
-  assert.match(j.systemMessage, /Recommended session model: Opus 5\.5 high\.$/);
+  assert.match(j.systemMessage, /Recommended model for this session: Opus 5\.5 high\.$/);
   assert.doesNotMatch(j.systemMessage, /model menu/);
-  assert.match(j.hookSpecificOutput.additionalContext, /Recommended session model: Opus 5\.5 high\. The pacing hooks module runs here: if you run on another model or effort, its Switch row above the prompt offers the change; do not tell the user to switch, nor how\./);
+  assert.match(j.hookSpecificOutput.additionalContext, /Recommended model for this session: Opus 5\.5 high\. The pacing hooks module runs here: if you run on another model or effort, its Switch row above the prompt offers the change; do not tell the user to switch, nor how\./);
   assert.doesNotMatch(j.hookSpecificOutput.additionalContext, /model menu/);
   // a reading of the session's own, with one of the module's in the last day
   state(s, { next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
@@ -83,7 +83,7 @@ test('where the hooks module runs, its Switch row offers the switch: no steps fo
 test('a stale reading asks for `usage`, which measures only where no newer reading came', withHome(s => {
   state(s, { t: new Date(Date.now() - 13 * 3600000).toISOString() });
   const c = parse(s.hook()).hookSpecificOutput.additionalContext;
-  assert.match(c, /Before the first big task run the `pacing` skill with `usage` \(it measures only where no newer reading came: no hooks module, as in a terminal\)/);
+  assert.match(c, /Before the first big task run the `pacing` skill with `usage` \(it takes a reading only where no newer one came: no hooks module, as in a terminal\)/);
   assert.doesNotMatch(c, /usage now/);
 }));
 
@@ -92,7 +92,7 @@ test('a handover beside a reading; the newest is named, the older counted', with
   const dir = path.dirname(handover(s));
   fs.writeFileSync(path.join(dir, '2000-01-01-0000.md'), 'old');
   const j = parse(s.hook());
-  assert.match(j.systemMessage, /Recommended session model: Fable 5.2 high\..* Handover waiting for this project \(under an hour ago, and 1 older beside it\)/);
+  assert.match(j.systemMessage, /Recommended model for this session: Fable 5.2 high\..* Handover waiting for this project \(under an hour ago, and 1 older beside it\)/);
 }));
 
 test('a handover for another project is not named', withHome(s => {
@@ -110,8 +110,8 @@ test('a handover filed away is no longer named', withHome(s => {
 
 test('the per-model meter that set the level, or holds its model back, is named', withHome(s => {
   state(s, { level: 'over', levelBy: 'premium', premium: 52 });
-  assert.match(parse(s.hook()).systemMessage, /level over \(set by the Fable 5\.2 meter at 52 %\)\./);
+  assert.match(parse(s.hook()).systemMessage, /level over \(set by Fable 5\.2's meter at 52 %\)\./);
   state(s, { premiumHeld: true, premium: 60, next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
   const j = parse(s.hook());
-  assert.match(j.systemMessage, /level ahead, Fable 5\.2 at 60 % is over its line: kept for judgment work\. Recommended session model: Opus 5\.5 high\./);
+  assert.match(j.systemMessage, /level ahead, Fable 5\.2 at 60 % is over its budget line: kept for judgment work\. Recommended model for this session: Opus 5\.5 high\./);
 }));

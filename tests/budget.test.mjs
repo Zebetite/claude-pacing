@@ -85,8 +85,8 @@ describe('the bars and the tier sheet', () => {
   });
   test('the bars: 20 cells, the line marked on the weekly bar', () => {
     const lines = block(dry('2026-11-13T12:00:00Z', 10, ...full).out);
-    const all = lines.find(l => l.startsWith('All models'));
-    assert.match(all, /^All models [█░│]{20} {2}10 % \/ 20 % pace · resets in 6d 0h$/);
+    const all = lines.find(l => l.startsWith('Weekly '));
+    assert.match(all, /^Weekly {5}[█░│]{20} {2}10 % \/ 20 % pace · resets in 6d 0h$/);
     // 10 % fills 2 cells; the line at 20 % marks the 4th
     assert.equal(all.slice(11, 31), '██░│' + '░'.repeat(16));
     assert.ok(lines.some(l => /^5-hour {5}[█░]{20} {2}55 %  resets 15:00$/.test(l)));
@@ -124,7 +124,7 @@ describe('the premium meter', () => {
     assert.match(out, /-> ahead, Fable 5.2 out$/m);
     assert.equal(routeOf(out, 'judgment'), 'tier 1 Opus 5.5 high (the session)');
     assert.equal(routeOf(out, 'medium'), 'tier 1 Opus 5.5 high (the session)');
-    assert.match(sheetRows(out).join('\n'), /^- +Fable 5.2 high +out until the reset: its own meter is at 100 %$/m);
+    assert.match(sheetRows(out).join('\n'), /^- +Fable 5.2 high +out until the reset: its meter is at 100 %$/m);
     assert.match(out, /^do: Fable 5\.2 is out until the reset: this session belongs on Opus 5\.5 high now; the Switch row offers it \(without the hooks module: model menu Opus 5\.5, effort high\)\. /m);
     assert.match(out, /^next session: Opus 5.5 high$/m);
   });
@@ -304,7 +304,7 @@ describe('arguments', () => {
   test('the session model by id: upward line on a lower tier', () => {
     const out = dry('2026-11-13T12:00:00Z', 10, '--session', 'claude-opus-5-5').out;
     assert.match(out, /^upward: this session runs on Opus 5.5 medium/m);
-    assert.match(dry('2026-11-13T12:00:00Z', 10, '--session', 'claude-haiku-5-5').out, /^note: the session model "claude-haiku-5-5" is not on the ladder$/m);
+    assert.match(dry('2026-11-13T12:00:00Z', 10, '--session', 'claude-haiku-5-5').out, /^note: the session's model "claude-haiku-5-5" is not on the ladder$/m);
   });
 });
 
@@ -366,7 +366,7 @@ describe('the week in sum', () => {
   const LAST = '2026-11-12T12:00:00.000Z';
   const e = (t, all, line, level, reset = LAST) => JSON.stringify({ t, all, line, level, reset });
   const lastWeek = [e('2026-11-10T12:00:00Z', 50, 60, 'ahead'), e('2026-11-11T12:00:00Z', 75, 73.3, 'over'), e('2026-11-12T00:00:00Z', 90, 86.7, 'on pace')];
-  const want = 'last week: ended at 90 %, time by level ahead 50 %, on pace 25 %, over 25 %; line crossed on 2 of 3 readings (peak 3.3 points over, 2026-11-12 00:00)';
+  const want = 'last week: ended at 90 %, time by level ahead 50 %, on pace 25 %, over 25 %; budget line crossed on 2 of 3 readings (peak 3.3 points over, 2026-11-12 00:00)';
   const lastLine = out => out.split(/\r?\n/).find(l => l.startsWith('last week:')) || null;
   test('the first reading of a new week sums up the week before', () => {
     sb.write('log.jsonl', lastWeek.join('\n') + '\n');
@@ -378,7 +378,7 @@ describe('the week in sum', () => {
   });
   test('a week that never crossed the line says how close it came', () => {
     sb.write('log.jsonl', [e('2026-11-11T12:00:00Z', 60, 73.3, 'ahead'), e('2026-11-12T06:00:00Z', 80, 86.7, 'on pace')].join('\n') + '\n');
-    assert.match(lastLine(dry('2026-11-12T13:00:00Z', 1).out), /; line never crossed \(closest 6.7 points under\)$/);
+    assert.match(lastLine(dry('2026-11-12T13:00:00Z', 1).out), /; budget line never crossed \(closest 6.7 points under\)$/);
   });
   test('no line on the very first reading', () => {
     sb.write('log.jsonl', '');
@@ -390,7 +390,7 @@ describe('the week in sum', () => {
     const weeks = out.split(/\r?\n/).filter(l => l.startsWith('week to '));
     assert.equal(weeks.length, 2);
     assert.match(weeks[0], /^week to 2026-11-19 12:00/);
-    assert.match(out, /^week to 2026-11-12 12:00: 3 readings, last 90 % at 2026-11-12 00:00\n {2}time by level: ahead 50 %, on pace 25 %, over 25 %\n {2}line crossed on 2 of 3 readings/m);
+    assert.match(out, /^week to 2026-11-12 12:00: 3 readings, last 90 % at 2026-11-12 00:00\n {2}time by level: ahead 50 %, on pace 25 %, over 25 %\n {2}budget line crossed on 2 of 3 readings/m);
     assert.equal(sb.budget(['week', '1']).out.split(/\r?\n/).filter(l => l.startsWith('week to ')).length, 1);
   });
   test('week with no readings', () => {
@@ -407,9 +407,9 @@ describe('the per-model meter, paced on the same line', () => {
   test('worse than all models while Fable is tier 1: its level decides, and the report says so', () => {
     const out = dry(now, 10, '--premium', '22').out;
     assert.equal(levelOf(out), 'over');
-    assert.match(out, /-> over \(set by the Fable 5.2 meter\)$/m);
+    assert.match(out, /-> over \(set by Fable 5.2's meter\)$/m);
     assert.equal(premLine(out), 'Fable 5.2 used 22 %, delta +2 -> over: sets the level');
-    assert.match(out.replace(/\s+/g, ' '), /Fable 5\.2's own meter at 22 % is 2 points over the same line: "over", worse than all models alone \("ahead", 10 points under\), and Fable 5\.2 runs tier 1, so that meter sets the level/);
+    assert.match(out.replace(/\s+/g, ' '), /Fable 5\.2's meter at 22 % is 2 points over the same budget line: "over", worse than the weekly meter alone \("ahead", 10 points under\), and Fable 5\.2 runs tier 1, so that meter sets the level/);
     assert.equal(routeOf(out, 'medium'), 'tier 2 Opus 5.5 medium (subagent)');
     assert.equal(routeOf(out, 'judgment'), 'tier 1 Fable 5.2 high (the session)');
     // at its "over", one step less effort first, as at the all-models one
@@ -419,7 +419,7 @@ describe('the per-model meter, paced on the same line', () => {
   test('better than all models: all models decide', () => {
     const out = dry(now, 22, '--premium', '10').out;
     assert.equal(levelOf(out), 'over');
-    assert.doesNotMatch(out, /set by the/);
+    assert.doesNotMatch(out, /\(set by /);
     assert.equal(premLine(out), 'Fable 5.2 used 10 %, delta -10 -> ahead');
   });
   test('at its throttle the session moves to the fallback and keeps Fable for judgment work', () => {
@@ -429,7 +429,7 @@ describe('the per-model meter, paced on the same line', () => {
     assert.equal(premLine(out), 'Fable 5.2 used 30 %, delta +10 -> throttle: the session moves off it');
     assert.equal(routeOf(out, 'judgment'), 'tier 1 Opus 5.5 high (the session)');
     assert.match(sheetRows(out).join('\n'), /^- +Fable 5.2 high +kept for judgment: one contained hard task at a time, as a subagent$/m);
-    assert.match(out, /^do: Fable 5\.2's own meter is at throttle: this session belongs on Opus 5\.5 high now, and Fable 5\.2 is kept for judgment work; the Switch row offers it \(without the hooks module: model menu Opus 5\.5, effort high\)\. /m);
+    assert.match(out, /^do: Fable 5\.2's meter is at throttle: this session belongs on Opus 5\.5 high now, and Fable 5\.2 is kept for judgment work; the Switch row offers it \(without the hooks module: model menu Opus 5\.5, effort high\)\. /m);
     assert.match(out, /^upward: Fable 5\.2 is kept for judgment work: one contained hard task with a clear deliverable may go to a Fable 5\.2 high subagent/m);
     assert.match(out, /^next session: Opus 5.5 high$/m);
     assert.equal(effort(out), null);
@@ -448,7 +448,7 @@ describe('the per-model meter, paced on the same line', () => {
     try {
       const out = dry(now, 10, '--premium', '30').out;
       assert.equal(levelOf(out), 'throttle');
-      assert.match(out, /set by the Fable 5.2 meter/);
+      assert.match(out, /set by Fable 5.2's meter/);
       assert.doesNotMatch(out, /held/);
     } finally { sb.config(['reset']); }
   });
@@ -564,6 +564,90 @@ describe('the verifier agent', () => {
       s.config(['set', '3', 'opus', 'low']);
       const j = JSON.parse(s.budget(['--all', '10', '--reset', RESET, '--now', now, '--source', 'hook', '--dry']).out.trim());
       assert.equal(j.tierOf['claude-sonnet-5-5'], 5);
+    } finally { s.cleanup(); }
+  });
+});
+
+describe('rate.json: tokens per point of the weekly meter', () => {
+  const NEXT = '2026-11-26T12:00:00.000Z';
+  // an automatic reading's JSON; the line is 20 % at both times
+  const reading = (s, all, spent, { reset = RESET, now = '2026-11-13T12:00:00Z', dry = false } = {}) => {
+    const r = s.budget(['--all', String(all), '--reset', reset, '--now', now, '--source', 'hook', ...(spent != null ? ['--spent', String(spent)] : []), ...(dry ? ['--dry'] : [])]);
+    assert.equal(r.code, 0, r.out);
+    return JSON.parse(r.out.trim());
+  };
+  const rate = s => JSON.parse(s.read('rate.json'));
+  test('the first reading is the baseline and drops its --spent; no rate yet', () => {
+    const s = sandbox();
+    try {
+      const j = reading(s, 10, 999);
+      assert.deepEqual(rate(s), { reset: RESET, from: 10, to: 10, tokens: 0, carried: null });
+      assert.equal(j.tokensPerPoint, null);
+      assert.deepEqual(j.left, { points: 10, tokens: null });
+    } finally { s.cleanup(); }
+  });
+  test('--spent adds up; a rise of 2 points gives a first rate, 5 points the week\'s', () => {
+    const s = sandbox();
+    try {
+      reading(s, 10, 999);
+      assert.equal(reading(s, 11, 1000).tokensPerPoint, null, 'a rise of 1 point is too little');
+      assert.equal(rate(s).tokens, 1000);
+      const j = reading(s, 12, 1000);
+      assert.equal(j.tokensPerPoint, 1000);
+      assert.deepEqual(j.left, { points: 8, tokens: 8000 });
+      // without --spent the tokens stay; the meter's highest is kept
+      reading(s, 15);
+      assert.deepEqual(rate(s), { reset: RESET, from: 10, to: 15, tokens: 2000, carried: null });
+      const k = reading(s, 30, 8000);
+      assert.equal(k.tokensPerPoint, 500);
+      assert.deepEqual(k.left, { points: -10, tokens: -5000 });
+    } finally { s.cleanup(); }
+  });
+  test('a new week carries the week before\'s rate from a rise of 5 points', () => {
+    const s = sandbox();
+    try {
+      reading(s, 10); reading(s, 16, 6000);
+      const j = reading(s, 3, 700, { reset: NEXT, now: '2026-11-20T12:00:00Z' });
+      assert.deepEqual(rate(s), { reset: NEXT, from: 3, to: 3, tokens: 0, carried: 1000 });
+      assert.equal(j.tokensPerPoint, 1000);
+      assert.deepEqual(j.left, { points: 17, tokens: 17000 });
+      // the carried rate goes before this week's from 2 points, not before 5
+      assert.equal(reading(s, 5, 4000, { reset: NEXT, now: '2026-11-20T12:00:00Z' }).tokensPerPoint, 1000);
+      assert.equal(reading(s, 8, 6000, { reset: NEXT, now: '2026-11-20T12:00:00Z' }).tokensPerPoint, 2000);
+    } finally { s.cleanup(); }
+  });
+  test('a week that rose under 5 points carries nothing, and keeps the rate before', () => {
+    const s = sandbox();
+    try {
+      reading(s, 10); reading(s, 13, 3000);
+      reading(s, 3, null, { reset: NEXT, now: '2026-11-20T12:00:00Z' });
+      assert.equal(rate(s).carried, null);
+      s.write('rate.json', JSON.stringify({ reset: RESET, from: 10, to: 13, tokens: 3000, carried: 800 }));
+      reading(s, 3, null, { reset: NEXT, now: '2026-11-20T12:00:00Z' });
+      assert.equal(rate(s).carried, 800);
+    } finally { s.cleanup(); }
+  });
+  test('a dry run writes nothing', () => {
+    const s = sandbox();
+    try {
+      reading(s, 10, 500, { dry: true });
+      assert.ok(!s.exists('rate.json'));
+      reading(s, 10);
+      const before = s.read('rate.json');
+      reading(s, 14, 4000, { dry: true });
+      assert.equal(s.read('rate.json'), before);
+    } finally { s.cleanup(); }
+  });
+  test('a damaged file is an empty one', () => {
+    const s = sandbox();
+    try {
+      s.write('rate.json', '{"reset": "2026-11');
+      const j = reading(s, 10, 500);
+      assert.equal(j.tokensPerPoint, null);
+      assert.deepEqual(rate(s), { reset: RESET, from: 10, to: 10, tokens: 0, carried: null });
+      s.write('rate.json', JSON.stringify([1, 2]));
+      assert.equal(reading(s, 12, 500).left.points, 8);
+      assert.equal(rate(s).from, 12);
     } finally { s.cleanup(); }
   });
 });
