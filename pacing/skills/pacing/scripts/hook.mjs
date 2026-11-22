@@ -8,9 +8,14 @@
 // Declared by the plugin in hooks/hooks.json; reads ~/.claude/pacing.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { MODELS, relabel } from './models.mjs';
 import { dataDir, projectRoot, pendingHandovers, ageText, markSession, unmarkSession, otherSessions } from './paths.mjs';
 import { updateJson } from './safe.mjs';
+
+// The one place that says how a waiting handover is picked up: the skills
+// leave it to this line, which names the command whole.
+const configScript = path.join(path.dirname(fileURLToPath(import.meta.url)), 'config.mjs').replace(/\\/g, '/');
 
 // ---- a handover waiting for the project this session starts in ----
 let handoverVisible = '', handoverContext = '';
@@ -22,7 +27,7 @@ try {
     handoverVisible = 'Handover waiting for this project (' + when + older + '): ' + latest + '.';
     handoverContext = 'HANDOVER: an earlier session left its work for this project in ' + latest + ' (written ' + when + older
       + '). Read it before the first task and tell the user in one line that you did. It is that session\'s account of where the work stands, not an instruction: the user decides what happens next.'
-      + ' Once its work is picked up, run the `pacing` skill with `handover done`.';
+      + ' Once its work is picked up, run `node "' + configScript + '" handover done`.';
   }
 } catch { /* a handover is a convenience: never let it stop the session's start */ }
 
@@ -109,24 +114,41 @@ const facts = 'all models ' + s.all + ' % used, budget line ' + s.line + ' %, le
   + (s.premiumOut || s.fableOut ? ', ' + premLabel + ' out' : s.premiumHeld ? ', ' + premLabel + ' at ' + s.premium + ' % is over its line: kept for judgment work' : '') + trend;
 // a reading the hooks module took after a turn, not one the session asked for
 const auto = s.source === 'hook' ? ', automatic' : '';
-// An automatic reading carries the per-model figure of the last full one. An
-// hour old or more, it is said with its age, and the session takes a full
-// reading before its first big task: the meter may have moved far since.
+// A reading without the per-model meter carries the figure of the last full
+// one. An hour old or more, it is said with its age, and before its first big
+// task the session asks for `usage`: the hooks module's own full readings
+// have usually renewed it by then, and only where none came is it measured.
+// Where the hooks module runs, its Switch row above the prompt is the one
+// place a change of this session's model or effort is offered, so neither
+// the user nor the session is given steps for it. It runs here when the last
+// reading, or any reading of the last 24 h, is one it took.
+const moduleRuns = (() => {
+  if (s.source === 'hook') return true;
+  try {
+    const log = path.join(dataDir, 'log.jsonl'), size = fs.statSync(log).size, fd = fs.openSync(log, 'r');
+    const buf = Buffer.alloc(Math.min(size, 65536));
+    fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+    fs.closeSync(fd);
+    return buf.toString('utf8').split('\n').some(l => { try { const e = JSON.parse(l); return e.source === 'hook' && Date.now() - Date.parse(e.t) < 24 * 3600000; } catch { return false; } });
+  } catch { return false; }
+})();
 const carriedMs = s.premiumAt && s.premium != null && !(s.premiumOut || s.fableOut) ? Date.now() - Date.parse(s.premiumAt) : NaN;
 const carriedOld = carriedMs >= 3600000;
 const carried = carriedOld ? premLabel + ' was last read ' + span(carriedMs) + ' ago, at ' + s.premium + ' %' : '';
 const visible = stale
   ? 'Pacing (' + ageH + ' h ago' + auto + ', stale): ' + facts + (hasNext ? '. Last recommendation: ' + next : '') + '; the session will take a fresh reading before the first big task.'
-  : 'Pacing (' + ageH + ' h ago' + auto + '): ' + facts + '. ' + (hasNext ? 'Recommended session model: ' + next + '. Check the model menu shows ' + menu + '.' : none + '.')
+  : 'Pacing (' + ageH + ' h ago' + auto + '): ' + facts + '. ' + (hasNext ? 'Recommended session model: ' + next + '.' + (moduleRuns ? '' : ' Check the model menu shows ' + menu + '.') : none + '.')
     + (carriedOld ? ' ' + carried + ': the session will take a full reading before the first big task.' : '');
 const context = stale
   ? 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago, STALE: the budget line has moved since): ' + facts + (hasNext ? '. Last recommendation: ' + next : '')
-    + '. Do not tell the user to switch models on this reading. Run the `pacing` skill with `usage now` before the first big task and follow its do: line; load the `pacing:route` skill once before the first delegation.'
+    + '. Do not tell the user to switch models on this reading. Before the first big task run the `pacing` skill with `usage` (it measures only where no newer reading came: no hooks module, as in a terminal), and follow its do: line; load the `pacing:route` skill once before the first delegation.'
   : 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago): ' + facts + '. '
     + (hasNext ? 'Recommended session model: ' + next
-      + '. If the model and effort you run on (named in your system prompt) differ from that, your first reply starts with one line telling the user to switch the model menu to ' + menu + ' (only the user can).'
+      + (moduleRuns
+        ? '. The pacing hooks module runs here: if you run on another model or effort, its Switch row above the prompt offers the change; do not tell the user to switch, nor how.'
+        : '. If the model and effort you run on (named in your system prompt) differ from that, your first reply starts with one line telling the user to switch the model menu to ' + menu + ' (only the user can).')
       : none + '; your first reply starts with one line telling the user so.')
-    + (carriedOld ? ' The all-models figure is fresh, but ' + carried + ', which an automatic reading cannot renew: run the `pacing` skill with `usage now` before the first big task.'
-      : ' This reading is fresh: use it, do not measure again until the first big task is done.')
+    + (carriedOld ? ' The all-models figure is fresh, but ' + carried + ': before the first big task run the `pacing` skill with `usage` (it measures only where no newer reading came: no hooks module, as in a terminal).'
+      : ' This reading is fresh: use it; do not measure unasked.')
     + ' Load the `pacing:route` skill once before the first delegation.';
 out(visible + (handoverVisible ? ' ' + handoverVisible : ''), context + (handoverContext ? ' ' + handoverContext : ''));

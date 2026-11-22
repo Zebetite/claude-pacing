@@ -123,8 +123,10 @@ describe('the ladder', () => {
 describe('init', () => {
   test('creates the folder, the config and BRIEF.local.md; then says exists', withHome(s => {
     const r = s.config(['init']);
-    assert.match(r.out, /^created$/m);
-    assert.match(r.out, /^BRIEF.local.md created in /m);
+    // sentences the session passes on as they stand, and the short help once
+    assert.match(r.out, /^created: pacing is set up in .*\. The short help, shown once:$/m);
+    assert.match(r.out, /^Pacing, the short help /m);
+    assert.match(r.out, /^BRIEF.local.md created in .*: your own rules for subagents go there\.$/m);
     assert.ok(s.exists('config.json') && s.exists('BRIEF.local.md'));
     const again = s.config(['init']);
     assert.equal(again.out.trim(), 'exists');
@@ -135,7 +137,7 @@ describe('init', () => {
     fs.writeFileSync(path.join(legacy, 'config.json'), JSON.stringify({ tiers: [{ model: 'opus', effort: 'max' }, { model: 'sonnet', effort: 'low' }], lastDayWeight: 2, installed: '2025-06-01' }));
     fs.writeFileSync(path.join(legacy, 'log.jsonl'), '{"t":"2026-01-01T00:00:00Z","all":1}\n');
     const r = s.config(['init']);
-    assert.match(r.out, /^migrated config.json, log.jsonl from /m);
+    assert.match(r.out, /^migrated config.json, log.jsonl from .*: the earlier standalone skill's files were taken over \(the originals are still there\)\.$/m);
     assert.equal(cfgOf(s).lastDayWeight, 2);
     assert.ok(s.exists('log.jsonl'));
     assert.ok(fs.existsSync(path.join(legacy, 'config.json')));
@@ -325,6 +327,37 @@ describe('the offer to switch', () => {
   });
 });
 
+describe('the panel of the running agents', () => {
+  test('auto by default, also with no key; off and auto again, kept by reset, a bad value refused or dropped', withHome(s => {
+    s.config(['init']);
+    assert.equal(cfgOf(s).agentsPanel, 'auto');
+    assert.match(s.config([]).out, /^live panel of the running agents \(\/pacing-agents\): auto$/m);
+    const { agentsPanel, ...without } = cfgOf(s);
+    s.writeConfig(without);
+    assert.match(s.config([]).out, /^live panel of the running agents \(\/pacing-agents\): auto$/m);
+    s.config(['panel', 'off']);
+    assert.equal(cfgOf(s).agentsPanel, 'off');
+    assert.match(s.config([]).out, /^live panel of the running agents \(\/pacing-agents\): off$/m);
+    s.config(['reset']);
+    assert.equal(cfgOf(s).agentsPanel, 'off');
+    s.config(['apply', 'panel', 'auto']);
+    assert.equal(cfgOf(s).agentsPanel, 'auto');
+    for (const bad of [['panel'], ['panel', 'on'], ['panel', 'maybe']]) {
+      const r = s.config(bad);
+      assert.equal(r.code, 1, bad.join(' '));
+      assert.equal(r.out.trim(), 'panel auto | panel off');
+    }
+    s.writeConfig({ ...cfgOf(s), agentsPanel: true });
+    assert.match(s.config([]).out, /the panel of the running agents is not auto or off: the default is used/);
+    assert.match(s.config([]).out, /\(\/pacing-agents\): auto$/m);
+  }));
+  test('the guide names /pacing-agents and the setting', () => {
+    const guide = fs.readFileSync(path.join(plugin, 'skills', 'pacing', 'GUIDE.md'), 'utf8').replace(/\s+/g, ' ');
+    assert.ok(guide.includes('`/pacing-agents`'));
+    assert.ok(guide.includes('`/pacing panel auto`, `/pacing panel off`'));
+  });
+});
+
 describe('the reload at a new version', () => {
   test('on by default, off and on again, kept by reset, a bad value refused or dropped', () => {
     const s = sandbox();
@@ -348,8 +381,9 @@ describe('the reload at a new version', () => {
   });
   test('the guide says what it does, in the module\'s own words', () => {
     const guide = fs.readFileSync(path.join(plugin, 'skills', 'pacing', 'GUIDE.md'), 'utf8').replace(/\s+/g, ' ');
-    assert.ok(guide.includes('`Pacing: updated to 0.9.11 and reloaded.`'));
-    assert.ok(guide.includes('`Pacing 0.9.11 is installed: type /reload-plugins to load it.`'));
+    // a toast leads with the icon of its kind where "Pacing: " stood
+    assert.ok(guide.includes('`🔄 updated to 0.9.12 and reloaded.`'));
+    assert.ok(guide.includes('`📦 Pacing 0.9.12 is installed: type /reload-plugins to load it.`'));
     assert.ok(guide.includes('`/pacing reload off` turns it off'));
   });
 });

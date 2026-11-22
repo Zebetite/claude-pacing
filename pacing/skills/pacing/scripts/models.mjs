@@ -45,5 +45,6 @@ export const checkConfig = raw => {
   drop('agentNotices', v => typeof v === 'boolean', 'the notices about running subagents are not on or off');
   drop('switchAsk', v => typeof v === 'boolean', 'the offers to switch model or effort are not on or off');
   drop('autoReload', v => typeof v === 'boolean', 'the reload at a new version is not on or off');
+  drop('agentsPanel', v => v === 'auto' || v === 'off', 'the panel of the running agents is not auto or off');
   return { cfg: c, problems };
 };

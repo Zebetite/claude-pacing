@@ -13,11 +13,15 @@
 // of the current calendar day's allowance counts as available from its start.
 // --dry: compute only (no log entry, no state.json, no settings.json change).
 // --source hook: an automatic reading from the plugin's hooks module (after a
-// turn). It has no per-model meter, so it carries that figure over from the
-// last full reading of the same week (a lower bound: a meter only rises), and
-// says from when; it never changes settings.json or the app's
-// preset; it is not logged when the last reading is under 30 min old and
-// nothing moved; and it prints one JSON line for the module, not the report.
+// turn). Without --premium it has no per-model meter, so it carries that
+// figure over from the last full reading of the same week (a lower bound: a
+// meter only rises), and says from when. With --premium (a figure, or - for
+// a plan without that meter) the module read every meter itself, through the
+// desktop app's usage tool: an automatic reading that is a full one, logged
+// with `full: true` and shown as "(auto, full)". Either kind never changes
+// settings.json or the app's preset; it is not logged when the last reading
+// is under 30 min old and nothing moved; and it prints one JSON line for the
+// module, not the report.
 // The config, the log and the state live in ~/.claude/pacing, outside the
 // plugin folder, which an update replaces.
 import fs from 'node:fs';
@@ -146,7 +150,7 @@ if (argv[0] === 'log') {
     const carried = e.premiumAt ? Date.parse(e.t) - Date.parse(e.premiumAt) : 0;
     // local time, like the report
     console.log(new Date(e.t).toLocaleString('sv-SE').slice(0, 16) + '  all ' + String(e.all).padStart(5) + ' %  line ' + String(e.line).padStart(5) + ' %  '
-      + ((e.premium ?? e.fable) != null ? labelOf(e.premiumModel) + ' ' + String(e.premium ?? e.fable).padStart(3) + ' %' + (carried >= 30 * 60000 ? ' (' + mins(carried) + ' old)' : '') + '  ' : '') + (e.five != null ? '5h ' + String(e.five).padStart(3) + ' %  ' : '') + e.level + (e.levelBy === 'premium' ? ' (' + labelOf(e.premiumModel) + ')' : '') + (e.premiumOut || e.fableOut ? ', ' + labelOf(e.premiumModel) + ' out' : e.premiumHeld ? ', ' + labelOf(e.premiumModel) + ' held' : '') + (e.source === 'hook' ? '  (auto)' : ''));
+      + ((e.premium ?? e.fable) != null ? labelOf(e.premiumModel) + ' ' + String(e.premium ?? e.fable).padStart(3) + ' %' + (carried >= 30 * 60000 ? ' (' + mins(carried) + ' old)' : '') + '  ' : '') + (e.five != null ? '5h ' + String(e.five).padStart(3) + ' %  ' : '') + e.level + (e.levelBy === 'premium' ? ' (' + labelOf(e.premiumModel) + ')' : '') + (e.premiumOut || e.fableOut ? ', ' + labelOf(e.premiumModel) + ' out' : e.premiumHeld ? ', ' + labelOf(e.premiumModel) + ' held' : '') + (e.source === 'hook' ? (e.full ? '  (auto, full)' : '  (auto)') : ''));
   }
   process.exit(0);
 }
@@ -211,13 +215,16 @@ const auto = source === 'hook';
 const num = v => (v === undefined || v === '-' ? null : String(v).trim() === '' ? NaN : Number(v));
 const used = String(opt.all).trim() === '' ? NaN : Number(opt.all);
 // the per-model meter is read only when the config names one. An automatic
-// reading never has it (the engine hands a plugin only the all-models and
-// 5-hour windows, and a gateway's spend limit; no per-model meter and no
-// extra usage), so it takes the last figure of the same week, with the
-// time that figure was read; a week with none has no figure. A report from
-// the last reading (`last`) takes it the same way.
+// reading without --premium has none (the engine hands a plugin only the
+// all-models and 5-hour windows, and a gateway's spend limit; no per-model
+// meter and no extra usage), so it takes the last figure of the same week,
+// with the time that figure was read; a week with none has no figure. A
+// report from the last reading (`last`) takes it the same way.
 let premFrom = null;
 const premArg = opt.premium !== undefined ? opt.premium : opt.fable;
+// an automatic reading that was handed the per-model meter read every meter
+// itself (the hooks module, through the desktop app's usage tool): a full one
+const fullAuto = auto && premArg !== undefined;
 if ((auto || fromState) && premium && premArg === undefined) {
   const r = Date.parse(opt.reset);
   const known = readLog().filter(e => e.premiumModel === premium && e.premium != null && Math.abs(Date.parse(e.reset) - r) <= HOUR);
@@ -467,7 +474,7 @@ if (fromState) {
   if (premWhy) { print('measure: ' + premWhy); process.exit(0); }
   // the block says what it rests on, within WIDTH like every line of it
   console.log('last reading ' + when(new Date(fromState.t)).slice(5) + ', ' + mins(fromState.age) + ' ago'
-    + (fromState.source === 'hook' ? ' (automatic)' : '') + ', not measured now');
+    + (fromState.source === 'hook' ? (fromState.full ? ' (automatic, full)' : ' (automatic)') : '') + ', not measured now');
   console.log('not in it: context, extra usage · /pacing usage now measures');
 }
 [
@@ -671,26 +678,31 @@ if (!ladder.length) {
       : 'tier ' + ladder.length + ' ' + name(pick('L')) + ' (pacing:verifier), the lowest tier'));
   }
   const t2 = pick(2);
+  // Which model or effort the session belongs on is said as a fact. Where
+  // the hooks module runs, its Switch row above the prompt is the one offer
+  // of the change: the session asks nothing and gives no steps. The steps
+  // (the model menu's words) are for a session without that module, and are
+  // left out of an automatic reading, which only the module reads.
+  const offered = t => '; the Switch row offers it' + (auto ? '' : ' (without the hooks module: model menu ' + t.label + ', effort ' + t.effort + ')');
   const notes = {
     'ahead': 'the session model does nearly everything',
     'on pace': 'the default split',
     'over': 'medium tasks leave the session model too',
-    'throttle': 'no manual change now: the session dispatches everything to ' + name(t2) + ' subagents and does itself only what they would get wrong. For the NEXT session SWITCH to ' + name(t2) + ' (model menu: ' + t2.label + ', effort ' + t2.effort + ')',
+    'throttle': 'no manual change now: the session dispatches everything to ' + name(t2) + ' subagents and does itself only what they would get wrong. The next session belongs on ' + name(t2) + offered(t2),
     'stop': extraOn ? 'the week is nearly used; from 100 % the work is charged to extra usage, so go on only with the user\'s word' : 'wrap up, the week is nearly used',
   };
-  const menuOf = t => '(model menu: ' + t.label + ', effort ' + t.effort + ')';
-  const switchNow = premOut ? premLabel + ' is out until the reset: SWITCH the session to ' + name(pick(1)) + ' now ' + menuOf(pick(1)) + '. '
-    : premHeld ? premLabel + '\'s own meter is at throttle: SWITCH the session to ' + name(pick(1)) + ' now ' + menuOf(pick(1)) + ' and keep ' + premLabel + ' for judgment work. ' : '';
+  const switchNow = premOut ? premLabel + ' is out until the reset: this session belongs on ' + name(pick(1)) + ' now' + offered(pick(1)) + '. '
+    : premHeld ? premLabel + '\'s own meter is at throttle: this session belongs on ' + name(pick(1)) + ' now, and ' + premLabel + ' is kept for judgment work' + offered(pick(1)) + '. ' : '';
   console.log('do: ' + switchNow + notes[level]);
   // At "over" the cheapest lever comes first: one step less effort on the
   // session's own model saves on every turn and keeps the work where it is.
-  // Only the user can change it (the model menu, or the app's prompt when the
-  // session offers set_session_effort). A session on another tier is left
-  // alone, and so is one that is told to switch model now (premium out or held).
+  // Only the user can change it: by the Switch row where the hooks module
+  // runs, else in the model menu. A session on another tier is left alone,
+  // and so is one that belongs on another model now (premium out or held).
   const top = ladder[0], lower = EFFORTS[EFFORTS.indexOf(top.effort) - 1];
   if (level === 'over' && lower && !premAway && (!sessionModel || sessionModel === top.model)) {
-    console.log('effort: first offer to lower this session\'s effort one step, ' + name(top) + ' -> ' + lower
-      + ' (model menu: ' + top.label + ', effort ' + lower + '; the user decides); medium work still goes to ' + name(pick(2)));
+    console.log('effort: one step less effort on this session would save most, ' + name(top) + ' -> ' + lower
+      + offered({ label: top.label, effort: lower }) + '; medium work still goes to ' + name(pick(2)));
   }
   if (premHeld && level !== 'throttle') {
     // what is left of the held meter goes to work that needs it most
@@ -716,12 +728,16 @@ if (!opt.dry) {
   // the log grows by about two readings an hour at most
   const lastEntry = readLog().at(-1);
   const age = lastEntry ? now - Date.parse(lastEntry.t) : Infinity;
-  const same = auto && lastEntry && age >= 0 && age < 30 * 60000 && Math.abs(used - lastEntry.all) < 1
+  // a full one read the per-model meter too: a whole point there, or a figure
+  // where the last entry carried one over or had none, is something that moved
+  const premSame = !fullAuto || !lastEntry || (prem === null ? lastEntry.premium == null
+    : typeof lastEntry.premium === 'number' && !lastEntry.premiumAt && Math.abs(prem - lastEntry.premium) < 1);
+  const same = auto && lastEntry && age >= 0 && age < 30 * 60000 && Math.abs(used - lastEntry.all) < 1 && premSame
     && lastEntry.level === level && !!lastEntry.premiumOut === premOut && !!lastEntry.premiumHeld === premHeld;
   if (!same) {
     const entry = { t: now.toISOString(), all: r1(used), premium: prem === null ? null : r1(prem), premiumModel: premium, premiumOut: premOut, five: five === null ? null : r1(five), fiveReset: opt['five-reset'] || null, line: r1(budget), level, reset: opt.reset,
       ...(premLevel ? { premiumLevel: premLevel } : {}), ...(premHeld ? { premiumHeld: true } : {}), ...(levelBy === 'premium' ? { levelBy } : {}),
-      ...(auto ? { source: 'hook' } : {}), ...(premFrom ? { premiumAt: premFrom.at } : {}) };
+      ...(auto ? { source: 'hook' } : {}), ...(fullAuto ? { full: true } : {}), ...(premFrom ? { premiumAt: premFrom.at } : {}) };
     fs.appendFileSync(logFile, JSON.stringify(entry) + '\n');
     // swapped in whole (safe.mjs), and never over a newer reading that
     // another session wrote meanwhile
@@ -847,7 +863,8 @@ const spawnedSession = () => {
 //             hour old, or all models 2 points on since it was read (two
 //             points were ten on the per-model meter in the case above).
 //             With the model held off tier 1 this session no longer draws
-//             on it, and three hours is soon enough.
+//             on it, and three hours is soon enough. Never for an
+//             automatic reading that read the meter itself (fullAuto).
 const fulls = weekLog.filter(e => e.premiumModel === premium && typeof e.premium === 'number' && !e.premiumAt);
 const premAgeMs = premFrom ? Math.max(0, now - Date.parse(premFrom.at)) : null;
 const readAt = premFrom ? fulls.filter(e => e.t === premFrom.at).at(-1) || fulls.at(-1) : null;
@@ -856,7 +873,7 @@ const ratio = fulls.length >= 2 && fulls.at(-1).all - fulls[0].all >= 2 && fulls
   ? Math.min(10, (fulls.at(-1).premium - fulls[0].premium) / (fulls.at(-1).all - fulls[0].all)) : null;
 const premEstimate = premFrom && prem !== null && ratio !== null && allMoved > 0 && ratio * allMoved >= 1 ? Math.min(100, r1(prem + ratio * allMoved)) : null;
 const FULL_AGE = HOUR, FULL_AGE_HELD = 3 * HOUR, FULL_MOVED = 2;
-const needFull = !(auto && premium && premTop) || premOut ? null
+const needFull = !(auto && premium && premTop) || premOut || fullAuto ? null
   : prem === null ? 'no ' + premLabel + ' reading this week yet'
     : premAgeMs !== null && premAgeMs >= (premHeld ? FULL_AGE_HELD : FULL_AGE) ? 'the ' + premLabel + ' figure is ' + mins(premAgeMs) + ' old'
       : !premHeld && allMoved !== null && allMoved >= FULL_MOVED ? 'all models moved ' + r1(allMoved) + ' points since the ' + premLabel + ' meter was read'
@@ -893,7 +910,7 @@ if (auto) {
     premium: prem === null ? null : r1(prem), premiumOut: premOut, premiumLabel: premLabel,
     premiumAt: premFrom ? premFrom.at : null, premiumLevel: premLevel, premiumHeld: premHeld, levelBy,
     premiumOfBudget: premLevel && budget > 0 ? Math.round(100 * prem / budget) : null,
-    premiumEstimate: premEstimate, needFull,
+    premiumEstimate: premEstimate, needFull, full: fullAuto,
     // what the session should run on, and at "over" the effort one step
     // lower on tier 1: the hooks module offers them as a Switch button
     recommend: sessionTier ? { model: MODELS[sessionTier.model].id, label: sessionTier.label, effort: sessionTier.effort } : null,

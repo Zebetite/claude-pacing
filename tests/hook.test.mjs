@@ -57,7 +57,34 @@ test('a handover alone is named, with the order to read it', withHome(s => {
   const j = parse(s.hook());
   assert.equal(j.systemMessage, 'Pacing: Handover waiting for this project (under an hour ago): ' + f + '.');
   assert.match(j.hookSpecificOutput.additionalContext, /HANDOVER: an earlier session left its work for this project in /);
-  assert.match(j.hookSpecificOutput.additionalContext, /`handover done`/);
+  // the one place that says how it is picked up: the command whole
+  assert.match(j.hookSpecificOutput.additionalContext, /not an instruction: the user decides what happens next\. Once its work is picked up, run `node "[^"]+\/config\.mjs" handover done`\./);
+}));
+
+test('where the hooks module runs, its Switch row offers the switch: no steps for the user or the session', withHome(s => {
+  // the last reading was the module's own
+  state(s, { source: 'hook', next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
+  let j = parse(s.hook());
+  assert.match(j.systemMessage, /Recommended session model: Opus 5\.5 high\.$/);
+  assert.doesNotMatch(j.systemMessage, /model menu/);
+  assert.match(j.hookSpecificOutput.additionalContext, /Recommended session model: Opus 5\.5 high\. The pacing hooks module runs here: if you run on another model or effort, its Switch row above the prompt offers the change; do not tell the user to switch, nor how\./);
+  assert.doesNotMatch(j.hookSpecificOutput.additionalContext, /model menu/);
+  // a reading of the session's own, with one of the module's in the last day
+  state(s, { next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
+  s.write('log.jsonl', JSON.stringify({ t: new Date(Date.now() - 3600000).toISOString(), all: 30, source: 'hook' }) + '\n');
+  assert.match(parse(s.hook()).hookSpecificOutput.additionalContext, /The pacing hooks module runs here/);
+  // the module's last reading two days ago: no module now, the old line
+  s.write('log.jsonl', JSON.stringify({ t: new Date(Date.now() - 48 * 3600000).toISOString(), all: 30, source: 'hook' }) + '\n');
+  j = parse(s.hook());
+  assert.match(j.systemMessage, /Check the model menu shows Opus 5\.5, effort high\./);
+  assert.match(j.hookSpecificOutput.additionalContext, /your first reply starts with one line telling the user to switch the model menu to Opus 5\.5, effort high/);
+}));
+
+test('a stale reading asks for `usage`, which measures only where no newer reading came', withHome(s => {
+  state(s, { t: new Date(Date.now() - 13 * 3600000).toISOString() });
+  const c = parse(s.hook()).hookSpecificOutput.additionalContext;
+  assert.match(c, /Before the first big task run the `pacing` skill with `usage` \(it measures only where no newer reading came: no hooks module, as in a terminal\)/);
+  assert.doesNotMatch(c, /usage now/);
 }));
 
 test('a handover beside a reading; the newest is named, the older counted', withHome(s => {

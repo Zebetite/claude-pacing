@@ -125,7 +125,7 @@ describe('the premium meter', () => {
     assert.equal(routeOf(out, 'judgment'), 'tier 1 Opus 5.5 high (the session)');
     assert.equal(routeOf(out, 'medium'), 'tier 1 Opus 5.5 high (the session)');
     assert.match(sheetRows(out).join('\n'), /^- +Fable 5.2 high +out until the reset: its own meter is at 100 %$/m);
-    assert.match(out, /^do: Fable 5.2 is out until the reset: SWITCH the session to Opus 5.5 high now \(model menu: Opus 5.5, effort high\)/m);
+    assert.match(out, /^do: Fable 5\.2 is out until the reset: this session belongs on Opus 5\.5 high now; the Switch row offers it \(without the hooks module: model menu Opus 5\.5, effort high\)\. /m);
     assert.match(out, /^next session: Opus 5.5 high$/m);
   });
   test('the old --fable flag still reads the meter', () => {
@@ -346,7 +346,7 @@ describe('the effort step at "over"', () => {
   const now = '2026-11-13T12:00:00Z';
   const effort = out => (out.split(/\r?\n/).find(l => l.startsWith('effort: ')) || null);
   test('at over: lower the session\'s effort one step first', () => {
-    assert.equal(effort(dry(now, 22).out), 'effort: first offer to lower this session\'s effort one step, Fable 5.2 high -> medium (model menu: Fable 5.2, effort medium; the user decides); medium work still goes to Opus 5.5 medium');
+    assert.equal(effort(dry(now, 22).out), 'effort: one step less effort on this session would save most, Fable 5.2 high -> medium; the Switch row offers it (without the hooks module: model menu Fable 5.2, effort medium); medium work still goes to Opus 5.5 medium');
     assert.match(effort(dry(now, 22, '--session', 'claude-fable-5-2').out), /Fable 5.2 high -> medium/);
   });
   test('not at the other levels', () => {
@@ -429,7 +429,7 @@ describe('the per-model meter, paced on the same line', () => {
     assert.equal(premLine(out), 'Fable 5.2 used 30 %, delta +10 -> throttle: the session moves off it');
     assert.equal(routeOf(out, 'judgment'), 'tier 1 Opus 5.5 high (the session)');
     assert.match(sheetRows(out).join('\n'), /^- +Fable 5.2 high +kept for judgment: one contained hard task at a time, as a subagent$/m);
-    assert.match(out, /^do: Fable 5\.2's own meter is at throttle: SWITCH the session to Opus 5\.5 high now \(model menu: Opus 5\.5, effort high\) and keep Fable 5\.2 for judgment work\./m);
+    assert.match(out, /^do: Fable 5\.2's own meter is at throttle: this session belongs on Opus 5\.5 high now, and Fable 5\.2 is kept for judgment work; the Switch row offers it \(without the hooks module: model menu Opus 5\.5, effort high\)\. /m);
     assert.match(out, /^upward: Fable 5\.2 is kept for judgment work: one contained hard task with a clear deliverable may go to a Fable 5\.2 high subagent/m);
     assert.match(out, /^next session: Opus 5.5 high$/m);
     assert.equal(effort(out), null);

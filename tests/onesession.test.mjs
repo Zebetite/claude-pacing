@@ -67,9 +67,9 @@ test('a task that needs the user\'s input stays in the session; the rest is the 
   assert.match(route, /never commit, push or publish unasked/);
 });
 
-test('the session says what runs, in two lines and no more', () => {
+test('the session says what runs, one line each and no more', () => {
   const route = texts['route SKILL.md'].replace(/\s*\n\s*/g, ' ');
-  assert.match(route, /\*\*Say what runs\*\*, two lines and no more: on delegating, one line naming the agent, its model and effort, and what it is for; when the user writes while agents run, start the reply with one line on how many run and what each is doing/);
+  assert.match(route, /\*\*Say what runs\*\*, one line each and no more: on delegating, the agent, its model and effort, and its task; when the user writes while agents run, the reply starts with how many run and what each is doing/);
 });
 
 test('each role agent\'s report leaves the session nothing to ask back', () => {
@@ -83,17 +83,19 @@ test('each role agent\'s report leaves the session nothing to ask back', () => {
 test('the outcome carries the important content itself, and a task in parts sends an update per part', () => {
   const route = texts['route SKILL.md'].replace(/\s*\n\s*/g, ' ');
   assert.match(route, /and the important content itself, verbatim \(texts the user will see, example lines, drafts, each choice and why\)/);
-  assert.match(route, /Pass on an agent's update for a finished part in a few lines when it arrives/);
+  assert.match(route, /Pass on a part's update in a few lines when it arrives/);
+  // the agents get the rest from BRIEF.md, printed by their start-up call
   const brief = fs.readFileSync(path.join(skillDir, 'BRIEF.md'), 'utf8').replace(/\s*\n\s*/g, ' ');
   assert.match(brief, /holds the important content itself, verbatim: the texts the user will see, example lines, drafts and wording, each choice made and why, and what could not be done or verified/);
   assert.match(brief, /send the session a short update with SendMessage to "main" when each part is done/);
+  assert.match(brief, /none for routine steps, since each one wakes the session/);
+  assert.match(brief, /ToolSearch "select:SendMessage"/);
   for (const name of ['implementer', 'reader', 'researcher', 'verifier']) {
     const file = fs.readFileSync(path.join(plugin, 'agents', name + '.md'), 'utf8');
     // the tools an update needs
     assert.match(file, /^tools: .*SendMessage, ToolSearch$/m, name);
+    // the one rule of the report that must hold even when the start-up call fails
     const report = file.split('## Report')[1].replace(/\s*\n\s*/g, ' ');
-    assert.match(report, /Under clear headings, give the important content itself, not a summary of it: the exact texts the user will see \(lines, messages, rows\), example lines, drafts and wording verbatim, each choice you made and why in a few words, and what you could not do or verify/, name);
-    assert.match(report, /SendMessage to "main"/, name);
-    assert.match(report, /One per finished part, none for routine steps/, name);
+    assert.match(report, /[Gg]ive the important content itself/, name);
   }
 });

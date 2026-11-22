@@ -40,6 +40,13 @@
 //                                   an id is a fresh agent, the later ones resumed
 //   node config.mjs agents [--project <folder>]   the kept agents (the latest of each role in
 //                                   the last 24 h) and the runs' tokens by role and model
+//   node config.mjs start [<role>] [--project <folder>]   all a role agent reads before its first
+//                                   task, in one call: BRIEF.md's rules, its notes, the user's
+//                                   BRIEF.local.md for the project; without a role, what the
+//                                   session pastes into a general-purpose agent's prompt
+//   node config.mjs part <done> <total>   an agent's progress through a task in parts: one
+//                                   line, nothing written (the hooks module reads the call)
+//   node config.mjs panel auto|off  the live panel of the running agents (/pacing-agents)
 // Models are the Agent tool's ids; the label is what the user sees.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -71,6 +78,7 @@ const defaults = () => ({
   agentNotices: true,
   switchAsk: true,
   autoReload: true,
+  agentsPanel: 'auto',
   premium: 'fable',
   fallback: { model: 'opus', effort: 'high' },
   reader: { model: 'haiku', effort: 'medium' },
@@ -144,6 +152,27 @@ const mutate = fn => {
   cfg = out;
 };
 
+// One source: the short help is cut from GUIDE.md, the parts between
+// <!-- help --> and <!-- /help -->, and the commands from its command table,
+// so the two cannot drift.
+const shortHelp = () => {
+  const guide = fs.readFileSync(path.join(here, '..', 'GUIDE.md'), 'utf8');
+  // blank lines trimmed, not spaces: an indented line is a code line
+  const parts = [...guide.matchAll(/<!-- help -->([\s\S]*?)<!-- \/help -->/g)].map(m => m[1].replace(/^\s*\n|\s+$/g, ''));
+  const table = guide.slice(guide.indexOf('## Commands'));
+  const KEYWORDS = ['now', 'full', 'done'];
+  const words = [];
+  for (const m of table.matchAll(/^\| (.*?) \|/gm)) {
+    for (const c of m[1].matchAll(/`\/pacing ([^`]+)`/g)) {
+      const w = c[1].split(' ');
+      const name = KEYWORDS.includes(w[1]) ? w[0] + ' ' + w[1] : w[0];
+      if (!words.includes(name)) words.push(name);
+    }
+  }
+  return ['Pacing, the short help (`/pacing-guide` shows the whole guide; where Claude Code lacks that command, `/pacing help full`).', ...parts,
+    'Commands, each after `/pacing`: ' + words.join(' · ') + '.'].join('\n\n');
+};
+
 const ROLE = ['the session: judgment work', 'subagents: routine work', 'subagents: bulky output'];
 const show = c => {
   c.tiers.forEach((t, i) => {
@@ -159,6 +188,7 @@ const show = c => {
   console.log('notices about running subagents: ' + (c.agentNotices === false ? 'off' : 'on'));
   console.log('offers to switch this session to the recommended model or effort: ' + (c.switchAsk === false ? 'off' : 'on'));
   console.log('reload of the plugins when a new version is installed: ' + (c.autoReload === false ? 'off' : 'on'));
+  console.log('live panel of the running agents (/pacing-agents): ' + (c.agentsPanel === 'off' ? 'off' : 'auto'));
   console.log('data folder: ' + dataDir);
 };
 const fail = m => { console.log(m); process.exit(1); };
@@ -181,6 +211,43 @@ const projectRoot = () => rootOf(projectArg);
 const HANDOVER_HEADINGS = ['Goal', 'State: done, verified, not verified', 'Decisions and why', 'Open items, in order', 'Files and commands', 'Ruled out and traps'];
 const noteLines = f => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').split(/\r?\n/).filter(l => l.startsWith('- ')) : []);
 const withoutDate = l => l.slice(2).replace(/ \(\d{4}-\d{2}-\d{2}\)$/, '');
+// The user's BRIEF.local.md as it applies to one project: its general
+// additions and anything else it holds, with the blocks of other projects
+// left out (a block is a "### <folder>" heading under "## Project blocks", or
+// names its folder in "Project rules (<folder>):"). A file without "## "
+// headings is given whole.
+const localFor = root => {
+  let text;
+  try { text = fs.readFileSync(localBrief, 'utf8').replace(/\r\n/g, '\n'); } catch { return 'BRIEF.local.md: none (' + localBrief + ').'; }
+  const lines = text.split('\n');
+  const first = lines.findIndex(l => l.startsWith('## '));
+  const ours = folder => {
+    if (!path.isAbsolute(folder)) return false;
+    const rel = path.relative(path.resolve(folder), root);
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  };
+  const kept = [];
+  if (first < 0) kept.push(...lines);
+  else {
+    let inBlocks = false, block = null, found = 0;
+    const close = () => {
+      if (!block) return;
+      const named = [block[0].slice(4).trim(), ...block.flatMap(l => { const m = /^\s*Project rules \((.+)\):\s*$/.exec(l); return m ? [m[1]] : []; })];
+      if (named.some(ours)) { kept.push(...block); found++; }
+      block = null;
+    };
+    const leave = () => { close(); if (inBlocks && !found) kept.push('', '(none for this project)', ''); inBlocks = false; };
+    for (const l of lines.slice(first)) {
+      if (l.startsWith('## ')) { leave(); inBlocks = /^## Project blocks/i.test(l); kept.push(l); } else if (inBlocks && l.startsWith('### ')) { close(); block = [l]; } else if (block) block.push(l);
+      else kept.push(l);
+    }
+    leave();
+  }
+  // nothing but headings, fences and empty bullets: the template as created
+  const said = kept.some(l => { const t = l.trim(); return t && !t.startsWith('#') && !t.startsWith('```') && t !== '-' && t !== '(none for this project)' && !/^Project rules \(.*\):$/.test(t); });
+  if (!said) return 'BRIEF.local.md: no rules for this project (' + localBrief + ').';
+  return 'The user\'s own rules (' + localBrief + ', the blocks for this project):\n' + kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+};
 
 // ---- the kept agents: a session whose history was summarised has lost the
 //      ids it kept, and nobody knows what a kept agent costs against a fresh
@@ -199,13 +266,15 @@ const agoText = t => { const h = (Date.now() - Date.parse(t)) / 3600000; return 
 const modelText = r => (MODELS[r.model] ? MODELS[r.model].label : r.model) + ' ' + r.effort;
 
 const [cmd, a, b, d] = argv;
-let cfg = read();
+// an agent's start-up and its progress lines need no settings, and must not
+// write a repaired config.json or add a note about it to their answer
+let cfg = cmd === 'start' || cmd === 'part' ? null : read();
 process.on('exit', () => { for (const n of configNotes) console.log(n); });
 // Several commands in one run. Every tool call a session makes re-reads its
 // whole history, so a setup that writes eight settings, or three agent
 // records after a batch of tasks, is one call this way and not eight.
 if (cmd === 'apply') {
-  const APPLY = ['set', 'add', 'remove', 'weight', 'next', 'compact', 'notify', 'switch', 'reload', 'premium', 'fallback', 'reader', 'verifier', 'agent', 'note'];
+  const APPLY = ['set', 'add', 'remove', 'weight', 'next', 'compact', 'notify', 'switch', 'reload', 'panel', 'premium', 'fallback', 'reader', 'verifier', 'agent', 'note'];
   const groups = [];
   let cur = [];
   for (const w of argv.slice(1)) { if (w === '+') { if (cur.length) groups.push(cur); cur = []; } else cur.push(w); }
@@ -243,27 +312,12 @@ switch (cmd || 'show') {
     console.log(version());
     break;
   case 'help': {
-    // One source: the short help is cut from GUIDE.md, the parts between
-    // <!-- help --> and <!-- /help -->, and the commands from its command
-    // table, so the two cannot drift. Printed text costs output tokens, so
-    // the whole guide (about 2 600 words) only on `help full`.
+    // Printed text costs output tokens, so the whole guide (about 2 600
+    // words) only on `help full`; the skill sends the user to /pacing-guide
+    // for it where the hooks module answers that without the model.
     if (a !== undefined && a !== 'full') fail('help | help full');
-    const guide = fs.readFileSync(path.join(here, '..', 'GUIDE.md'), 'utf8');
-    if (a === 'full') { console.log(guide.replace(/<!-- \/?help -->/g, '')); break; }
-    // blank lines trimmed, not spaces: an indented line is a code line
-    const parts = [...guide.matchAll(/<!-- help -->([\s\S]*?)<!-- \/help -->/g)].map(m => m[1].replace(/^\s*\n|\s+$/g, ''));
-    const table = guide.slice(guide.indexOf('## Commands'));
-    const KEYWORDS = ['now', 'full', 'done'];
-    const words = [];
-    for (const m of table.matchAll(/^\| (.*?) \|/gm)) {
-      for (const c of m[1].matchAll(/`\/pacing ([^`]+)`/g)) {
-        const w = c[1].split(' ');
-        const name = KEYWORDS.includes(w[1]) ? w[0] + ' ' + w[1] : w[0];
-        if (!words.includes(name)) words.push(name);
-      }
-    }
-    console.log(['Pacing, the short help (`/pacing help full` shows the whole guide).', ...parts,
-      'Commands, each after `/pacing`: ' + words.join(' · ') + '.'].join('\n\n'));
+    if (a === 'full') { console.log(fs.readFileSync(path.join(here, '..', 'GUIDE.md'), 'utf8').replace(/<!-- \/?help -->/g, '')); break; }
+    console.log(shortHelp());
     break;
   }
   case 'where':
@@ -424,20 +478,55 @@ switch (cmd || 'show') {
     for (const r of rows) console.log('  ' + r.map((v, c) => (c < 2 ? v.padEnd(w[c]) : v.padStart(w[c]))).join('  '));
     break;
   }
+  case 'start': {
+    // Everything an agent reads before its first task, in one call: every
+    // tool call re-reads the agent's whole context, and a start used to make
+    // three or four (agents/*.md, "Before your first task").
+    if (a !== undefined && !ROLES.includes(a)) fail('usage: start [<role>] --project "<project folder>"; role: ' + ROLES.join(', '));
+    const root = projectRoot();
+    const out = [];
+    // BRIEF.md is the one source of the rules: section 1 for every subagent,
+    // section 3 for the role agents, with the role, the project and this
+    // script's path filled in
+    const brief = fs.readFileSync(path.join(here, '..', 'BRIEF.md'), 'utf8').replace(/\r\n/g, '\n');
+    const section = n => (brief.match(new RegExp('^## ' + n + '\\..*\\n[\\s\\S]*?^```\\n([\\s\\S]*?)^```', 'm')) || [])[1] || '';
+    const self = fileURLToPath(import.meta.url).replace(/\\/g, '/');
+    const fill = t => t.replace(/\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/pacing\/scripts\/config\.mjs/g, self)
+      .replace(/<role>/g, a).replace(/<project folder>/g, root).trimEnd();
+    out.push((a ? 'Pacing start-up for the ' + a : 'Pacing brief for a subagent') + ', project ' + root
+      + '. Follow all of it; the project\'s own CLAUDE.md rules come first.', '', section(1).trimEnd());
+    if (a) {
+      const f = path.join(notesDir(root), a + '.md'), lines = noteLines(f);
+      out.push('', fill(section(3)), '', lines.length ? 'Your notes (' + f + '):\n' + lines.join('\n') : 'Your notes: none yet (' + f + ').');
+    }
+    out.push('', localFor(root));
+    console.log(out.join('\n'));
+    break;
+  }
+  case 'part': {
+    // An agent's progress through a task in parts (BRIEF.md section 3). The
+    // hooks module reads the call from the agent's own tool use and shows it;
+    // the command only answers, and writes nothing.
+    const whole = v => /^\d+$/.test(String(v));
+    if (argv.length !== 3 || !whole(a) || !whole(b) || Number(b) < 1 || Number(a) > Number(b)) fail('usage: part <done> <total>, whole numbers with done at most total (part 0 4 at the start, part 1 4 after the first)');
+    console.log('part ' + Number(a) + ' of ' + Number(b));
+    break;
+  }
   case 'init': {
     fs.mkdirSync(dataDir, { recursive: true });
     if (cfg) {
       console.log('exists');
     } else {
-      // a machine that ran the standalone skill keeps its ladder, readings and rules
+      // a machine that ran the standalone skill keeps its ladder, readings and
+      // rules. Each line is a sentence the session passes on as it stands.
       const legacy = ['config.json', 'log.jsonl', 'state.json', 'BRIEF.local.md'].filter(f => fs.existsSync(path.join(legacyDir, f)));
       if (legacy.length) {
         for (const f of legacy) fs.copyFileSync(path.join(legacyDir, f), path.join(dataDir, f));
-        console.log('migrated ' + legacy.join(', ') + ' from ' + legacyDir + ' (the originals are still there)');
+        console.log('migrated ' + legacy.join(', ') + ' from ' + legacyDir + ': the earlier standalone skill\'s files were taken over (the originals are still there).');
         cfg = read();
       }
       if (!cfg) mutate(() => {});
-      console.log('created');
+      console.log('created: pacing is set up in ' + dataDir + '. The short help, shown once:\n\n' + shortHelp());
     }
     // the user's own subagent rules, outside the plugin folder
     if (!fs.existsSync(localBrief)) {
@@ -450,7 +539,7 @@ switch (cmd || 'show') {
         '## Project blocks', '', '### <project folder>', '', '```', 'Project rules (<project folder>):', '- ', '```', '',
       // the exclusive flag: of two first runs at once, one creates it
       ].join('\n'), { flag: 'wx' }); } catch (e) { if (e.code !== 'EEXIST') throw e; made = false; }
-      if (made) console.log('BRIEF.local.md created in ' + dataDir);
+      if (made) console.log('BRIEF.local.md created in ' + dataDir + ': your own rules for subagents go there.');
     }
     break;
   }
@@ -503,6 +592,15 @@ switch (cmd || 'show') {
     mutate(cfg => {
       if (a !== 'on' && a !== 'off') fail('reload on | reload off');
       cfg.autoReload = a === 'on';
+    }); show(cfg);
+    break;
+  }
+  case 'panel': {
+    // read by the hooks module, which registers /pacing-agents to open or
+    // close the panel; auto is the default, also when the key is absent
+    mutate(cfg => {
+      if (a !== 'auto' && a !== 'off') fail('panel auto | panel off');
+      cfg.agentsPanel = a;
     }); show(cfg);
     break;
   }
@@ -560,6 +658,7 @@ switch (cmd || 'show') {
       if (keep.agentNotices === false) c.agentNotices = false;
       if (keep.switchAsk === false) c.switchAsk = false;
       if (keep.autoReload === false) c.autoReload = false;
+      if (keep.agentsPanel === 'off') c.agentsPanel = 'off';
       if (keep.premium !== undefined) c.premium = keep.premium;
       return c;
     });
@@ -567,5 +666,5 @@ switch (cmd || 'show') {
     break;
   }
   default:
-    fail('commands: show | json | init | help [full] | apply <command> + <command> ... | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | compact on|off | notify on|off | switch on|off | reload on|off | premium <model>|none | fallback <model> <effort>|none | reader <model> <effort>|ladder | verifier <model> <effort>|ladder | reset | version | where | notes | note <role> <fact> | agent <role> <id> <model> <effort> <tokens> | agents | handover [new|done]');
+    fail('commands: show | json | init | help [full] | apply <command> + <command> ... | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | compact on|off | notify on|off | switch on|off | reload on|off | panel auto|off | premium <model>|none | fallback <model> <effort>|none | reader <model> <effort>|ladder | verifier <model> <effort>|ladder | reset | version | where | notes | note <role> <fact> | agent <role> <id> <model> <effort> <tokens> | agents | start [<role>] | part <done> <total> | handover [new|done]');
 }

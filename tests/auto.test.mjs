@@ -101,7 +101,9 @@ describe('the per-model meter, carried over', () => {
       const j = auto(s, 12, at(40));
       assert.equal(j.premiumOut, true);
       assert.equal(j.premiumAt, NOW);
-      assert.match(j.do, /^Fable 5\.2 is out until the reset: SWITCH the session to Opus 5\.5 high now/);
+      assert.match(j.do, /^Fable 5\.2 is out until the reset: this session belongs on Opus 5\.5 high now; the Switch row offers it\. /);
+      // read by the hooks module alone: the fact and its row, never the steps
+      assert.doesNotMatch(j.do, /model menu|SWITCH/);
       const e = log(s).at(-1);
       assert.equal(e.premium, 100);
       assert.equal(e.premiumAt, NOW);
@@ -238,7 +240,8 @@ describe('the per-model meter, paced from a carried figure', () => {
       assert.equal(j.level, 'ahead');
       assert.equal(j.levelBy, 'all');
       assert.equal(j.premiumHeld, true);
-      assert.match(j.do, /^Fable 5\.2's own meter is at throttle: SWITCH the session to Opus 5\.5 high now/);
+      assert.match(j.do, /^Fable 5\.2's own meter is at throttle: this session belongs on Opus 5\.5 high now, and Fable 5\.2 is kept for judgment work; the Switch row offers it\. /);
+      assert.doesNotMatch(j.do, /model menu|SWITCH/);
       assert.equal(log(s).at(-1).premiumHeld, true);
     } finally { s.cleanup(); }
   });
@@ -377,7 +380,7 @@ describe('a carried per-model figure is not a current one', () => {
         premiumModel: 'fable', premium: 71, premiumAt: new Date(Date.now() - 15 * 3600000).toISOString(), premiumHeld: true, next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } }));
       const j = JSON.parse(s.hook().out);
       assert.match(j.systemMessage, /Fable 5\.2 was last read 15 h ago, at 71 %: the session will take a full reading before the first big task\.$/);
-      assert.match(j.hookSpecificOutput.additionalContext, /The all-models figure is fresh, but Fable 5\.2 was last read 15 h ago, at 71 %, which an automatic reading cannot renew: run the `pacing` skill with `usage now` before the first big task\./);
+      assert.match(j.hookSpecificOutput.additionalContext, /The all-models figure is fresh, but Fable 5\.2 was last read 15 h ago, at 71 %: before the first big task run the `pacing` skill with `usage` \(it measures only where no newer reading came: no hooks module, as in a terminal\)\./);
       assert.doesNotMatch(j.hookSpecificOutput.additionalContext, /This reading is fresh/);
       // read 20 minutes ago: nothing to add
       const st = JSON.parse(s.read('state.json'));
@@ -438,6 +441,103 @@ describe('what the session should run on, for the switch button', () => {
       assert.equal(throttle.level, 'throttle');
       assert.deepEqual(throttle.recommend, { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' });
       assert.equal(throttle.effortStep, null);
+    } finally { s.cleanup(); }
+  });
+});
+
+// The hooks module reads every meter itself where the desktop app's usage
+// tool answers, and hands them over as the skill does: an automatic reading
+// that is a full one.
+describe('an automatic reading that read every meter itself: full', () => {
+  const FULL = ['--premium', '15', '--five', '12', '--five-reset', '2026-11-13T15:00:00.000Z', '--context', '12', '--context-tokens', '120000',
+    '--categories', 'Messages=80000,System tools=25759,MCP tools=13768', '--extra-spent', '1.5', '--extra-limit', '50', '--extra-currency', 'EUR', '--session', 'claude-fable-5-2'];
+  test('the figure it read is used as read, logged as full, and nothing is asked for', () => {
+    const s = sandbox();
+    try {
+      // the week's only full reading by the skill is three hours old
+      s.budget(['--all', '10', '--reset', RESET, '--premium', '12', '--now', NOW]);
+      const settings = s.read('../settings.json');
+      const j = auto(s, 14, at(180), FULL);
+      assert.equal(j.full, true);
+      assert.equal(j.premium, 15);
+      assert.equal(j.premiumAt, null);
+      assert.equal(j.premiumEstimate, null);
+      assert.equal(j.needFull, null);
+      const e = log(s).at(-1);
+      assert.equal(e.source, 'hook');
+      assert.equal(e.full, true);
+      assert.equal(e.premium, 15);
+      assert.equal(e.premiumAt, undefined);
+      assert.equal(e.five, 12);
+      // still automatic: the skill's reading set the default, this one leaves it
+      assert.equal(s.read('../settings.json'), settings, 'settings.json untouched');
+    } finally { s.cleanup(); }
+  });
+  test('a plain automatic reading is not full, and still asks', () => {
+    const s = sandbox();
+    try {
+      const j = auto(s, 10);
+      assert.equal(j.full, false);
+      assert.equal(j.needFull, 'no Fable 5.2 reading this week yet');
+      assert.equal(log(s).at(-1).full, undefined);
+    } finally { s.cleanup(); }
+  });
+  test('a plan without the per-model window (-): full all the same, no figure, nothing asked for', () => {
+    const s = sandbox();
+    try {
+      const j = auto(s, 10, NOW, ['--premium', '-']);
+      assert.equal(j.full, true);
+      assert.equal(j.premium, null);
+      assert.equal(j.needFull, null);
+    } finally { s.cleanup(); }
+  });
+  test('its figure sets the level and feeds the next plain reading, with the time it was read', () => {
+    const s = sandbox();
+    try {
+      // 22 % against a 20 % line: over, by the per-model meter
+      const j = auto(s, 11, NOW, ['--premium', '22']);
+      assert.equal(j.level, 'over');
+      assert.equal(j.levelBy, 'premium');
+      const next = auto(s, 11.2, at(10));
+      assert.equal(next.premium, 22);
+      assert.equal(next.premiumAt, NOW);
+    } finally { s.cleanup(); }
+  });
+  test('the thin log counts the per-model meter: a whole point there is logged, and so is a figure where the last entry carried one', () => {
+    const s = sandbox();
+    try {
+      auto(s, 10, NOW, ['--premium', '12']);
+      assert.equal(auto(s, 10.2, at(5), ['--premium', '12.4']).logged, false, 'nothing moved a point');
+      assert.equal(auto(s, 10.2, at(6), ['--premium', '13']).logged, true, 'the per-model meter moved a point');
+      // a plain one carries the figure; the next full one reads it afresh
+      assert.equal(auto(s, 11.3, at(8)).logged, true);
+      assert.equal(log(s).at(-1).premiumAt, at(6));
+      assert.equal(auto(s, 11.3, at(9), ['--premium', '13']).logged, true, 'a figure read where the last was carried');
+      assert.equal(log(s).at(-1).premiumAt, undefined);
+      assert.equal(log(s).length, 4);
+    } finally { s.cleanup(); }
+  });
+  test('extra usage and the context reach the do: line and never break the one JSON line', () => {
+    const s = sandbox();
+    try {
+      const j = auto(s, 96, NOW, FULL);
+      assert.equal(j.level, 'stop');
+      assert.equal(j.do, 'the week is nearly used; from 100 % the work is charged to extra usage, so go on only with the user\'s word');
+      assert.equal(auto(s, 96, at(1), ['--premium', '15']).do, 'wrap up, the week is nearly used');
+    } finally { s.cleanup(); }
+  });
+  test('`log` and the report from the last reading call it automatic and full', () => {
+    const s = sandbox();
+    try {
+      auto(s, 12, NOW);
+      auto(s, 14, at(40), FULL);
+      const rows = s.budget(['log']).out.trim().split(/\r?\n/);
+      assert.ok(rows[0].endsWith('ahead  (auto)'), rows[0]);
+      assert.ok(rows[1].endsWith('on pace (Fable 5.2)  (auto, full)'), rows[1]);
+      const r = s.budget(['last', '--now', at(50)]);
+      assert.equal(r.out.split(/\r?\n/)[0], 'last reading 11-13 12:40, 10 min ago (automatic, full), not measured now');
+      // its per-model bar is the figure as read, with no "read" mark of an older time
+      assert.match(r.out, /^Fable 5\.2 .* 15 % \/ 20 % pace · read 11-13 12:40$/m);
     } finally { s.cleanup(); }
   });
 });

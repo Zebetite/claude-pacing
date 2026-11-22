@@ -449,3 +449,102 @@ level in the status line.
 - **The row and `/pacing-status`** use the line's form: `In the
   background: ⏳ implementer: Auto-reload on plugin update, editing 2m
   ~60%`.
+
+## Every meter, read by the module itself (0.9.12)
+
+- **The case.** An automatic reading had the two windows the engine hands a
+  plugin, carried the per-model figure, and asked the session beside a
+  prompt to take a full reading: a tool call with a long answer, on the
+  session's whole history.
+- **The tool.** `await $.tool.call({ tool: 'mcp__ccd_session_mgmt__get_usage' })`
+  from a module answers with no dialog (seen live), as `{ text, result }`:
+  `text` is JSON, `result` the tool's content as `{ type, text }` items.
+  In it `plan.windows[]` (`label`, `percentUsed`, `resetsAt`),
+  `plan.extraUsage` and `context` with its `categories[]`. `usageOf` reads
+  it; the per-model window is the weekly one that names config.json's
+  `premium`.
+- **A full automatic reading.** Where the tool answers, budget.mjs gets
+  what the skill's section 1 hands it: `--premium` (`-` where the plan has
+  no such window), `--five`, `--context`, `--context-tokens`,
+  `--categories`, the extra usage and `--session`, with `--source hook`.
+  The log entry carries `full: true`; `/pacing log` says `(auto, full)`,
+  the report from the last reading `(automatic, full)`. It sets no setting,
+  like any automatic reading. budget.mjs sends no `needFull` for it, so
+  `fullReadingAsk` is not sent. The thin log counts the per-model meter
+  too: a whole point there is logged.
+- **The fallback.** The tool absent, failing, or reading as nothing (a
+  terminal session): the plain reading from the engine's two windows, the
+  carried figure and the note beside the prompt as before. Figures
+  budget.mjs refuses: the plain reading in the same go.
+- **How often.** As before (a whole point of the weekly window, 30 minutes,
+  the load), and once when a subagent's run ends if the last reading is 5
+  minutes old (`AGENT_GAP`). At a load with no windows from the engine yet,
+  the tool gives a logged reading at once.
+- **Not checked live:** that the call draws no row in the transcript, and
+  the shape of `resetsAt` beyond an ISO string (seconds and milliseconds
+  since the epoch are converted).
+
+## The module records, reports and shows (0.9.12)
+
+- **Records.** When a run of pacing:reader, implementer, verifier or
+  researcher ends by itself, the module runs `config.mjs agent <role> <id>
+  <model> <effort> <tokens>`. The tokens are the engine list's `tokenCount`
+  (the latest request's input and all its output, the notification's
+  figure), asked as the run ends, else the last figure the refresh saw;
+  the run's own usage is every request summed and is not used. The effort
+  is the Agent call's, else the list's, else the session's
+  (`CLAUDE_EFFORT`); a kept agent's is remembered by its id. Without a
+  known model, effort or token count, and for a stopped run, there is no
+  record. When the command's answer names a fresh agent, the next prompt
+  that is no slash command (a task notification too) carries one hidden
+  line, once: `Pacing (automatic note, not from the user): the next
+  implementer task goes to a fresh agent (5 tasks or 150k tokens reached).
+  Start a new agent of that role for it, not the kept one.` A fresh agent
+  of that role starting first drops it.
+- **Reports.** `/pacing-usage` (`budget.mjs last`; too old a reading: the
+  module measures first), `/pacing-help` and `/pacing-guide` (`config.mjs
+  help [full]`). A command's text is drawn as markdown (the `CommandOutput`
+  site's `text`), so the usage report goes in a fenced code block and the
+  help and the guide as they are. Each answer is `isTextDisplayOnly`: the
+  session never reads it. None is `immediate`: a text answered mid-turn
+  stays in the requests.
+- **The panel.** `$.ui.open({ id: 'pacing-agents', title: 'Agents' })`, a
+  `ui.render` hook on `Pane`; `panelLines` is its text. Auto opens at an
+  agent's or a side session's start; a person's close holds for the
+  session (heard as `ui.close` with origin `person`, and where a panel
+  this copy saw drawn is gone from `$.ui.panes()`), kept in `$.store` under
+  `panelClosed` by the session's id so a reload does not forget.
+  `{ isPlaced: false }`: nothing more, and the next start asks again. No
+  Box has a width.
+- **Parts.** `config.mjs part <done> <total>` anywhere in an agent's Bash
+  command sets its parts; a TodoWrite list serves where the agent said
+  none. TaskCreate and TaskUpdate are not read.
+- **The kit cannot raise a person's close:** its `$.ui` has no `close`. The
+  tests cover the `$.ui.panes()` way; the `ui.close` hook is untested.
+
+## A toast by its kind, a shorter line, the time left (0.9.12)
+
+- **Icons.** `ToastOptions` is `timeoutMs` alone, so each toast leads with
+  an emoji where "Pacing: " stood (the box is drawn under the plugin's
+  name): ▶️ started, ✅ finished, ⏳ still running, ⚠️ over the line, 🔴
+  stop or the model out, 🟢 within the line, 🔁 switched, ❌ did not
+  happen, 🔄 updated, 📦 a version waiting, 🗜️ compacted, 💤 the pause.
+  15 seconds (`TOAST_LONG`) for finished, a change of level, ❌, 📦, 🔄, 💤
+  and "press Enter to switch"; the engine's 4 for the rest. The rows above
+  the prompt lead with the same icons and keep their colours.
+- **The line without the assignment.** The user: "the status line dont
+  need task from agents, its to long. just keep it in toasts". Per agent:
+  name, step, time, progress, `⏳ implementer editing 2m part 2 of 4`, or
+  `⏳ implementer is running 2m`. What gives way: the progress, the step,
+  the time, then the names, the count as a sentence, the bare count. Two
+  agents fit whole in 75 characters. The toasts, the row above the prompt,
+  the panel and `/pacing-status` keep the assignment.
+- **The time left.** In the 5-minute toast and the panel's row: with parts
+  said, the time so far per part done times the parts left; else the
+  median of that kind's finished runs (three or more) less the time run.
+  `about 8m left`, `under 1m left`; nothing without a basis or past the
+  estimate. The start toast says the usual length, `, about 20m`. Each is
+  the first thing to go at 120 characters.
+- **Not checked live:** how the emoji draw in the app's toast box and in
+  the band, and whether the terminal's notification bar names the plugin
+  beside a toast.

@@ -165,7 +165,7 @@ describe('fewer calls, fewer lines', () => {
       'Fable 5.2 used 10 %, delta -10 -> ahead',
       'route: judgment, trivial -> Fable 5.2 high (the session); medium, routine -> Opus 5.5 medium; bulky -> Sonnet 5.5 medium; reader -> Haiku 5.5 medium; verifier -> Haiku 5.5 medium (plain runs; checks to judge -> Sonnet 5.5 medium)',
       'do: medium tasks leave the session model too',
-      'effort: first offer to lower this session\'s effort one step, Fable 5.2 high -> medium (model menu: Fable 5.2, effort medium; the user decides); medium work still goes to Opus 5.5 medium',
+      'effort: one step less effort on this session would save most, Fable 5.2 high -> medium; the Switch row offers it (without the hooks module: model menu Fable 5.2, effort medium); medium work still goes to Opus 5.5 medium',
       'next session: Fable 5.2 high',
     ]);
     assert.ok(brief.length * 4 < full.length * 1.2, brief.length + ' against ' + full.length);
@@ -175,7 +175,7 @@ describe('fewer calls, fewer lines', () => {
     const brief = dry(s, '--all', '10', '--premium', '30', '--five', '90', '--five-reset', '2026-11-13T15:00:00Z', '--context-tokens', '340000',
       '--categories', 'Messages=90000,System tools=25000,MCP tools=40000', '--brief').out;
     for (const re of [/^5-hour window 90 %.*-> HOLD heavy work/m, /^context 340k tokens -> suggest compacting/m, /^fixed overhead .* -> MCP tools are 40k of it/m,
-      /^All models used .* Fable 5\.2 held$/m, /^do: Fable 5\.2's own meter is at throttle: SWITCH/m, /^upward: /m, /^route: judgment, medium, routine, trivial -> Opus 5\.5 high \(the session\)/m]) assert.match(brief, re);
+      /^All models used .* Fable 5\.2 held$/m, /^do: Fable 5\.2's own meter is at throttle: this session belongs on Opus 5\.5 high now, and Fable 5\.2 is kept for judgment work; the Switch row offers it/m, /^upward: /m, /^route: judgment, medium, routine, trivial -> Opus 5\.5 high \(the session\)/m]) assert.match(brief, re);
     // and leaves out what only describes
     assert.doesNotMatch(brief, /^(day \d|allowance today|spend rate|trend:|tier {2}model)/m);
   }));
@@ -230,9 +230,14 @@ describe('fewer calls, fewer lines', () => {
     assert.match(read('pacing', 'SETUP.md'), /config\.mjs" apply set 1 fable high \+ add haiku low \+ weight 2/);
     assert.match(read('pacing', 'SETUP.md'), /the tiers \(2 to 6\)/);
     assert.match(read('pacing', 'SKILL.md'), /\*\*A `first run:` line\*\* in a script's output, and only then:/);
-    assert.match(read('pacing', 'SKILL.md'), /`last --brief`/);
+    assert.match(read('pacing', 'SKILL.md'), /config\.mjs" init`, and pass on what it\s+prints as it stands/);
     assert.match(read('route', 'SKILL.md'), /budget\.mjs" last --brief`/);
-    assert.match(read('route', 'SKILL.md'), /beside the next tool call, never alone/);
+    // the hooks module records each finished agent; the session only where it does not run
+    assert.match(read('route', 'SKILL.md'), /Without the hooks module \(no\s+pacing status line\), record each finished task: `config\.mjs agent\s+<role> <agent id> <model> <effort> <tokens>`, beside the next tool call, never alone\./);
+    assert.doesNotMatch(read('route', 'SKILL.md'), /\*\*Record each finished task\*\*/);
+    // the module takes the readings: no unasked reading after a big task
+    assert.doesNotMatch(read('pacing', 'SKILL.md'), /after (?:a|each) big task/);
+    assert.doesNotMatch(read('route', 'SKILL.md'), /after each big task/);
   });
 });
 
