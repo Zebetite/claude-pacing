@@ -132,7 +132,8 @@ export const compactedText = (before, after) => (before && after
 // Compact now that the engine refused: its reason (one line, 120 characters
 // at most), and /compact in the box to send, where the box took it
 export const compactFailedText = (reason, filled) => {
-  const why = typeof reason === 'string' ? reason.replace(/\s+/g, ' ').trim() : '';
+  // the engine's words may carry the plugin's name already ("pacing: $.session…")
+  const why = typeof reason === 'string' ? reason.replace(/\s+/g, ' ').trim().replace(/^pacing:\s*/i, '') : '';
   const short = why.length > 120 ? why.slice(0, 119) + '…' : why;
   return ICON.failed + ' the compaction did not start' + (short ? ': ' + short.replace(/[.\s]+$/, '') : '') + '. '
     + (filled ? '/compact is in the box: press Enter to send it.' : 'Type /compact to run it.');
@@ -1494,12 +1495,22 @@ export const register = on => {
             contextTokens = (r && r.tokensAfter) || null;
           }
         } catch (err) {
-          // the engine rejects while a turn runs, and for other reasons too: a
-          // live press with no turn running was told a turn ran. So the toast
-          // gives the engine's own reason, and /compact goes in the box to send.
-          let filled = false;
-          try { const f = await $.prompt.fill({ text: '/compact', mode: 'replace' }); filled = !f || f.isFilled !== false; } catch { /* the toast alone */ }
-          $.ui.toast(compactFailedText(err && err.message, filled), { timeoutMs: TOAST_LONG });
+          // The engine rejects while a turn runs, and in the desktop app always:
+          // "$.session.compact: not available in a headless (-p / SDK) session
+          // yet: compaction here runs inside a turn" (seen live), while a typed
+          // /compact works there. So /compact runs as if typed (command.run,
+          // queued until the session is idle); only where that fails too does
+          // the toast give the engine's reason and /compact go in the box.
+          try {
+            const ran = await $.command.run({ command: 'compact', args: COMPACT_INSTRUCTIONS });
+            if (commandFailed(ran)) throw new Error((ran && ran.text) || 'the /compact command failed');
+            $.ui.toast(ICON.compacted + ' compacting: /compact runs as soon as the session is free.');
+            forget();
+          } catch (err2) {
+            let filled = false;
+            try { const f = await $.prompt.fill({ text: '/compact', mode: 'replace' }); filled = !f || f.isFilled !== false; } catch { /* the toast alone */ }
+            $.ui.toast(compactFailedText((err2 && err2.message) || (err && err.message), filled), { timeoutMs: TOAST_LONG });
+          }
         }
       } }),
       Button({ key: 'pacing-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => {

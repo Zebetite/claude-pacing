@@ -741,7 +741,31 @@ const bandText = async ($: any) => {
   return { text: t?.text as string | undefined }
 }
 
-test('Compact now that the engine refuses: its own reason in the toast, /compact in the box', async ($, on) => {
+test('Compact now in the desktop app: the direct call is refused, so /compact runs as if typed', async ($, on) => {
+  engine(on)
+  big(on)
+  const toasts: string[] = [], fills: string[] = [], runs: string[] = []
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  on('fs.read', () => ({ value: '{}' }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
+  on('session.compact', () => { throw new Error('pacing: $.session.compact: not available in a headless (-p / SDK) session yet') })
+  on('command.run', (_: unknown, e: any) => (runs.push('/' + e.command + ' ' + e.args), { text: '' }))
+  on('prompt.fill', (_: unknown, e: any) => (fills.push(e.text), { isFilled: true }))
+  on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 320000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-compact' })
+  await ui.unmount()
+  expect(runs).toEqual(['/compact ' + COMPACT_INSTRUCTIONS])
+  expect(fills).toEqual([])
+  expect(toasts.at(-1)).toBe('🗜️ compacting: /compact runs as soon as the session is free.')
+  expect((await bandText($)).text).toBe(undefined)
+})
+
+test('Compact now that the engine refuses both ways: its own reason in the toast, /compact in the box', async ($, on) => {
   engine(on)
   big(on)
   const toasts: string[] = [], fills: string[] = []
@@ -750,6 +774,7 @@ test('Compact now that the engine refuses: its own reason in the toast, /compact
   on('ui.invalidate', () => ({ value: undefined }))
   on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
   on('session.compact', () => { throw new Error('Not enough messages to compact.') })
+  on('command.run', () => { throw new Error('no such command here') })
   on('prompt.fill', (_: unknown, e: any) => (fills.push(e.text), { isFilled: true }))
   on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
   await $.prompt.submit({ text: 'work on', asUser: true })
@@ -763,6 +788,7 @@ test('Compact now that the engine refuses: its own reason in the toast, /compact
   expect(toasts.at(-1)).toMatch(/^❌ the compaction did not start: .+\. \/compact is in the box: press Enter to send it\.$/)
   expect(toasts.at(-1)).not.toContain('turn runs')
   expect(compactFailedText('Not enough messages to compact.', true)).toBe('❌ the compaction did not start: Not enough messages to compact. /compact is in the box: press Enter to send it.')
+  expect(compactFailedText('pacing: $.session.compact: not available', true)).toBe('❌ the compaction did not start: $.session.compact: not available. /compact is in the box: press Enter to send it.')
   expect(compactFailedText(undefined, false)).toBe('❌ the compaction did not start. Type /compact to run it.')
   expect(compactFailedText('x'.repeat(200), true)).toHaveLength('❌ the compaction did not start: '.length + 120 + '. /compact is in the box: press Enter to send it.'.length)
 })

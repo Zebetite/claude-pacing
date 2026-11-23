@@ -832,3 +832,15 @@ level in the status line.
   `$.session.compact` got those words. Now the toast gives the engine's own
   reason (`❌ the compaction did not start: <reason>. /compact is in the
   box: press Enter to send it.`) and the box holds `/compact`.
+
+## Compact now runs /compact in the desktop app (0.9.18)
+
+- **Seen live (0.9.17):** the toast gave the engine's reason: `$.session.compact:
+  not available in a headless (-p / SDK) session yet: compaction here runs
+  inside a turn`. The desktop app runs Claude Code as an SDK session, so the
+  direct call never works there, while a typed `/compact` does.
+- **Now:** a refused `$.session.compact` is followed by `/compact` run as if
+  typed (`$.command.run`, with the compaction instructions), toast
+  `🗜️ compacting: /compact runs as soon as the session is free.` Only where
+  that fails too does the toast give the reason and the box hold
+  `/compact`. A reason that starts with the plugin's name loses it.
