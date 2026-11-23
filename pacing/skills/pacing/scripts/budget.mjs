@@ -12,9 +12,11 @@
 // (1.5 by default), the rest 1. The line is a step at local midnight: the whole
 // of the current calendar day's allowance counts as available from its start.
 // --dry: compute only (no log entry, no state.json, no rate.json, no settings.json change).
-// --spent <tokens>: what this session spent since its previous reading (input,
-// output, cache read and write, all models, its subagents' too), from the
-// hooks module: it learns the tokens per point of the weekly meter (rate.json).
+// --spent-usd <dollars>: what this session spent since its previous reading
+// (input, output, cache read and write at each model's prices, its subagents'
+// too), from the hooks module: it learns the dollars per point of the weekly
+// meter (rate.json). --spent <tokens>, an older module's raw count, is taken
+// and ignored.
 // --source hook: an automatic reading from the plugin's hooks module (after a
 // turn). Without --premium it has no per-model meter, so it carries that
 // figure over from the last full reading of the same week (a lower bound: a
@@ -189,7 +191,7 @@ if (argv[0] === 'last') {
     ...(s.five != null && s.fiveReset && Date.parse(s.fiveReset) > at.getTime() ? ['--five', String(s.five), '--five-reset', s.fiveReset] : []));
 }
 
-const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'context-tokens', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry', 'source', 'categories', 'brief', 'spent'];
+const KNOWN = ['all', 'reset', 'premium', 'fable', 'five', 'five-reset', 'session', 'context', 'context-tokens', 'extra-spent', 'extra-limit', 'extra-currency', 'now', 'dry', 'source', 'categories', 'brief', 'spent', 'spent-usd'];
 const opt = {};
 const unknown = [];
 for (let i = 0; i < argv.length; i++) {
@@ -205,7 +207,7 @@ const usage = () => {
   console.log('usage: node budget.mjs --all <pct> --reset <ISO> [--premium <pct>] [--five <pct>] [--five-reset <ISO>] [--session <model>]');
   console.log('                      [--context <pct>] [--context-tokens <n>] [--categories "<name>=<tokens>,..."] [--brief]');
   console.log('                      [--extra-spent <amount> --extra-limit <amount> [--extra-currency <code>]] [--now <ISO>] [--dry] [--source skill|hook]');
-  console.log('                      [--spent <tokens>]');
+  console.log('                      [--spent-usd <dollars>]');
   console.log('       node budget.mjs last [--brief] [--now <ISO>] | log [n] | week [n]');
   console.log('       a meter the plan does not have: pass - for its percent');
   process.exit(1);
@@ -883,33 +885,40 @@ const needFull = !(auto && premium && premTop) || premOut || fullAuto ? null
     : premAgeMs !== null && premAgeMs >= (premHeld ? FULL_AGE_HELD : FULL_AGE) ? 'the ' + premLabel + ' figure is ' + mins(premAgeMs) + ' old'
       : !premHeld && allMoved !== null && allMoved >= FULL_MOVED ? 'the weekly meter moved ' + r1(allMoved) + ' points since ' + premLabel + '\'s meter was read'
         : null;
-// ---- tokens per point of the weekly meter, for "Budget tokens: 850K".
+// ---- dollars per point of the weekly meter, for "Budget tokens: 850K".
+//      The meter weighs what the work cost, not how many tokens it moved: a
+//      cache read costs a tenth of an input token, and a long session
+//      re-reads its whole context each turn, so a raw token count tracks the
+//      meter poorly. The rate is learned in dollars and shown in full-price
+//      tokens of the session's model (left, below).
 //      rate.json holds this week's baseline (from: the meter at the week's
-//      first reading, to: the highest since) and the tokens the sessions
-//      reported (--spent) since then; a new week keeps the week before's rate
-//      (carried) when its meter rose 5 points or more. The first reading of a
-//      week drops its --spent: those tokens were spent before the baseline.
+//      first reading, to: the highest since) and the dollars the sessions
+//      reported (--spent-usd) since then; a new week keeps the week before's
+//      rate (carried) when its meter rose 5 points or more. The first reading
+//      of a week drops its --spent-usd: that was spent before the baseline.
 //      Use by sessions without the hooks module (another device, the web)
-//      raises the meter with no tokens counted, so the rate errs low and the
+//      raises the meter with nothing counted, so the rate errs low and the
 //      figure shows less left than there is. Rate now: this week's from a
 //      rise of 5 points, else the carried one, else this week's from 2 points.
-//      A damaged or missing file is an empty one; a failed write is no error. ----
-const RISE_MIN = 5, RISE_EARLY = 2;
-const spentArg = opt.spent === undefined ? NaN : Number(opt.spent);
+//      A damaged or missing file is an empty one, and so is one without v: 2
+//      (0.9.15 and before learned raw tokens per point: dropped); a failed
+//      write is no error. ----
+const RISE_MIN = 5, RISE_EARLY = 2, RATE_V = 2;
+const spentArg = opt['spent-usd'] === undefined ? NaN : Number(opt['spent-usd']);
 const spent = Number.isFinite(spentArg) && spentArg > 0 ? spentArg : 0;
 const fin = v => typeof v === 'number' && Number.isFinite(v);
 const rateNext = text => {
   let cur = null;
   try { cur = text ? JSON.parse(text) : null; } catch { cur = null; }
-  if (!cur || typeof cur !== 'object' || Array.isArray(cur)) cur = {};
+  if (!cur || typeof cur !== 'object' || Array.isArray(cur) || cur.v !== RATE_V) cur = {};
   const carried = fin(cur.carried) && cur.carried > 0 ? cur.carried : null;
   const at = Date.parse(cur.reset);
-  const whole = fin(cur.from) && fin(cur.to) && fin(cur.tokens);
+  const whole = fin(cur.from) && fin(cur.to) && fin(cur.usd);
   // a late reading of a week before the file's leaves it alone
   if (whole && at > reset.getTime() + HOUR) return { ...cur, carried };
-  if (whole && Math.abs(at - reset) <= HOUR) return { ...cur, to: Math.max(cur.to, used), tokens: cur.tokens + spent, carried };
+  if (whole && Math.abs(at - reset) <= HOUR) return { ...cur, to: Math.max(cur.to, used), usd: cur.usd + spent, carried };
   const rise = whole ? cur.to - cur.from : 0;
-  return { reset: opt.reset, from: used, to: used, tokens: 0, carried: rise >= RISE_MIN && cur.tokens > 0 ? cur.tokens / rise : carried };
+  return { v: RATE_V, reset: opt.reset, from: used, to: used, usd: 0, carried: rise >= RISE_MIN && cur.usd > 0 ? cur.usd / rise : carried };
 };
 let rateState = null;
 try {
@@ -922,10 +931,16 @@ try {
 } catch { /* the rate stays as computed, or unknown */ }
 const rateRise = rateState ? rateState.to - rateState.from : 0;
 const rate = !rateState ? null
-  : rateRise >= RISE_MIN && rateState.tokens > 0 ? rateState.tokens / rateRise
+  : rateRise >= RISE_MIN && rateState.usd > 0 ? rateState.usd / rateRise
     : rateState.carried ? rateState.carried
-      : rateRise >= RISE_EARLY && rateState.tokens > 0 ? rateState.tokens / rateRise
+      : rateRise >= RISE_EARLY && rateState.usd > 0 ? rateState.usd / rateRise
         : null;
+// what a full-price token costs: an input token of the session's model, else
+// of tier 1 on the ladder in force (of the configured ladder when none is left)
+const fullPrice = (() => {
+  const m = MODELS[sessionModel] || MODELS[(ladder[0] || tiers[0] || {}).model];
+  return m ? m.price[0] / 1e6 : null;
+})();
 if (auto) {
   const doLine = said.find(l => l.startsWith('do: '));
   // For the status line: what is left under the budget line, and what the
@@ -964,9 +979,11 @@ if (auto) {
   if (verifierCfg && verifierCfg !== 'ladder') nameAt(tierOf[idOf(verifierCfg)], verifierCfg);
   const prices = Object.fromEntries(Object.values(MODELS).map(m => [m.id, m.price]));
   print(JSON.stringify({ level, all: r1(used), line: r1(budget), ofBudget: budget > 0 ? Math.round(100 * used / budget) : null,
-    // what is left under today's line, in points of the week and in tokens
-    tokensPerPoint: rate !== null ? Math.round(rate) : null,
-    left: { points: r1(budget - used), tokens: rate !== null ? Math.round((budget - used) * rate) : null },
+    // what is left under today's line, in points of the week and in
+    // full-price tokens of the session's model (the dollars it is worth, at
+    // that model's input price)
+    usdPerPoint: rate !== null ? Math.round(rate * 1e4) / 1e4 : null,
+    left: { points: r1(budget - used), tokens: rate !== null && fullPrice ? Math.round((budget - used) * rate / fullPrice) : null },
     tierOf, agentTierOf, tierNames, prices,
     premium: prem === null ? null : r1(prem), premiumOut: premOut, premiumLabel: premLabel,
     premiumAt: premFrom ? premFrom.at : null, premiumLevel: premLevel, premiumHeld: premHeld, levelBy,

@@ -28,6 +28,8 @@ const ALLOWED = [
   /start line/i, /the new session does/i, // a handover's file, read by the session that starts next
   /another session (?:started|drives|has been|wrote|ran|cleared)|that another session started|another one has been/i, // side sessions, the shared-checkout notice
   /pointing the user at another session/i, /never open .* another session/i, // the rule against pointing elsewhere
+  // a new version of the plugin: /reload-plugins, or the next session loads it (0.9.16)
+  /\/reload-plugins`?(?: to load it,)? or open a new session|keeps the old one until you type `\/reload-plugins` or open a new session|a new session loads the new version/i,
 ];
 // what may never be said
 const FORBIDDEN = [/starts? in a new session/i, /better started in a new session/i, /(?<!never )offer a new session/i, /a new session(?:,| with a handover)? only for/i];

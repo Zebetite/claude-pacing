@@ -156,12 +156,17 @@ Fable's, which the session that started it shows:
 
     sub · Budget tokens: 850K · usage: Weekly 36%
 
-**Budget in tokens.** The plugin learns how many tokens one point
-of the weekly meter is from what its sessions spend, over the week (the
-week before's rate until this one has risen 5 points). Until it has
-one, the status line shows the points of the week that are left, without
-the word tokens: `Budget: 5%`. Use without the plugin (another device, the web) moves the meter
-with no tokens counted, so the figure shows less left than there is.
+**Budget in tokens.** The figure is in full-price tokens of the
+session's model: what is left, at that model's price for an input token.
+The plugin learns what one point of the weekly meter costs from what its
+sessions spend, priced at each model's API rates, over the week (the week
+before's rate until this one has risen 5 points). So cache reads, which a
+long session re-reads every turn, count at their lower price, as they do
+on the meter, and the figure holds steady as a session grows. Until it has
+a rate, the status line shows the points of the week that are left,
+without the word tokens: `Budget: 5%`. Use without the plugin (another
+device, the web) moves the meter with nothing counted, so the figure shows
+less left than there is.
 
 **Every meter, without the model.** Claude Code hands a plugin only the
 weekly meter and the 5-hour window. In the desktop app the plugin reads the
@@ -384,14 +389,14 @@ status line goes back to its plain form when the last one ends.
 `/pacing-status` says which of the agents are side sessions. An agent that
 works on in the background after the turn ends gets a row above the
 prompt, under the offer to compact, with its assignment: `In the
-background: ⏳ implementer: Auto-reload on plugin update, editing 2m
-part 2 of 4`.
+background: ⏳ implementer: Auto-reload on plugin update, editing
+step 2 of 4, 2m`.
 `/pacing-status` lists every running
 agent with what it is doing. The session also says in one line which
 agent it started, on which model and effort, and for what.
 
 **Progress.** A role agent with a task in several parts says each part
-it has finished, and its entry then ends with `part 2 of 4`. An agent
+it has finished, and its entry then shows `step 2 of 4` before its time. An agent
 that says none has, once its kind has finished three runs, a percentage
 such as `~60%` instead: a rough estimate
 from how long that kind of agent usually takes, not a measure of the work
@@ -405,7 +410,7 @@ running "Auto-reload on plugin update" on Fable 5.2 high.`, and
 (`✅ implementer is done with "Auto-reload on plugin update" after
 3m, 41k tokens; nothing else is running.`), and every 5 minutes while
 any runs (`⏳ still running: implementer "Auto-reload on plugin
-update", editing 12m part 2 of 4, about 12m left.`). The time left is a
+update", editing step 2 of 4, 12m, about 12m left.`). The time left is a
 rough estimate: with parts said, the time so far per finished part times
 the parts left; else how long that kind of agent usually takes (from
 three finished runs on), less the time it has run. Without either, or
@@ -425,7 +430,6 @@ icon for its kind, since a toast has no colour of its own:
 | 🟢 | on or under the budget line again |
 | 🔁 | the session's model or effort was switched |
 | ❌ | something did not happen: a switch that did not take, a compaction that did not run |
-| 🔄 | a new version of the plugin was loaded |
 | 📦 | a new version waits for `/reload-plugins` |
 | 🗜️ | the session was compacted |
 | 💤 | the session's cache lapsed in a pause |
@@ -496,7 +500,7 @@ Each thing has one name in the guide and in everything the plugin shows:
 | weekly meter | the plan's "Weekly · all models" meter; `Weekly` in the status line. The budget line is drawn against it |
 | per-model meter | the plan's weekly meter for one model (`/pacing premium` names it, Fable by default), called by that model: `Fable` in the status line, "Fable's meter" in a sentence |
 | 5-hour window | the plan's 5-hour limit, shared by all models |
-| budget, budget line | the share of the week the days so far may use, drawn as a line that steps up at midnight; `Budget tokens` is what is still under it (`Budget` in points until the plugin has learned how many tokens a point is) |
+| budget, budget line | the share of the week the days so far may use, drawn as a line that steps up at midnight; `Budget tokens` is what is still under it, in full-price tokens of the session's model, learned from what the spending cost, so cache reads count at their lower price (`Budget` in points until the plugin has learned what a point costs) |
 | level | where the weekly meter stands against the budget line: ahead, on pace, over, throttle, stop in the report; under budget, on budget, over budget, far over budget, stop in toasts. The per-model meter's model is "held" or "out" |
 | reading | one look at the meters, logged; "full" when it has the per-model meter, "automatic" when the plugin took it. One is taken, never "measured" |
 | tier, ladder | a tier is one model with its effort; the ladder is the tiers in order, tier 1 on top. A model is named with its effort, `Opus 5.5 high` |
@@ -506,7 +510,7 @@ Each thing has one name in the guide and in everything the plugin shows:
 | role agent | one of the four the plugin brings: reader, verifier, implementer, researcher |
 | side session | a session this one started in the desktop app; its status line leads with `sub`, and it counts among the Subagents |
 | status line | the plugin's line in the footer |
-| row | a line above the prompt with buttons, named by what it offers: the Switch row, the offer to compact, the Reload row; a button by its label, **Switch** |
+| row | a line above the prompt with buttons, named by what it offers: the Switch row, the offer to compact, the new-version row; a button by its label, **Switch** |
 | toast | a message that shows for a few seconds and goes |
 
 ## Commands
@@ -539,7 +543,7 @@ so, as in `Pacing: no reading to show (the last reading is 45 min old).
 | `/pacing week` | the last two weeks in sum: where the meter ended, the share of the time at each level, and whether it crossed the budget line |
 | `/pacing next on`, `/pacing next off` | lets the skill set, or stop setting, the default model of new sessions |
 | `/pacing switch on`, `/pacing switch off` | turns the offer to switch the session to the recommended model or effort on (the default) or off: a row above the prompt with Switch and Not now |
-| `/pacing reload on`, `/pacing reload off` | turns the Reload row at a new version on (the default) or off: when the app has installed a new version of the plugin, a row above the prompt offers **Reload**; off, one toast per version says to type `/reload-plugins`. Nothing reloads by itself either way |
+| `/pacing reload on`, `/pacing reload off` | turns the new-version row on (the default) or off: when the app has installed a new version of the plugin, a row above the prompt says to type `/reload-plugins` or open a new session; off, one toast per version says the same. The plugin runs nothing itself either way |
 | `/pacing notify on`, `/pacing notify off` | turns the toasts about running subagents on (the default) or off: when one starts, when one ends, and every 5 minutes while any runs; the status line and the row above the prompt still show them |
 | `/pacing compact on`, `/pacing compact off` | turns the offers to compact a large session on (the default) or off: a row above the prompt with Compact now from 300 000 tokens, plainer from 500 000, and a warning before the cache of an idle session lapses |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model meter belongs to (Fable by default), or says the plan has none |
@@ -565,19 +569,14 @@ from the defaults (or takes over the files of an earlier standalone
 install of this skill) and shows the short help once.
 
 **A new version.** The desktop app installs a new version of the plugin
-in the background, and an open session used to keep the old one until
-you typed `/reload-plugins`. On a Claude Code version with hooks modules
-the plugin looks for a new version when a turn ends and every 5 minutes,
-and in a session you have typed in, a row above the prompt says at once
-`📦 Pacing 0.9.12 is installed.` with **Reload** and **Not now** (that
-version only). Nothing reloads by itself. **Reload** runs
-`/reload-plugins`, and the new version says so in one line,
-`🔄 updated to 0.9.12 and reloaded.` Over a remote connection, where
-Claude Code does not run that command, a toast says
-`📦 Reload from the computer: /reload-plugins does not run over a remote connection.`
-and the row stays. Where the command is refused otherwise or does not
-answer within 3 seconds, the plugin puts `/reload-plugins` in the prompt
-box and says `📦 Press Enter to reload.`; where even that fails,
-`📦 Pacing 0.9.12 is installed: type /reload-plugins to load it.`
-`/pacing reload off` turns the row off: then that last line comes once
-per version as a toast instead.
+in the background, and an open session keeps the old one until you type
+`/reload-plugins` or open a new session. On a Claude Code version with
+hooks modules the plugin looks for a new version when a turn ends and
+every 5 minutes, and in a session you have typed in, a row above the
+prompt says at once
+`📦 Pacing 0.9.16 is installed: type /reload-plugins to load it, or open a new session.`
+with **Not now** (that version only). The plugin runs nothing and puts
+nothing in the prompt box: over a remote connection Claude Code does not
+run `/reload-plugins` at all, and a new session loads the new version
+either way. `/pacing reload off` turns the row off: then the same line
+comes once per version as a toast instead.

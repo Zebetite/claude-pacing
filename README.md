@@ -38,8 +38,9 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   Budget tokens: 850K · usage: Weekly 36% Fable 40%
   ```
 
-  What is left under today's budget line, in tokens, then the usage of the
-  weekly meters; while subagents run, how many first (`⏳ 2 Subagents
+  What is left under today's budget line, in full-price tokens of the
+  session's model (learned from what the spending cost, so cache reads
+  count at their lower price), then the usage of the weekly meters; while subagents run, how many first (`⏳ 2 Subagents
   running`). The budget and the usage always show whole; where room is
   short (70 characters in the desktop app, 75 in a terminal) only the
   agents' part shrinks (`⏳ 2 Subagents · Budget tokens: 850K · usage:
@@ -80,8 +81,8 @@ Updates: turn on auto-update for this marketplace under `/plugin` →
 Marketplaces (it is off by default for marketplaces you add yourself), or
 run `/plugin marketplace update claude-pacing` and `claude plugin update
 pacing@claude-pacing`. A running session then shows a row above the prompt
-to load the new version, with **Reload** and **Not now** (`/pacing reload off`
-puts a one-line toast in its place).
+that says to type `/reload-plugins` or open a new session, with **Not now**
+(`/pacing reload off` puts a one-line toast in its place).
 
 Requirements: Node.js 18 or later on the PATH of the shell Claude Code
 uses, and a Claude plan with usage limits (the plugin reads the usage

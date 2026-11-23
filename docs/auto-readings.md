@@ -750,3 +750,52 @@ level in the status line.
 - **Desktop, as drawn:** `Budget tokens: 850K · usage: Weekly 33% Fable
   53%`; `⏳ 1 Subagent · Budget tokens: 850K · usage: Weekly 33% Fable 53%`;
   `⏳ 2 Subagents · Budget tokens: -120K · usage: Weekly 33% Fable 53%`.
+
+## Budget tokens in full-price tokens, a new version as words only, progress before time (0.9.16)
+
+- **Seen live:** the status line's `Budget tokens` swung from 16.8M to
+  125.1M within an hour. The module summed raw tokens (input, output,
+  cache read, cache write) and budget.mjs learned raw tokens per point of
+  the weekly meter. Most raw tokens are cache reads, which cost about a
+  tenth of an input token, and a long session re-reads about 400K of them
+  each turn, so the raw count tracked the meter (which weighs cost) poorly.
+- **The rate in dollars.** readings.mjs `spentUsd` prices every usage it
+  counts (the session's turns and its subagents', per model id) at the
+  prices budget.mjs's JSON carries: input, output, cache read and cache
+  write each at its own rate. A model the prices do not know counts at the
+  session model's prices; with neither priced it is left out. The whole
+  session is priced again at each turn, so a turn before the first reading
+  (no prices yet) goes with the next one. The difference since the last
+  reading that ran goes as `--spent-usd`, marked sent only on success.
+- **rate.json v2.** `{ v: 2, reset, from, to, usd, carried }`; a file
+  without `v: 2` (raw tokens per point, 0.9.15 and before) is an empty one,
+  and `--spent` from an older module copy is taken and ignored. The rule is
+  the same: this week's rate from a 5-point rise, else the carried one,
+  else this week's from 2 points, now in dollars per point. The JSON says
+  `usdPerPoint` (4 decimals) in place of `tokensPerPoint`.
+- **Full-price tokens.** `left.tokens` = points left × dollars per point ÷
+  the session model's input price per token (`--session`, else tier 1 of
+  the ladder). Example, one turn on Opus 5.5 with 400K cache read, 5K input
+  and 2K output: 407K raw tokens; $0.08 + $0.02 + $0.04 = $0.14; at $4 per
+  million input that is 35K full-price tokens. The status line keeps its
+  words (`Budget tokens: 850K`, `Budget: 5%` before a rate).
+- **saved.mjs and the self-check** read the v2 file: points saved are the
+  dollars saved ÷ dollars per point; doctor says `learned, $0.0123 per
+  point, from 6 points this week` (two decimals from $1 up), and an older
+  file `not learned yet (an older rate was dropped)`.
+- **A new version, as words only.** Live, a Reload press filled the prompt
+  and the typed `/reload-plugins` answered "/reload-plugins isn't available
+  over a remote connection in this session." every time. So the row has no
+  Reload button: `📦 Pacing 0.9.16 is installed: type /reload-plugins to
+  load it, or open a new session.` and Not now. The plugin runs no command
+  and fills no prompt; the press path (RELOAD_WAIT, the remote toast,
+  `fillReload`, the settle look) and the store mark with its "🔄 updated to
+  … and reloaded." toast are gone. `/pacing reload off`: no row, one toast
+  per version with the same words. Doctor's fix for a newer copy: `type
+  /reload-plugins or open a new session`.
+- **Progress before time.** In the toasts, the row above the prompt and
+  `/pacing-status` an agent reads `implementer "task", editing step 2 of
+  4, 12m, about 5m left` (with an estimate, `editing ~60%, 12m`); without
+  progress, `editing 12m` as before. What gives way first is unchanged.
+  The user-visible `part 2 of 4` is now `step 2 of 4`; the command stays
+  `config.mjs part <done> <total>`.

@@ -13,7 +13,7 @@
 // them at the session model's price; saved is the difference, never below 0:
 // a task on a dearer model than the session's counts as nothing saved and is
 // named apart. In points of the weekly meter when records carry what their
-// tasks spent (`spent`, see Prices) and rate.json gives the tokens per point
+// tasks spent (`spent`, see Prices) and rate.json gives the dollars per point
 // (as budget.mjs works it out), else as a share.
 //   --detail  a table by role and model as well
 //   --json    the figures as one JSON line (for the hooks module)
@@ -66,15 +66,16 @@ let weekEnd = lastReading ? Date.parse(lastReading.reset) : now.getTime() + 1;
 while (weekEnd <= now.getTime()) weekEnd += 7 * DAY;
 const weekStart = weekEnd - 7 * DAY;
 
-// ---- tokens per point of the weekly meter: budget.mjs's rule on rate.json
+// ---- dollars per point of the weekly meter: budget.mjs's rule on rate.json
 //      as it stands (this week's from a rise of 5 points, else the carried
-//      one, else this week's from 2 points) ----
+//      one, else this week's from 2 points). A file without v: 2 holds the
+//      raw tokens per point of 0.9.15 and before: no rate. ----
 const rs = readJson(path.join(dataDir, 'rate.json'));
 let rate = null;
-if (rs && typeof rs === 'object') {
+if (rs && typeof rs === 'object' && rs.v === 2) {
   const rise = fin(rs.from) && fin(rs.to) ? rs.to - rs.from : 0;
-  const tok = fin(rs.tokens) ? rs.tokens : 0;
-  rate = rise >= 5 && tok > 0 ? tok / rise : fin(rs.carried) && rs.carried > 0 ? rs.carried : rise >= 2 && tok > 0 ? tok / rise : null;
+  const usd = fin(rs.usd) ? rs.usd : 0;
+  rate = rise >= 5 && usd > 0 ? usd / rise : fin(rs.carried) && rs.carried > 0 ? rs.carried : rise >= 2 && usd > 0 ? usd / rise : null;
 }
 
 // ---- prices ----
@@ -108,10 +109,9 @@ const tasks = logs.flatMap(readLines).filter(r => r && MODELS[r.model] && fin(r.
 });
 
 const sum = (l, k) => l.reduce((s, x) => s + x[k], 0);
-// what a saving in dollars is in points of the weekly meter: the tokens
-// rate.json counts are mostly the session's own, so a point is valued at the
-// session model's blended price
-const pointsOf = usd => (rate ? usd * 1e6 / blended(session) / rate : null);
+// what a saving in dollars is in points of the weekly meter, at the dollars
+// per point rate.json has learned
+const pointsOf = usd => (rate ? usd / rate : null);
 const figures = l => {
   const usd = sum(l, 'usd'), sessionUsd = sum(l, 'sessionUsd'), savedUsd = sum(l, 'savedUsd');
   // the ratio and the share are of the tasks that ran at or below the
@@ -167,7 +167,7 @@ if (flag('--json')) {
   console.log(JSON.stringify({
     week: { from: new Date(weekStart).toISOString(), to: new Date(weekEnd).toISOString(), known: !!lastReading },
     session: { model: session, label: sessionLabel, from: sessionFrom },
-    tokensPerPoint: rate === null ? null : Math.round(rate),
+    usdPerPoint: rate === null ? null : Math.round(rate * 1e4) / 1e4,
     priced: !tasks.length ? null : tasks.every(x => x.split) ? 'split' : tasks.some(x => x.split) ? 'mixed' : 'blended',
     ...out(all), above,
     groups: groups.map(g => ({ role: g.role, model: g.model, label: g.label, above: g.list.every(x => x.above), ...out(figures(g.list)) })),

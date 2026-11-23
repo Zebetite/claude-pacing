@@ -568,73 +568,117 @@ describe('the verifier agent', () => {
   });
 });
 
-describe('rate.json: tokens per point of the weekly meter', () => {
+describe('rate.json: dollars per point of the weekly meter', () => {
   const NEXT = '2026-11-26T12:00:00.000Z';
-  // an automatic reading's JSON; the line is 20 % at both times
-  const reading = (s, all, spent, { reset = RESET, now = '2026-11-13T12:00:00Z', dry = false } = {}) => {
-    const r = s.budget(['--all', String(all), '--reset', reset, '--now', now, '--source', 'hook', ...(spent != null ? ['--spent', String(spent)] : []), ...(dry ? ['--dry'] : [])]);
+  // an automatic reading's JSON; the line is 20 % at both times. `usd`: what
+  // the module hands over as spent since its last reading (--spent-usd)
+  const reading = (s, all, usd, { reset = RESET, now = '2026-11-13T12:00:00Z', dry = false, more = [] } = {}) => {
+    const r = s.budget(['--all', String(all), '--reset', reset, '--now', now, '--source', 'hook', ...(usd != null ? ['--spent-usd', String(usd)] : []), ...more, ...(dry ? ['--dry'] : [])]);
     assert.equal(r.code, 0, r.out);
     return JSON.parse(r.out.trim());
   };
   const rate = s => JSON.parse(s.read('rate.json'));
-  test('the first reading is the baseline and drops its --spent; no rate yet', () => {
+  // a full-price token with no --session: tier 1's input, Fable 5.2 at $8 per million
+  const FULL = 8 / 1e6;
+  test('the first reading is the baseline and drops its --spent-usd; no rate yet', () => {
     const s = sandbox();
     try {
-      const j = reading(s, 10, 999);
-      assert.deepEqual(rate(s), { reset: RESET, from: 10, to: 10, tokens: 0, carried: null });
-      assert.equal(j.tokensPerPoint, null);
+      const j = reading(s, 10, 0.5);
+      assert.deepEqual(rate(s), { v: 2, reset: RESET, from: 10, to: 10, usd: 0, carried: null });
+      assert.equal(j.usdPerPoint, null);
+      assert.equal(j.tokensPerPoint, undefined);
       assert.deepEqual(j.left, { points: 10, tokens: null });
     } finally { s.cleanup(); }
   });
-  test('--spent adds up; a rise of 2 points gives a first rate, 5 points the week\'s', () => {
+  test('--spent-usd adds up; a rise of 2 points gives a first rate, 5 points the week\'s', () => {
     const s = sandbox();
     try {
-      reading(s, 10, 999);
-      assert.equal(reading(s, 11, 1000).tokensPerPoint, null, 'a rise of 1 point is too little');
-      assert.equal(rate(s).tokens, 1000);
-      const j = reading(s, 12, 1000);
-      assert.equal(j.tokensPerPoint, 1000);
-      assert.deepEqual(j.left, { points: 8, tokens: 8000 });
-      // without --spent the tokens stay; the meter's highest is kept
+      reading(s, 10, 0.5);
+      assert.equal(reading(s, 11, 1).usdPerPoint, null, 'a rise of 1 point is too little');
+      assert.equal(rate(s).usd, 1);
+      const j = reading(s, 12, 1);
+      assert.equal(j.usdPerPoint, 1);
+      // 8 points at $1 a point, in Fable 5.2's input tokens at $8 per million
+      assert.deepEqual(j.left, { points: 8, tokens: 1000000 });
+      // without --spent-usd the dollars stay; the meter's highest is kept
       reading(s, 15);
-      assert.deepEqual(rate(s), { reset: RESET, from: 10, to: 15, tokens: 2000, carried: null });
-      const k = reading(s, 30, 8000);
-      assert.equal(k.tokensPerPoint, 500);
-      assert.deepEqual(k.left, { points: -10, tokens: -5000 });
+      assert.deepEqual(rate(s), { v: 2, reset: RESET, from: 10, to: 15, usd: 2, carried: null });
+      const k = reading(s, 30, 8);
+      assert.equal(k.usdPerPoint, 0.5);
+      assert.deepEqual(k.left, { points: -10, tokens: Math.round(-10 * 0.5 / FULL) });
+    } finally { s.cleanup(); }
+  });
+  test('the tokens left are full-price tokens of the session\'s model; an unknown one counts as tier 1', () => {
+    const s = sandbox();
+    try {
+      reading(s, 10); reading(s, 15, 1.25);
+      // $0.25 a point, 5 points left: $1.25, at Opus 5.5's $4 per million input
+      const opus = reading(s, 15, null, { more: ['--session', 'claude-opus-5-5'] });
+      assert.equal(opus.usdPerPoint, 0.25);
+      assert.deepEqual(opus.left, { points: 5, tokens: 312500 });
+      // at Haiku 5.5's $0.10 per million: forty times as many
+      assert.equal(reading(s, 15, null, { more: ['--session', 'claude-haiku-5-5'] }).left.tokens, 12500000);
+      assert.equal(reading(s, 15, null, { more: ['--session', 'claude-mystery-1'] }).left.tokens, 156250);
+      // rounded to 4 decimals
+      reading(s, 16, 0.123456);
+      assert.equal(reading(s, 16).usdPerPoint, Math.round(1.373456 / 6 * 1e4) / 1e4);
+    } finally { s.cleanup(); }
+  });
+  test('an older module\'s --spent is taken and ignored', () => {
+    const s = sandbox();
+    try {
+      reading(s, 10);
+      const r = s.budget(['--all', '13', '--reset', RESET, '--now', '2026-11-13T12:00:00Z', '--source', 'hook', '--spent', '900000']);
+      assert.equal(r.code, 0, r.out);
+      assert.equal(JSON.parse(r.out.trim()).usdPerPoint, null);
+      assert.deepEqual(rate(s), { v: 2, reset: RESET, from: 10, to: 13, usd: 0, carried: null });
+    } finally { s.cleanup(); }
+  });
+  test('a file without v: 2 (raw tokens per point, 0.9.15 and before) is dropped', () => {
+    const s = sandbox();
+    try {
+      s.write('rate.json', JSON.stringify({ reset: RESET, from: 10, to: 20, tokens: 5000000, carried: 80000 }));
+      const j = reading(s, 21, 1);
+      assert.equal(j.usdPerPoint, null);
+      assert.deepEqual(rate(s), { v: 2, reset: RESET, from: 21, to: 21, usd: 0, carried: null });
+      // a week before's, with a carried rate, carries nothing either
+      s.write('rate.json', JSON.stringify({ reset: '2026-11-12T12:00:00.000Z', from: 10, to: 30, tokens: 5000000, carried: 80000 }));
+      assert.equal(reading(s, 21, 1).usdPerPoint, null);
+      assert.equal(rate(s).carried, null);
     } finally { s.cleanup(); }
   });
   test('a new week carries the week before\'s rate from a rise of 5 points', () => {
     const s = sandbox();
     try {
-      reading(s, 10); reading(s, 16, 6000);
-      const j = reading(s, 3, 700, { reset: NEXT, now: '2026-11-20T12:00:00Z' });
-      assert.deepEqual(rate(s), { reset: NEXT, from: 3, to: 3, tokens: 0, carried: 1000 });
-      assert.equal(j.tokensPerPoint, 1000);
-      assert.deepEqual(j.left, { points: 17, tokens: 17000 });
+      reading(s, 10); reading(s, 16, 6);
+      const j = reading(s, 3, 0.7, { reset: NEXT, now: '2026-11-20T12:00:00Z' });
+      assert.deepEqual(rate(s), { v: 2, reset: NEXT, from: 3, to: 3, usd: 0, carried: 1 });
+      assert.equal(j.usdPerPoint, 1);
+      assert.deepEqual(j.left, { points: 17, tokens: Math.round(17 / FULL) });
       // the carried rate goes before this week's from 2 points, not before 5
-      assert.equal(reading(s, 5, 4000, { reset: NEXT, now: '2026-11-20T12:00:00Z' }).tokensPerPoint, 1000);
-      assert.equal(reading(s, 8, 6000, { reset: NEXT, now: '2026-11-20T12:00:00Z' }).tokensPerPoint, 2000);
+      assert.equal(reading(s, 5, 4, { reset: NEXT, now: '2026-11-20T12:00:00Z' }).usdPerPoint, 1);
+      assert.equal(reading(s, 8, 6, { reset: NEXT, now: '2026-11-20T12:00:00Z' }).usdPerPoint, 2);
     } finally { s.cleanup(); }
   });
   test('a week that rose under 5 points carries nothing, and keeps the rate before', () => {
     const s = sandbox();
     try {
-      reading(s, 10); reading(s, 13, 3000);
+      reading(s, 10); reading(s, 13, 3);
       reading(s, 3, null, { reset: NEXT, now: '2026-11-20T12:00:00Z' });
       assert.equal(rate(s).carried, null);
-      s.write('rate.json', JSON.stringify({ reset: RESET, from: 10, to: 13, tokens: 3000, carried: 800 }));
+      s.write('rate.json', JSON.stringify({ v: 2, reset: RESET, from: 10, to: 13, usd: 3, carried: 0.8 }));
       reading(s, 3, null, { reset: NEXT, now: '2026-11-20T12:00:00Z' });
-      assert.equal(rate(s).carried, 800);
+      assert.equal(rate(s).carried, 0.8);
     } finally { s.cleanup(); }
   });
   test('a dry run writes nothing', () => {
     const s = sandbox();
     try {
-      reading(s, 10, 500, { dry: true });
+      reading(s, 10, 0.5, { dry: true });
       assert.ok(!s.exists('rate.json'));
       reading(s, 10);
       const before = s.read('rate.json');
-      reading(s, 14, 4000, { dry: true });
+      reading(s, 14, 4, { dry: true });
       assert.equal(s.read('rate.json'), before);
     } finally { s.cleanup(); }
   });
@@ -642,11 +686,11 @@ describe('rate.json: tokens per point of the weekly meter', () => {
     const s = sandbox();
     try {
       s.write('rate.json', '{"reset": "2026-11');
-      const j = reading(s, 10, 500);
-      assert.equal(j.tokensPerPoint, null);
-      assert.deepEqual(rate(s), { reset: RESET, from: 10, to: 10, tokens: 0, carried: null });
+      const j = reading(s, 10, 0.5);
+      assert.equal(j.usdPerPoint, null);
+      assert.deepEqual(rate(s), { v: 2, reset: RESET, from: 10, to: 10, usd: 0, carried: null });
       s.write('rate.json', JSON.stringify([1, 2]));
-      assert.equal(reading(s, 12, 500).left.points, 8);
+      assert.equal(reading(s, 12, 0.5).left.points, 8);
       assert.equal(rate(s).from, 12);
     } finally { s.cleanup(); }
   });

@@ -51,8 +51,6 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // "Thu 26 Nov 11:00", in local time
 const stamp = ms => { const d = new Date(ms); return DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
-// 850K, 2.1M: as the status line says "Budget tokens"
-const tok = n => (n >= 1e6 ? Math.round(n / 1e5) / 10 + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(Math.round(n)));
 const kindOf = e => (e.source === 'hook' ? (e.full ? 'automatic and full' : 'automatic') : 'full');
 const labelOf = m => (m && MODELS[m] ? MODELS[m].label : 'the per-model meter');
 const USAGE = 'type /pacing usage now';
@@ -106,7 +104,7 @@ const checkVersion = () => {
   const copies = installedCopies();
   if (!copies.length) return { status: 'ok', found: 'running ' + running + '; no installed copy found to compare', running };
   const newest = copies.reduce((a, b) => (newer(b.version, a.version) ? b : a)).version;
-  if (newer(newest, running)) return { status: 'warn', found: 'running ' + running + ', but ' + newest + ' is installed', fix: 'type /reload-plugins or press Reload above the prompt', running, installed: newest };
+  if (newer(newest, running)) return { status: 'warn', found: 'running ' + running + ', but ' + newest + ' is installed', fix: 'type /reload-plugins or open a new session', running, installed: newest };
   return { status: 'ok', found: 'running ' + running + ', the app holds ' + newest, running, installed: newest };
 };
 
@@ -176,21 +174,26 @@ const checkSettings = () => {
     + ', reload ' + onOff(cfg.autoReload) + ', ' + (cfg.tiers ? cfg.tiers.length : 3) + ' tiers' };
 };
 
-// ---- the token rate (rate.json): tokens per point of the weekly meter, by
+// ---- the token rate (rate.json): dollars per point of the weekly meter, by
 //      budget.mjs's rule: this week's from a rise of 5 points, else the one
-//      carried from last week, else this week's from 2 points ----
+//      carried from last week, else this week's from 2 points. A file
+//      without v: 2 holds 0.9.15's raw tokens per point, which budget.mjs
+//      drops at its next reading. ----
+const usdText = n => '$' + (n >= 1 ? n.toFixed(2) : n.toFixed(4));
 const checkRate = () => {
   const r = readJson(path.join(dataDir, 'rate.json'));
   if (r.missing) return { status: 'ok', found: 'not learned yet', learned: false };
   const v = r.value, fin = x => typeof x === 'number' && Number.isFinite(x);
-  if (r.damaged || !v || typeof v !== 'object' || !fin(v.from) || !fin(v.to) || !fin(v.tokens)) {
+  if (!r.damaged && v && typeof v === 'object' && !Array.isArray(v) && v.v !== 2) return { status: 'ok', found: 'not learned yet (an older rate was dropped)', learned: false };
+  if (r.damaged || !v || typeof v !== 'object' || !fin(v.from) || !fin(v.to) || !fin(v.usd)) {
     return { status: 'warn', found: 'rate.json does not parse', fix: USAGE + ' to start it afresh', learned: false };
   }
   const rise = Math.round((v.to - v.from) * 10) / 10, carried = fin(v.carried) && v.carried > 0 ? v.carried : null;
   const points = rise + (rise === 1 ? ' point' : ' points');
-  if (rise >= 5 && v.tokens > 0) return { status: 'ok', found: tok(v.tokens / rise) + ' tokens per point, from ' + points + ' this week', learned: true, tokensPerPoint: Math.round(v.tokens / rise), points: rise };
-  if (carried) return { status: 'ok', found: tok(carried) + ' tokens per point, carried from last week', learned: true, tokensPerPoint: Math.round(carried), points: null };
-  if (rise >= 2 && v.tokens > 0) return { status: 'ok', found: tok(v.tokens / rise) + ' tokens per point, from only ' + points + ' so far', learned: true, tokensPerPoint: Math.round(v.tokens / rise), points: rise };
+  const learned = (usd, how, pts) => ({ status: 'ok', found: 'learned, ' + usdText(usd) + ' per point, ' + how, learned: true, usdPerPoint: Math.round(usd * 1e4) / 1e4, points: pts });
+  if (rise >= 5 && v.usd > 0) return learned(v.usd / rise, 'from ' + points + ' this week', rise);
+  if (carried) return learned(carried, 'carried from last week', null);
+  if (rise >= 2 && v.usd > 0) return learned(v.usd / rise, 'from only ' + points + ' so far', rise);
   return { status: 'ok', found: 'not learned yet: ' + points + ' this week so far', learned: false, points: rise };
 };
 

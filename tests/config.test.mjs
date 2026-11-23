@@ -360,10 +360,10 @@ describe('the reload at a new version', () => {
     const s = sandbox();
     try {
       s.config(['init']);
-      assert.match(s.config([]).out, /^Reload row when a new version is installed \(off: a toast to type \/reload-plugins\): on$/m);
+      assert.match(s.config([]).out, /^New-version row above the prompt \(off: one toast per version instead\): on$/m);
       s.config(['reload', 'off']);
       assert.equal(JSON.parse(s.read('config.json')).autoReload, false);
-      assert.match(s.config([]).out, /^Reload row when a new version is installed \(off: a toast to type \/reload-plugins\): off$/m);
+      assert.match(s.config([]).out, /^New-version row above the prompt \(off: one toast per version instead\): off$/m);
       s.config(['reset']);
       assert.equal(JSON.parse(s.read('config.json')).autoReload, false);
       s.config(['apply', 'reload', 'on']);
@@ -379,9 +379,10 @@ describe('the reload at a new version', () => {
   test('the guide says what it does, in the module\'s own words', () => {
     const guide = fs.readFileSync(path.join(plugin, 'skills', 'pacing', 'GUIDE.md'), 'utf8').replace(/\s+/g, ' ');
     // a toast leads with the icon of its kind where "Pacing: " stood
-    assert.ok(guide.includes('`🔄 updated to 0.9.12 and reloaded.`'));
-    assert.ok(guide.includes('`📦 Pacing 0.9.12 is installed: type /reload-plugins to load it.`'));
-    assert.ok(guide.includes('`📦 Reload from the computer: /reload-plugins does not run over a remote connection.`'));
+    assert.ok(guide.includes('`📦 Pacing 0.9.16 is installed: type /reload-plugins to load it, or open a new session.`'));
     assert.ok(guide.includes('`/pacing reload off` turns the row off'));
+    // no Reload button any more, nothing the plugin runs or fills
+    assert.ok(!guide.includes('**Reload**'));
+    assert.ok(!guide.includes('🔄'));
   });
 });

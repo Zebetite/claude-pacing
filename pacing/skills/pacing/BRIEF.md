@@ -93,7 +93,8 @@ For the <role>, a role agent:
   node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" part 0 <total>
   at its start and part <n> <total> as each part is done, each put before
   a command you run anyway and joined with ";", never a call of its own.
-  It shows your progress beside the update to "main", which is still sent.
+  The user sees it as "step <n> of <total>" beside your work; the update
+  to "main" is still sent.
 ```
 
 ## 4. Afterwards

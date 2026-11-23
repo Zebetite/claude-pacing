@@ -34,7 +34,7 @@ const healthy = () => {
   s.writeConfig({ tiers: [{ model: 'fable', label: 'Fable 5.2', effort: 'high' }, { model: 'opus', label: 'Opus 5.5', effort: 'medium' }, { model: 'sonnet', label: 'Sonnet 5.5', effort: 'medium' }],
     lastDayWeight: 1.5, setNextModel: true, compactAsk: true, agentNotices: true, switchAsk: true, autoReload: true, agentsPanel: 'auto', premium: 'fable',
     fallback: { model: 'opus', effort: 'high' }, reader: { model: 'haiku', effort: 'medium' }, verifier: { model: 'haiku', effort: 'medium' }, installed: '2026-11-01' });
-  s.write('rate.json', JSON.stringify({ reset: RESET, from: 10, to: 16, tokens: 6000000, carried: null }) + '\n');
+  s.write('rate.json', JSON.stringify({ v: 2, reset: RESET, from: 10, to: 16, usd: 0.0738, carried: null }) + '\n');
   s.write(agentsFile(s), record(-60) + record(-30, { resumed: true }));
   installCopy(s, VERSION);
   return s;
@@ -69,7 +69,7 @@ describe('doctor.mjs', () => {
       isOk(r, 'per-model', /^Fable 5\.2 read 10 min ago, at 30 %$/);
       isOk(r, 'week', /^resets Thu 19 Nov 12:00, in 6 days; the log agrees$/);
       isOk(r, 'settings', /^compact on, notify on, switch on, reload on, 3 tiers$/);
-      isOk(r, 'token rate', /^1M tokens per point, from 6 points this week$/);
+      isOk(r, 'token rate', /^learned, \$0\.0123 per point, from 6 points this week$/);
       isOk(r, 'agents', /^2 records, the last 30 min ago$/);
       isOk(r, 'folders', /^the data folder and the notes folder take writes$/);
     } finally { s.cleanup(); }
@@ -101,7 +101,7 @@ describe('doctor.mjs', () => {
       installCopy(s, '99.0.0');
       const r = doctor(s);
       assert.equal(r.code, 0);
-      isWarn(r, 'version', new RegExp('^running ' + VERSION.replace(/\./g, '\\.') + ', but 99\\.0\\.0 is installed -> type /reload-plugins or press Reload above the prompt$'));
+      isWarn(r, 'version', new RegExp('^running ' + VERSION.replace(/\./g, '\\.') + ', but 99\\.0\\.0 is installed -> type /reload-plugins or open a new session$'));
       assert.equal(r.summary, '1 warning: see above.');
       assert.doesNotMatch(r.out, /switch (the|this|to)|model menu|effort to/i);
     } finally { s.cleanup(); }
@@ -208,16 +208,21 @@ describe('doctor.mjs', () => {
     } finally { s.cleanup(); }
   });
 
-  test('token rate: damaged, carried from last week, early, still learning', () => {
+  test('token rate: damaged, an older file, carried from last week, early, still learning', () => {
     const s = healthy();
     try {
       s.write('rate.json', '{"from": 1');
       isWarn(doctor(s), 'token rate', /^rate\.json does not parse -> type \/pacing usage now to start it afresh$/);
-      s.write('rate.json', JSON.stringify({ reset: RESET, from: 10, to: 11, tokens: 500000, carried: 850000 }));
-      isOk(doctor(s), 'token rate', /^850K tokens per point, carried from last week$/);
-      s.write('rate.json', JSON.stringify({ reset: RESET, from: 10, to: 13, tokens: 3600000, carried: null }));
-      isOk(doctor(s), 'token rate', /^1\.2M tokens per point, from only 3 points so far$/);
-      s.write('rate.json', JSON.stringify({ reset: RESET, from: 10, to: 11, tokens: 900000, carried: null }));
+      s.write('rate.json', JSON.stringify({ v: 2, reset: RESET, from: 10, to: 11 }));
+      isWarn(doctor(s), 'token rate', /^rate\.json does not parse -> type \/pacing usage now to start it afresh$/);
+      // 0.9.15's raw tokens per point: budget.mjs drops it at its next reading
+      s.write('rate.json', JSON.stringify({ reset: RESET, from: 10, to: 16, tokens: 6000000, carried: null }));
+      isOk(doctor(s), 'token rate', /^not learned yet \(an older rate was dropped\)$/);
+      s.write('rate.json', JSON.stringify({ v: 2, reset: RESET, from: 10, to: 11, usd: 0.5, carried: 2.5 }));
+      isOk(doctor(s), 'token rate', /^learned, \$2\.50 per point, carried from last week$/);
+      s.write('rate.json', JSON.stringify({ v: 2, reset: RESET, from: 10, to: 13, usd: 0.36, carried: null }));
+      isOk(doctor(s), 'token rate', /^learned, \$0\.1200 per point, from only 3 points so far$/);
+      s.write('rate.json', JSON.stringify({ v: 2, reset: RESET, from: 10, to: 11, usd: 0.09, carried: null }));
       isOk(doctor(s), 'token rate', /^not learned yet: 1 point this week so far$/);
     } finally { s.cleanup(); }
   });
@@ -261,7 +266,7 @@ describe('doctor.mjs', () => {
       }
       assert.deepEqual(j.counts, { ok: 9, warn: 0, fail: 0 });
       assert.equal(j.summary, 'All 9 checks pass.');
-      assert.equal(j.checks.find(c => c.name === 'token rate').tokensPerPoint, 1000000);
+      assert.equal(j.checks.find(c => c.name === 'token rate').usdPerPoint, 0.0123);
       assert.equal(j.checks.find(c => c.name === 'version').running, VERSION);
       s.write('config.json', 'nope');
       installCopy(s, '99.0.0');
@@ -270,7 +275,7 @@ describe('doctor.mjs', () => {
       const k = JSON.parse(r.out);
       assert.deepEqual(k.counts, { ok: 7, warn: 1, fail: 1 });
       assert.equal(k.summary, '1 warning, 1 failure: see above.');
-      assert.equal(k.checks.find(c => c.name === 'version').fix, 'type /reload-plugins or press Reload above the prompt');
+      assert.equal(k.checks.find(c => c.name === 'version').fix, 'type /reload-plugins or open a new session');
     } finally { s.cleanup(); }
   });
 });

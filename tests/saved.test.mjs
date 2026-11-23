@@ -11,8 +11,8 @@ const saved = (s, args = [], now = NOW) => s.run('saved.mjs', [...args, '--now',
 const reading = s => s.write('log.jsonl', JSON.stringify({ t: '2026-11-18T10:00:00.000Z', all: 30, line: 40, level: 'ahead', reset: RESET }) + '\n');
 const records = (s, list) => s.write('agents/' + projectSlug(s.project) + '.jsonl',
   list.map((r, i) => JSON.stringify({ role: 'implementer', id: 'a' + i, effort: 'medium', resumed: false, ...r })).join('\n') + '\n');
-// 100 000 tokens per point of the weekly meter
-const rate = s => s.write('rate.json', JSON.stringify({ reset: RESET, from: 10, to: 20, tokens: 1e6, carried: null }) + '\n');
+// $0.133 per point of the weekly meter (100 000 tokens at Opus 5.5's blended price)
+const rate = s => s.write('rate.json', JSON.stringify({ v: 2, reset: RESET, from: 10, to: 20, usd: 1.33, carried: null }) + '\n');
 // what records carry today: one total, the agent's size, no split
 const plain = [
   { t: '2026-11-10T09:00:00.000Z', model: 'sonnet', tokens: 1e6 }, // the week before
@@ -159,6 +159,10 @@ describe('saved.mjs', () => {
       // without a rate the saved column is the share
       s.write('rate.json', '{}');
       assert.match(saved(s, ['--session', 'opus', '--detail']).out, /^  reader +Haiku 5\.5 +1 +2\.1M +97%$/m);
+      // and so with an older file, raw tokens per point without v: 2
+      s.write('rate.json', JSON.stringify({ reset: RESET, from: 10, to: 20, tokens: 1e6, carried: null }) + '\n');
+      assert.match(saved(s, ['--session', 'opus', '--detail']).out, /^  reader +Haiku 5\.5 +1 +2\.1M +97%$/m);
+      assert.equal(JSON.parse(saved(s, ['--session', 'opus', '--json']).out).usdPerPoint, null);
     } finally { s.cleanup(); }
   });
 
@@ -170,9 +174,9 @@ describe('saved.mjs', () => {
       assert.equal(r.code, 0, r.err);
       assert.equal(r.out.trim().split('\n').length, 1);
       const j = JSON.parse(r.out);
-      assert.deepEqual(Object.keys(j), ['week', 'session', 'tokensPerPoint', 'priced', 'tasks', 'counted', 'tokens', 'usd', 'sessionUsd', 'savedUsd', 'ratio', 'share', 'points', 'above', 'groups', 'text']);
+      assert.deepEqual(Object.keys(j), ['week', 'session', 'usdPerPoint', 'priced', 'tasks', 'counted', 'tokens', 'usd', 'sessionUsd', 'savedUsd', 'ratio', 'share', 'points', 'above', 'groups', 'text']);
       assert.equal(j.priced, 'split');
-      assert.equal(j.tokensPerPoint, 100000);
+      assert.equal(j.usdPerPoint, 0.133);
       assert.equal(j.tasks, 2);
       assert.equal(j.tokens, 2575000);
       assert.equal(j.usd, 0.22);

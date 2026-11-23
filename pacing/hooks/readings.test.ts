@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadedText, reloadAskText, reloadRowText, RELOAD_ENTER, RELOAD_REMOTE, remoteRefused, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, RELOAD_SETTLE, RELOAD_WAIT, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, leftOf, leftText, usualText, budgetText, tokensText } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -194,33 +194,68 @@ test('the status line in tokens once budget.mjs has a rate, negative past the li
   expect(status.at(-1)).toBe('Budget tokens: -510K · usage: Weekly 26% Fable 40%')
 })
 
-test('--spent: every token of the session and its agents since the last reading that ran; a failed run keeps them for the next', async ($, on) => {
+test('--spent-usd: every dollar of the session and its agents since the last reading that ran; a failed run keeps them for the next', async ($, on) => {
   engine(on)
   const runs: string[][] = []
   let fail = false
   on('process.run', (_, e) => (runs.push([...e.argv]), { value: fail ? { ...answer('ahead', 10), exitCode: 1, stdout: 'bad input' } : answer('ahead', 10) }))
-  const spentOf = (argv: string[]) => (argv.includes('--spent') ? argv[argv.indexOf('--spent') + 1] : null)
+  const usdOf = (argv: string[]) => (argv.includes('--spent-usd') ? argv[argv.indexOf('--spent-usd') + 1] : null)
 
-  // nothing spent yet: no flag
+  // a turn before the first reading: no prices yet, so no flag; it goes with the next
+  await $.turn.complete(turn('claude-fable-5-2', 0.5))
   await $.session.measure(measure(10))
-  expect(spentOf(runs[0])).toBe(null)
-  // $1 of Fable output is 25 000 tokens, $1 of Opus output 50 000 (a subagent's)
+  expect(usdOf(runs[0])).toBe(null)
+  // $1 of Fable output, $1 of Opus output (a subagent's)
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await $.turn.complete(turn('claude-opus-5-5', 1, 'a1'))
   await $.session.measure(measure(11))
-  expect(spentOf(runs[1])).toBe('75000')
-  // a run that failed: its tokens go with the next one
+  expect(usdOf(runs[1])).toBe('2.5')
+  // the raw count is gone
+  expect(runs[1]).not.toContain('--spent')
+  // a run that failed: its dollars go with the next one
   await $.turn.complete(turn('claude-fable-5-2', 0.4))
   fail = true
   await $.session.measure(measure(12))
-  expect(spentOf(runs[2])).toBe('10000')
+  expect(usdOf(runs[2])).toBe('0.4')
   fail = false
   await $.turn.complete(turn('claude-fable-5-2', 0.4))
   await $.session.measure(measure(13))
-  expect(spentOf(runs[3])).toBe('20000')
+  expect(usdOf(runs[3])).toBe('0.8')
   // and nothing twice
   await $.session.measure(measure(14))
-  expect(spentOf(runs[4])).toBe(null)
+  expect(usdOf(runs[4])).toBe(null)
+})
+
+test('--spent-usd prices cache reads at their own price; a model with no price counts at the session model\'s', async ($, on) => {
+  engine(on)
+  const runs: string[][] = []
+  on('process.run', (_, e) => (runs.push([...e.argv]), { value: answer('ahead', 10) }))
+  const usdOf = (argv: string[]) => (argv.includes('--spent-usd') ? argv[argv.indexOf('--spent-usd') + 1] : null)
+  await $.session.measure(measure(10))
+  // a long session's turn on Opus 5.5: 400K cache read, 5K input, 2K output
+  // is 407K tokens, but $0.08 + $0.02 + $0.04 = $0.14
+  await $.turn.complete({ ...turn('claude-opus-5-5', 0), usage: { model: 'claude-opus-5-5', input_tokens: 5000, output_tokens: 2000, cache_read_input_tokens: 400000, cache_creation_input_tokens: 0 } })
+  await $.session.measure(measure(11))
+  expect(usdOf(runs[1])).toBe('0.14')
+  // a subagent on a model the prices do not know: at Opus 5.5's, the session's
+  await $.turn.complete({ ...turn('claude-opus-5-5', 0, 'a1'), usage: { model: 'claude-opus-4-8', input_tokens: 0, output_tokens: 1000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } })
+  await $.session.measure(measure(12))
+  expect(usdOf(runs[2])).toBe('0.02')
+})
+
+test('spentUsd: each model at its prices, input, output, cache read and cache write', () => {
+  const tokens = { 'claude-opus-5-5': { in: 5000, out: 2000, read: 400000, write: 10000 } }
+  const agents = { 'claude-haiku-5-5-20261101': { in: 1e6, out: 1e6, read: 1e6, write: 1e6 } }
+  // 0.02 + 0.04 + 0.08 + 0.05, and Haiku 5.5's 0.1 + 0.5 + 0.01 + 0.125
+  const cents = (usd: number) => Math.round(usd * 1e6) / 1e6
+  expect(cents(spentUsd(tokens, agents, PRICES, 'claude-opus-5-5'))).toBe(0.925)
+  // an unknown model at the session's prices; with no session priced, left out
+  const odd = { 'claude-mystery-1': { in: 0, out: 1000, read: 0, write: 0 } }
+  expect(cents(spentUsd(odd, {}, PRICES, 'claude-fable-5-2'))).toBe(0.04)
+  expect(spentUsd(odd, {}, PRICES, null)).toBe(0)
+  expect(spentUsd(odd, {}, PRICES, 'claude-mystery-1')).toBe(0)
+  // no prices yet (no reading): nothing
+  expect(spentUsd(tokens, {}, undefined as any, 'claude-opus-5-5')).toBe(0)
 })
 
 test('the width with the longer budget text: the budget and the usage whole, the agents\' count in what is left', () => {
@@ -1097,7 +1132,7 @@ test('with 1, 2, 3 and 6 agents, long names and assignments, far over budget: th
   // the line never shows an assignment, whatever the room; where one shows (the toasts, the row) it is never longer than TASK_MAX
   expect(TASK_MAX).toBe(60)
   expect(agentPart(described(SETS.one as any), T0, 500)).toBe('⏳ 1 Subagent running')
-  expect(backgroundText(described(SETS.one as any), T0, 500)).toBe('In the background: ⏳ reader: Auto-reload on plugin update when the desktop app has insta…, on the web 3m ~60%')
+  expect(backgroundText(described(SETS.one as any), T0, 500)).toBe('In the background: ⏳ reader: Auto-reload on plugin update when the desktop app has insta…, on the web ~60%, 3m')
   expect(roleOf('general-purpose')).toBe('general')
   expect(roleOf('someplugin:very-long-agent-name')).toBe('very-long-a…')
 })
@@ -1176,7 +1211,7 @@ test('the forms the user approved: the line with the count alone (0.9.13), the t
   expect(doneText(IMPL, 3 * 60000, 41000, [])).toBe('✅ implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; nothing else is running.')
   expect(doneText(IMPL, 3 * 60000, 41000, [READER])).toBe('✅ implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; reader is still running.')
   expect(doneText(IMPL, 3 * 60000, 41000, [READER, VERIFIER, { ...VERIFIER, id: 'w' }])).toBe('✅ implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; 3 Subagents are still running.')
-  expect(progressText([{ ...IMPL, startedAt: T0 - 12 * 60000, runs: [20 * 60000, 20 * 60000, 20 * 60000] }], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 12m ~60%, about 8m left.')
+  expect(progressText([{ ...IMPL, startedAt: T0 - 12 * 60000, runs: [20 * 60000, 20 * 60000, 20 * 60000] }], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing ~60%, 12m, about 8m left.')
 })
 
 test('the agent part as the room shrinks: the count with "running", then without it, then the bare count; side sessions counted in', async () => {
@@ -1240,8 +1275,8 @@ test('an agent without a description has no assignment part, in the line, the ro
   expect(statusText(J77, [], null, T0, bare)).toBe('⏳ 1 Subagent running · Budget tokens: 850K · usage: Weekly 100% Fable 100%')
   expect(startedText(bare[0], bare)).toBe('▶️ reader is running on Haiku 5.5 medium, about 5m.')
   expect(doneText(bare[0], 3 * 60000, 41000, [])).toBe('✅ reader is done after 3m, 41k tokens; nothing else is running.')
-  expect(progressText(bare, T0)).toBe('⏳ still running: reader searching 3m ~60%, about 2m left.')
-  expect(backgroundText(bare, T0)).toBe('In the background: ⏳ reader searching 3m ~60%')
+  expect(progressText(bare, T0)).toBe('⏳ still running: reader searching ~60%, 3m, about 2m left.')
+  expect(backgroundText(bare, T0)).toBe('In the background: ⏳ reader searching ~60%, 3m')
   // a description over several lines is one line, where it shows
   expect(backgroundText([{ ...READER, description: 'Read\n  the logs', step: null, runs: [] }], T0)).toBe('In the background: ⏳ reader is running: Read the logs 3m')
 })
@@ -1249,13 +1284,13 @@ test('an agent without a description has no assignment part, in the line, the ro
 test('the 5-minute toast and the row follow the same order and shrink the same way, each one line within 120', async () => {
   const two = [IMPL, READER], three = [IMPL, READER, VERIFIER]
   // the toast: the assignment quoted, several joined by "; "
-  expect(progressText([IMPL], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 2m ~60%, about 1m left.')
+  expect(progressText([IMPL], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing ~60%, 2m, about 1m left.')
   expect(progressText(two, T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 2m; reader "Read the test logs", searching 3m.')
   expect(progressText(three, T0)).toBe('⏳ still running: implementer "Auto-reload on plugin …" 2m; reader "Read the test logs" 3m; verifier "Run the suite" 30s.')
-  const short = [{ ...IMPL, description: 'Fix it' }, { ...READER, description: 'Logs' }]
-  expect(progressText(short, T0)).toBe('⏳ still running: implementer "Fix it", editing 2m ~60%, about 1m left; reader "Logs", searching 3m ~60%, about 2m left.')
+  const short = [{ ...IMPL, description: 'Fix' }, { ...READER, description: 'Logs' }]
+  expect(progressText(short, T0)).toBe('⏳ still running: implementer "Fix", editing ~60%, 2m, about 1m left; reader "Logs", searching ~60%, 3m, about 2m left.')
   // the row above the prompt keeps the assignment: it has more room than the status line
-  expect(backgroundText([IMPL], T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing 2m ~60%')
+  expect(backgroundText([IMPL], T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing ~60%, 2m')
   expect(backgroundText([{ ...IMPL, step: null, runs: [] }], T0)).toBe('In the background: ⏳ implementer is running: Auto-reload on plugin update 2m')
   expect(backgroundText(two, T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing 2m, ⏳ reader: Read the test logs, searching 3m')
   expect(backgroundText(two, T0, 117)).toBe('In the background: ⏳ implementer is running: Auto-reload on plugin up… 2m, ⏳ reader is running: Read the test logs 3m')
@@ -1288,10 +1323,10 @@ test('in a session: the history from the store gives the estimate, the agent\'s 
   await $.tool.call({ tool: 'Grep', pattern: 'x', agentId: 'ag1' } as any)
   await clock.advance(2 * 60000)
   // capped at 95 % at the median and past it, the step in the toast
-  expect(seen.toasts.at(-1)).toBe('⏳ still running: reader "a task", searching 5m ~95%.')
+  expect(seen.toasts.at(-1)).toBe('⏳ still running: reader "a task", searching ~95%, 5m.')
   expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget: 10% · usage: Weekly 10% Fable 40%')
   // /pacing-status: the same order, and the model the agent runs on
-  expect((await $.command.run({ command: 'pacing-status', args: '' } as any)).text.split('\n')[1]).toBe('Running: reader: a task, searching 5m ~95% (Haiku 5.5)')
+  expect((await $.command.run({ command: 'pacing-status', args: '' } as any)).text.split('\n')[1]).toBe('Running: reader: a task, searching ~95%, 5m (Haiku 5.5)')
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
   expect(store['pacing:reader']).toEqual([4 * 60000, 5 * 60000, 6 * 60000, 5 * 60000])
 })
@@ -1789,21 +1824,15 @@ test('the app\'s list_sessions answer as a module gets it: the rows from its tex
   expect(workingSessions(rows, 'local_other')).toEqual([])
 })
 
-// ---- a new version: the Reload row ----
+// ---- a new version: the new-version row ----
 
-// the engine beneath: the manifest and the module's own file as they stand
+// the engine beneath: the manifest as it stands
 // on disk (a test changes them as the app's sync would), the session's id,
-// the config file, the module's store, the slash commands run, what
-// /reload-plugins answers (`reject`: it throws, which the kit hands the
-// module as an error of its own, "no implementation for command.run", the
-// message lost; `answer`: what it resolves with, of which the kit keeps
-// text, exitCode and isTextDisplayOnly; `hang`: never), the prompt box
-// filled and the toasts
-const MARK = 'reload:local_s1'
-const REMOTE = '/reload-plugins isn\'t available over a remote connection in this session.'
+// the config file, the module's store, the slash commands run (none should
+// be), the prompt box filled (never) and the toasts
 const manifestOf = (version: string) => JSON.stringify({ name: 'pacing', version })
-const reloadEngine = (on: any, opts: { config?: string; reject?: string; answer?: unknown; hang?: boolean; store?: Record<string, unknown> } = {}) => {
-  const seen = { runs: [] as string[], toasts: [] as string[], fills: [] as string[], reject: opts.reject ?? null as string | null, answer: opts.answer ?? { text: 'Reloaded plugins' } as unknown, hang: !!opts.hang, store: { ...(opts.store ?? {}) } as Record<string, unknown>, manifest: manifestOf('0.9.10') as string | null, code: 'the module as it was loaded' }
+const reloadEngine = (on: any, opts: { config?: string; store?: Record<string, unknown> } = {}) => {
+  const seen = { runs: [] as string[], toasts: [] as string[], fills: [] as string[], store: { ...(opts.store ?? {}) } as Record<string, unknown>, manifest: manifestOf('0.9.10') as string | null }
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
   on('command.register', () => ({ value: { command: 'pacing-status' } }))
   on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000, tokens: 1000, percent: 0 }, rateLimits: [] } }))
@@ -1815,14 +1844,11 @@ const reloadEngine = (on: any, opts: { config?: string; reject?: string; answer?
       if (seen.manifest === null) throw new Error('ENOENT')
       return { value: seen.manifest }
     }
-    if (/[\\/]hooks[\\/]readings\.mjs$/.test(p)) return { value: seen.code }
     return { value: opts.config !== undefined && /[\\/]\.claude[\\/]pacing[\\/]config\.json$/.test(p) ? opts.config : '{}' }
   })
   on('command.run', (_: unknown, e: any) => {
     seen.runs.push('/' + e.command + (e.args ? ' ' + e.args : ''))
-    if (seen.reject !== null) throw new Error(seen.reject)
-    if (seen.hang) return new Promise(() => {})
-    return seen.answer
+    return { text: 'ran' }
   })
   on('store.get', (_: unknown, e: any) => ({ value: seen.store[e.key] }))
   on('store.set', (_: unknown, e: any) => { seen.store[e.key] = e.value; return { value: undefined } })
@@ -1834,12 +1860,19 @@ const reloadEngine = (on: any, opts: { config?: string; reject?: string; answer?
   on('turn.start', (_: unknown, e: any) => ({ turnId: e.turnId }))
   return seen
 }
-// the Reload row's text as drawn now, or undefined
+// the new-version row's text as drawn now, or undefined
 const reloadRow = async ($: any) => {
   const ui = await $.ui.mount(BAND)
   const r = await ui.find({ type: 'Text', text: /is installed/ })
   await ui.unmount()
   return r?.text as string | undefined
+}
+// the buttons of the band as drawn now, by key
+const bandKeys = async ($: any) => {
+  const ui = await $.ui.mount(BAND)
+  const keys = (await ui.findAll({ type: 'Button' })).map((b: any) => b.key ?? b.props?.key)
+  await ui.unmount()
+  return keys
 }
 // a button of the row pressed, and what it started settled
 const pressRow = async ($: any, clock: any, key: string) => {
@@ -1862,28 +1895,17 @@ const rowUp = async ($: any, clock: any, seen: any) => {
   seen.manifest = manifestOf('0.9.11')
   await clock.advance(RELOAD_CHECK_EVERY)
 }
+const ROW_11 = '📦 Pacing 0.9.11 is installed: type /reload-plugins to load it, or open a new session.'
+const ROW_12 = '📦 Pacing 0.9.12 is installed: type /reload-plugins to load it, or open a new session.'
 
-test('the reload\'s words, and the version a manifest names', async () => {
-  expect(reloadedText('0.9.11')).toBe('🔄 updated to 0.9.11 and reloaded.')
-  expect(reloadAskText('0.9.11')).toBe('📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.')
-  expect(reloadRowText('0.9.11')).toBe('📦 Pacing 0.9.11 is installed.')
-  expect(RELOAD_ENTER).toBe('📦 Press Enter to reload.')
-  expect(RELOAD_REMOTE).toBe('📦 Reload from the computer: /reload-plugins does not run over a remote connection.')
-  expect(RELOAD_WAIT).toBe(3000)
+test('the new version\'s words, and the version a manifest names', async () => {
+  expect(reloadText('0.9.11')).toBe(ROW_11)
   expect(versionOf(manifestOf('0.9.11'))).toBe('0.9.11')
   // half-written during a sync, or no version in it: none
   expect(versionOf('{ "name": "pacing", "vers')).toBe(null)
   expect(versionOf('')).toBe(null)
   expect(versionOf('{"name":"pacing"}')).toBe(null)
   expect(versionOf('{"version":11}')).toBe(null)
-  // the refusal over a remote connection, in a thrown error or in the answer
-  expect(remoteRefused(new Error(REMOTE))).toBe(true)
-  expect(remoteRefused({ text: REMOTE, isError: true })).toBe(true)
-  expect(remoteRefused({ error: REMOTE })).toBe(true)
-  expect(remoteRefused({ error: new Error(REMOTE) })).toBe(true)
-  expect(remoteRefused({ text: 'Reloaded: 2 plugins · 15 skills' })).toBe(false)
-  expect(remoteRefused(new Error('a module may not run this command'))).toBe(false)
-  expect(remoteRefused(undefined)).toBe(false)
 })
 
 test('the version unchanged: nothing, at a turn\'s end or on the slow timer', async ($, on) => {
@@ -1899,7 +1921,7 @@ test('the version unchanged: nothing, at a turn\'s end or on the slow timer', as
   expect(await reloadRow($)).toBe(undefined)
 })
 
-test('a new version: the row at the first look that sees it, nothing run by itself', async ($, on) => {
+test('a new version: the row at the first look that sees it, the text and Not now only, nothing run and nothing filled', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on)
@@ -1908,21 +1930,24 @@ test('a new version: the row at the first look that sees it, nothing run by itse
   // the app's sync puts 0.9.11 in the folder; the slow timer finds it
   seen.manifest = manifestOf('0.9.11')
   await clock.advance(RELOAD_CHECK_EVERY)
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  expect(await reloadRow($)).toBe(ROW_11)
+  expect(await bandKeys($)).toEqual(['pacing-reload-not-now'])
   expect(seen.runs).toEqual([])
+  expect(seen.fills).toEqual([])
   expect(seen.toasts).toEqual([])
-  expect(seen.store[MARK]).toBe(undefined)
   // every later look: nothing more, the row stays
   await clock.advance(6 * RELOAD_CHECK_EVERY)
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(RELOAD_AFTER_TURN)
   expect(seen.runs).toEqual([])
+  expect(seen.fills).toEqual([])
   expect(seen.toasts).toEqual([])
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
-  // the next version takes its place
+  expect(await reloadRow($)).toBe(ROW_11)
+  // the next version takes its place, the same way
   seen.manifest = manifestOf('0.9.12')
   await clock.advance(RELOAD_CHECK_EVERY)
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.12 is installed.')
+  expect(await reloadRow($)).toBe(ROW_12)
+  expect(await bandKeys($)).toEqual(['pacing-reload-not-now'])
 })
 
 test('a new version found as a turn ends: the row right after the turn', async ($, on) => {
@@ -1934,180 +1959,23 @@ test('a new version found as a turn ends: the row right after the turn', async (
   await $.turn.start({ text: 'next', turnId: 't2' } as any)
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(RELOAD_AFTER_TURN)
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  expect(await reloadRow($)).toBe(ROW_11)
   expect(seen.runs).toEqual([])
 })
 
-test('the copy a reload brings finds the mark at its load and says "updated", once', async ($, on) => {
+test('a load says nothing of a version: a new session, or a reload the person typed', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
-  // what the copy that pressed Reload left for this session
-  const seen = reloadEngine(on, { store: { [MARK]: { version: '0.9.11', at: T0 - 1000 } } })
-  seen.manifest = manifestOf('0.9.11')
+  // a mark an earlier copy's Reload button left (0.9.14, 0.9.15) means nothing now
+  const seen = reloadEngine(on, { store: { 'reload:local_s1': { version: '0.9.10', at: T0 - 1000 } } })
   await start($)
   await clock.settle()
-  expect(seen.toasts).toEqual(['🔄 updated to 0.9.11 and reloaded.'])
-  expect(seen.store[MARK]).toBe(undefined)
-  // loaded is what is on disk: nothing more
+  expect(seen.toasts).toEqual([])
   await $.prompt.submit({ text: 'work on', asUser: true })
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(3 * RELOAD_CHECK_EVERY)
-  expect(seen.runs).toEqual([])
-  expect(seen.toasts.length).toBe(1)
-  expect(await reloadRow($)).toBe(undefined)
-})
-
-test('a load with no mark says nothing: a new session, or a reload the person typed', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { store: { 'reload:local_other': { version: '0.9.10', at: T0 - 1000 } } })
-  await start($)
-  await clock.settle()
   expect(seen.toasts).toEqual([])
-  // another session's mark is not this one's
-  expect(seen.store).toEqual({ 'reload:local_other': { version: '0.9.10', at: T0 - 1000 } })
-})
-
-test('Reload: /reload-plugins answers; the copy that stays, its own file unchanged, says "updated" and the row goes', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on)
-  await rowUp($, clock, seen)
-  await pressRow($, clock, 'pacing-reload')
-  expect(seen.runs).toEqual(['/reload-plugins'])
   expect(await reloadRow($)).toBe(undefined)
-  // a copy the reload brings says so at its load; this one waits for it
-  expect(seen.toasts).toEqual([])
-  expect(seen.store[MARK]).toEqual({ version: '0.9.11', at: T0 + RELOAD_AFTER_TURN + RELOAD_CHECK_EVERY })
-  await clock.advance(RELOAD_SETTLE)
-  expect(seen.toasts).toEqual(['🔄 updated to 0.9.11 and reloaded.'])
-  expect(seen.store[MARK]).toBe(undefined)
-  expect(seen.fills).toEqual([])
-  // no loop: this copy now counts as 0.9.11
-  await clock.advance(3 * RELOAD_CHECK_EVERY)
-  await $.turn.complete(turn('claude-fable-5-2', 1))
-  await clock.advance(RELOAD_AFTER_TURN)
-  expect(seen.runs.length).toBe(1)
-  expect(seen.toasts.length).toBe(1)
-  expect(await reloadRow($)).toBe(undefined)
-})
-
-test('Reload that leaves the old code running: the row again, and nothing by itself', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on)
-  await loadedAndTyped($, clock)
-  // the new version changed this module too, yet this copy still runs
-  seen.manifest = manifestOf('0.9.11')
-  seen.code = 'the module of 0.9.11'
-  await clock.advance(RELOAD_CHECK_EVERY)
-  await pressRow($, clock, 'pacing-reload')
-  await clock.advance(RELOAD_SETTLE)
-  expect(seen.toasts).toEqual([])
-  expect(seen.store[MARK]).toBe(undefined)
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
-  await clock.advance(6 * RELOAD_CHECK_EVERY)
-  await $.turn.complete(turn('claude-fable-5-2', 1))
-  await clock.advance(RELOAD_AFTER_TURN)
-  expect(seen.runs.length).toBe(1)
-  expect(seen.toasts).toEqual([])
-})
-
-test('Reload over a remote connection: the toast to reload from the computer, and the row stays', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { answer: { text: REMOTE, exitCode: 1 } })
-  await rowUp($, clock, seen)
-  await pressRow($, clock, 'pacing-reload')
-  expect(seen.runs).toEqual(['/reload-plugins'])
-  expect(seen.toasts).toEqual(['📦 Reload from the computer: /reload-plugins does not run over a remote connection.'])
-  expect(seen.fills).toEqual([])
-  expect(seen.store[MARK]).toBe(undefined)
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
-  // pressed again: one more attempt; Not now hides it
-  await pressRow($, clock, 'pacing-reload')
-  expect(seen.runs.length).toBe(2)
-  await pressRow($, clock, 'pacing-reload-not-now')
-  expect(await reloadRow($)).toBe(undefined)
-})
-
-test('Reload over a remote connection, the words in an answer that reports no error: the same toast, never "updated"', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { answer: { text: REMOTE } })
-  await rowUp($, clock, seen)
-  await pressRow($, clock, 'pacing-reload')
-  expect(seen.toasts).toEqual(['📦 Reload from the computer: /reload-plugins does not run over a remote connection.'])
-  expect(seen.fills).toEqual([])
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
-  await clock.advance(RELOAD_SETTLE)
-  expect(seen.toasts.length).toBe(1)
-  expect(seen.store[MARK]).toBe(undefined)
-})
-
-test('Reload rejected, not for a remote connection: the command goes into the prompt box, one key left', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { reject: 'a module may not run this command' })
-  await rowUp($, clock, seen)
-  await pressRow($, clock, 'pacing-reload')
-  expect(seen.runs).toEqual(['/reload-plugins'])
-  expect(seen.fills).toEqual(['/reload-plugins'])
-  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
-  expect(await reloadRow($)).toBe(undefined)
-  // the mark stays for the reload that Enter runs
-  expect(seen.store[MARK]).toEqual({ version: '0.9.11', at: T0 + RELOAD_AFTER_TURN + RELOAD_CHECK_EVERY })
-})
-
-test('Reload with an error answer: the prompt box too', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { answer: { text: 'Something went wrong', exitCode: 1 } })
-  await rowUp($, clock, seen)
-  await pressRow($, clock, 'pacing-reload')
-  expect(seen.fills).toEqual(['/reload-plugins'])
-  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
-  await clock.advance(RELOAD_SETTLE)
-  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
-})
-
-test('Reload with no answer in 3 s: the prompt box filled and the toast', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { hang: true })
-  await rowUp($, clock, seen)
-  await pressRow($, clock, 'pacing-reload')
-  expect(seen.runs).toEqual(['/reload-plugins'])
-  expect(seen.fills).toEqual([])
-  expect(seen.toasts).toEqual([])
-  await clock.advance(RELOAD_WAIT)
-  expect(seen.fills).toEqual(['/reload-plugins'])
-  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
-  expect(await reloadRow($)).toBe(undefined)
-  expect(seen.store[MARK]).toEqual({ version: '0.9.11', at: T0 + RELOAD_AFTER_TURN + RELOAD_CHECK_EVERY })
-  // later looks: nothing more for this version
-  await clock.advance(3 * RELOAD_CHECK_EVERY)
-  expect(seen.runs.length).toBe(1)
-  expect(seen.toasts.length).toBe(1)
-})
-
-test('Reload pressed twice: one attempt', async ($, on) => {
-  engine(on)
-  const clock = mock.clock(on, { now: T0 })
-  const seen = reloadEngine(on, { hang: true })
-  await rowUp($, clock, seen)
-  // two bands drawn with the row, each pressed while the first run is open
-  const a = await $.ui.mount(BAND)
-  const b = await $.ui.mount({ ...BAND, requestId: 'pacing-2' })
-  await a.press({ key: 'pacing-reload' })
-  await b.press({ key: 'pacing-reload' })
-  await a.unmount()
-  await b.unmount()
-  await clock.settle()
-  expect(seen.runs).toEqual(['/reload-plugins'])
-  await clock.advance(RELOAD_WAIT)
-  expect(seen.fills).toEqual(['/reload-plugins'])
-  expect(seen.toasts).toEqual(['📦 Press Enter to reload.'])
 })
 
 test('Not now hides the row for that version only', async ($, on) => {
@@ -2126,7 +1994,7 @@ test('Not now hides the row for that version only', async ($, on) => {
   // the next version shows it again
   seen.manifest = manifestOf('0.9.12')
   await clock.advance(RELOAD_CHECK_EVERY)
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.12 is installed.')
+  expect(await reloadRow($)).toBe(ROW_12)
 })
 
 test('an unreadable manifest is no change, and is read again later', async ($, on) => {
@@ -2146,15 +2014,15 @@ test('an unreadable manifest is no change, and is read again later', async ($, o
   // written whole: found at the next look
   seen.manifest = manifestOf('0.9.11')
   await clock.advance(RELOAD_CHECK_EVERY)
-  expect(await reloadRow($)).toBe('📦 Pacing 0.9.11 is installed.')
+  expect(await reloadRow($)).toBe(ROW_11)
 })
 
-test('reload off: no row, one toast per version to type the command', async ($, on) => {
+test('reload off: no row, one toast per version with the same words', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = reloadEngine(on, { config: JSON.stringify({ autoReload: false }) })
   await rowUp($, clock, seen)
-  expect(seen.toasts).toEqual(['📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.'])
+  expect(seen.toasts).toEqual([ROW_11])
   expect(await reloadRow($)).toBe(undefined)
   await clock.advance(2 * RELOAD_CHECK_EVERY)
   await $.turn.complete(turn('claude-fable-5-2', 1))
@@ -2163,7 +2031,7 @@ test('reload off: no row, one toast per version to type the command', async ($, 
   expect(seen.runs).toEqual([])
   seen.manifest = manifestOf('0.9.12')
   await clock.advance(RELOAD_CHECK_EVERY)
-  expect(seen.toasts).toEqual(['📦 Pacing 0.9.11 is installed: type /reload-plugins to load it.', '📦 Pacing 0.9.12 is installed: type /reload-plugins to load it.'])
+  expect(seen.toasts).toEqual([ROW_11, ROW_12])
   expect(await reloadRow($)).toBe(undefined)
 })
 
@@ -2254,9 +2122,11 @@ test('where the usage tool answers, the reading is a full one: its own meters go
   await $.session.measure(measure(35.6, [{ kind: 'five_hour', percentUsed: 11, resetsAt: '2026-11-13T14:59:00.000Z' }]))
   expect(seen.calls).toBe(1)
   expect(seen.runs.length).toBe(1)
-  // the tool's figures, not the engine's two windows; the turn's tokens since the last reading
+  // the tool's figures, not the engine's two windows; no --spent-usd yet: the
+  // prices come with a reading, so a turn before the first one is priced and
+  // handed over with the next
   expect(seen.runs[0].slice(2)).toEqual(['--all', '36', '--reset', RESET, '--source', 'hook', '--five', '12', '--five-reset', '2026-11-13T15:00:00.000Z',
-    ...FULL_ARGS, '--session', 'claude-fable-5-2', '--spent', '25000'])
+    ...FULL_ARGS, '--session', 'claude-fable-5-2'])
   expect(status.at(-1)).toBe('Budget: -16% · usage: Weekly 36% Fable 41%')
 })
 
@@ -2711,7 +2581,7 @@ test('the parts off an agent\'s own call: `config.mjs part <done> <total>` in Ba
   const bash = (command: string) => ({ tool: 'Bash', command })
   expect(partOf(bash('node "C:/p/skills/pacing/scripts/config.mjs" part 2 4'))).toEqual({ done: 2, total: 4, said: true })
   expect(partOf(bash('node /p/scripts/config.mjs part 0 3 && echo ok'))).toEqual({ done: 0, total: 3, said: true })
-  expect(partText({ part: partOf(bash('node x/config.mjs part 4 4')) })).toBe('part 4 of 4')
+  expect(partText({ part: partOf(bash('node x/config.mjs part 4 4')) })).toBe('step 4 of 4')
   // as the agents run it: before a command they run anyway, joined with ";"
   expect(partOf(bash('node "C:/p/skills/pacing/scripts/config.mjs" part 3 5; node --test tests/budget.test.mjs'))).toEqual({ done: 3, total: 5, said: true })
   expect(partOf(bash('cd /x/app; node "C:/p/skills/pacing/scripts/config.mjs" part 1 5; git status'))).toEqual({ done: 1, total: 5, said: true })
@@ -2731,12 +2601,12 @@ test('the parts off an agent\'s own call: `config.mjs part <done> <total>` in Ba
   expect(partText({})).toBe('')
 })
 
-test('part 2 of 4 shows where the estimate did: the row, the toasts and /pacing-status; the line keeps the count alone', async () => {
+test('step 2 of 4 shows where the estimate did: the row, the toasts and /pacing-status; the line keeps the count alone', async () => {
   const a = { ...IMPL, part: { done: 2, total: 4, said: true } }
   // the row, the 5-minute toast and the status line with the budget
-  expect(backgroundText([a], T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing 2m part 2 of 4')
-  expect(progressText([a], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 2m part 2 of 4, about 2m left.')
-  expect(progressText([a, VERIFIER], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 2m part 2 of 4; verifier "Run the suite" 30s.')
+  expect(backgroundText([a], T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing step 2 of 4, 2m')
+  expect(progressText([a], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing step 2 of 4, 2m, about 2m left.')
+  expect(progressText([a, VERIFIER], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing step 2 of 4, 2m; verifier "Run the suite" 30s.')
   // two that pass 120 with them: the part and the estimate go first, for both
   expect(progressText([a, READER], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 2m; reader "Read the test logs", searching 3m.')
   // in the line, the count alone
@@ -2766,14 +2636,14 @@ test('in a session: an agent\'s Bash call says its parts, and the toast and /pac
   expect((await second())[0]).toContain('~60%')
   await $.tool.call({ tool: 'Bash', command: 'node "/p/skills/pacing/scripts/config.mjs" part 1 3', agentId: 'ag1' } as any)
   await clock.advance(5000)
-  expect((await second())[0]).toBe('Running: reader: a task, running 3m part 1 of 3 (Haiku 5.5)')
+  expect((await second())[0]).toBe('Running: reader: a task, running step 1 of 3, 3m (Haiku 5.5)')
   expect(status.at(-1)).toBe('⏳ 1 Subagent running · Budget: 10% · usage: Weekly 10% Fable 40%')
   await $.tool.call({ tool: 'Grep', pattern: 'x', agentId: 'ag1' } as any)
   await $.tool.call({ tool: 'Bash', command: 'node "/p/skills/pacing/scripts/config.mjs" part 2 3', agentId: 'ag1' } as any)
   await clock.advance(2 * 60000 - 5000)
-  expect(seen.toasts.at(-1)).toBe('⏳ still running: reader "a task", running 5m part 2 of 3, about 3m left.')
+  expect(seen.toasts.at(-1)).toBe('⏳ still running: reader "a task", running step 2 of 3, 5m, about 3m left.')
   // no estimate shown, so no note about one
-  expect(await second()).toEqual(['Running: reader: a task, running 5m part 2 of 3 (Haiku 5.5)', 'Now: the default split'])
+  expect(await second()).toEqual(['Running: reader: a task, running step 2 of 3, 5m (Haiku 5.5)', 'Now: the default split'])
 })
 
 // ---- running agents across a reload ----
@@ -2854,7 +2724,7 @@ test('an agent the engine no longer runs at the reload is dropped; without its l
 
 test('every toast leads with the icon of its kind where "Pacing: " stood, and keeps its words after it', async () => {
   expect(ICON).toEqual({ started: '▶️', done: '✅', still: '⏳', worse: '⚠️', stop: '🔴', better: '🟢', switched: '🔁', failed: '❌',
-    updated: '🔄', waiting: '📦', compacted: '🗜️', pause: '💤' })
+    waiting: '📦', compacted: '🗜️', pause: '💤' })
   const side = { id: 's1', kind: 'session', label: 'Task s1', startedAt: T0 - 35000 } as any
   const texts: [string, string][] = [
     ['▶️', startedText(FIRST, [FIRST])],
@@ -2865,8 +2735,7 @@ test('every toast leads with the icon of its kind where "Pacing: " stood, and ke
     ['⏳', progressText([...SETS.six, ...SETS.six.map(a => ({ ...a, id: a.id + 'b' }))] as any, T0)],
     ['🔁', switchedText(REC_OPUS_HIGH, 'claude-opus-5-5', 'high')],
     ['❌', switchedText(REC_OPUS_HIGH, 'claude-fable-5-2', 'high')],
-    ['🔄', reloadedText('0.9.12')],
-    ['📦', reloadAskText('0.9.12')],
+    ['📦', reloadText('0.9.12')],
     ['🗜️', compactedText(320000, 40000)],
     ['🗜️', compactedText(0, 0)],
     ['💤', pauseNote(420000, 85 * 60000)!],
@@ -2882,15 +2751,14 @@ test('every toast leads with the icon of its kind where "Pacing: " stood, and ke
   expect(texts[1][1]).toBe('▶️ side session Task s1 is running.')
   expect(texts[2][1]).toBe('✅ implementer is done with "Auto-reload on plugin update" after 3m, 41k tokens; nothing else is running.')
   expect(texts[3][1]).toBe('✅ side session Task s1 ended its turn after 35s; nothing else is running.')
-  expect(texts[4][1]).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 2m ~60%, about 1m left.')
+  expect(texts[4][1]).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing ~60%, 2m, about 1m left.')
   expect(texts[5][1]).toBe('⏳ 12 Subagents are still running, the longest for 12m.')
   expect(texts[6][1]).toBe('🔁 this session now runs on Opus 5.5 high.')
   expect(texts[7][1]).toBe('❌ the switch did not take; the session still runs on Fable 5.2. The model menu does it: Opus 5.5, effort high.')
-  expect(texts[8][1]).toBe('🔄 updated to 0.9.12 and reloaded.')
-  expect(texts[9][1]).toBe('📦 Pacing 0.9.12 is installed: type /reload-plugins to load it.')
-  expect(texts[10][1]).toBe('🗜️ compacted from 320k to 40k tokens.')
-  expect(texts[11][1]).toBe('🗜️ compacted.')
-  expect(texts[12][1]).toBe('💤 this session is 420k tokens and sat idle 1 h 25 min, so its cache has lapsed and this turn stores it all again. After a break, /compact first is cheaper.')
+  expect(texts[8][1]).toBe('📦 Pacing 0.9.12 is installed: type /reload-plugins to load it, or open a new session.')
+  expect(texts[9][1]).toBe('🗜️ compacted from 320k to 40k tokens.')
+  expect(texts[10][1]).toBe('🗜️ compacted.')
+  expect(texts[11][1]).toBe('💤 this session is 420k tokens and sat idle 1 h 25 min, so its cache has lapsed and this turn stores it all again. After a break, /compact first is cheaper.')
   // a reading's state in one colour: stop or the model out, over the line, within it
   expect(levelIcon({ level: 'stop' })).toBe('🔴')
   expect(levelIcon({ level: 'ahead', premiumOut: true })).toBe('🔴')
@@ -2984,17 +2852,17 @@ test('the toasts with it: the 5-minute toast per agent, the start toast with the
   const m = 60000
   const hist = { ...IMPL, startedAt: T0 - 12 * m, runs: [20 * m, 20 * m, 20 * m] }
   const parts = { ...FIRST, startedAt: T0 - 12 * m, part: { done: 2, total: 4, said: true } }
-  expect(progressText([hist], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 12m ~60%, about 8m left.')
-  expect(progressText([parts], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 12m part 2 of 4, about 12m left.')
+  expect(progressText([hist], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing ~60%, 12m, about 8m left.')
+  expect(progressText([parts], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing step 2 of 4, 12m, about 12m left.')
   // no basis, or past the estimate: the toast as it was
   expect(progressText([{ ...FIRST, startedAt: T0 - 12 * m }], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 12m.')
-  expect(progressText([{ ...hist, startedAt: T0 - 25 * m }], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 25m ~95%.')
+  expect(progressText([{ ...hist, startedAt: T0 - 25 * m }], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing ~95%, 25m.')
   // several: each its own, joined by "; " so the commas stay inside one agent's part
-  const short = [{ ...IMPL, description: 'Fix it' }, { ...READER, description: 'Logs' }]
-  expect(progressText(short, T0)).toBe('⏳ still running: implementer "Fix it", editing 2m ~60%, about 1m left; reader "Logs", searching 3m ~60%, about 2m left.')
-  expect(progressText([{ ...READER, description: undefined }, { ...VERIFIER, description: undefined }], T0)).toBe('⏳ still running: reader searching 3m ~60%, about 2m left; verifier 30s.')
+  const short = [{ ...IMPL, description: 'Fix' }, { ...READER, description: 'Logs' }]
+  expect(progressText(short, T0)).toBe('⏳ still running: implementer "Fix", editing ~60%, 2m, about 1m left; reader "Logs", searching ~60%, 3m, about 2m left.')
+  expect(progressText([{ ...READER, description: undefined }, { ...VERIFIER, description: undefined }], T0)).toBe('⏳ still running: reader searching ~60%, 3m, about 2m left; verifier 30s.')
   // past 120 characters the time left goes first, for all of them, before the progress does
-  expect(progressText([parts, VERIFIER], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing 12m part 2 of 4; verifier "Run the suite" 30s.')
+  expect(progressText([parts, VERIFIER], T0)).toBe('⏳ still running: implementer "Auto-reload on plugin update", editing step 2 of 4, 12m; verifier "Run the suite" 30s.')
   for (const list of [[hist], [parts], short, [parts, VERIFIER], [hist, READER, VERIFIER], described(SETS.six as any)]) expect(chars(progressText(list as any, T0))).toBeLessThanOrEqual(MSG_MAX)
   // the start toast: the usual length of that kind of run, where three runs say one
   expect(startedText(IMPL, [IMPL])).toBe('▶️ implementer is running "Auto-reload on plugin update" on Fable 5.2 high, about 3m.')
@@ -3005,5 +2873,5 @@ test('the toasts with it: the 5-minute toast per agent, the start toast with the
   expect(chars(startedText(IMPL, [IMPL, READER, VERIFIER]))).toBeLessThanOrEqual(MSG_MAX)
   // the status line and the row above the prompt do not have it
   expect(agentPart([hist], T0, LINE_MAX)).toBe('⏳ 1 Subagent running')
-  expect(backgroundText([hist], T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing 12m ~60%')
+  expect(backgroundText([hist], T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing ~60%, 12m')
 })

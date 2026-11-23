@@ -48,7 +48,6 @@ export const ICON = {
   better: '🟢', // on or under the budget line again
   switched: '🔁', // the session's model or effort switched, or a switch on offer
   failed: '❌', // what did not happen: a switch that did not take, a compaction that did not run
-  updated: '🔄', // a new version loaded
   waiting: '📦', // a new version waiting for /reload-plugins
   compacted: '🗜️', // compacted, or a compaction on offer
   pause: '💤', // the cache lapsed, or is about to, in a pause
@@ -146,8 +145,8 @@ async function compactAskOn($) {
 // module read itself (usageOf): the per-model figure (- where the plan has
 // no such window), the context and its categories, extra usage, and the
 // session's model, as the skill's own reading hands them over. `spent`: the
-// tokens this session spent since its last reading that ran (budget.mjs
-// learns the tokens per point of the weekly meter from them).
+// dollars this session spent since its last reading that ran (spentUsd;
+// budget.mjs learns the dollars per point of the weekly meter from them).
 export const readingArgv = (root, all, reset, five, fiveReset, dry, m = null, session = null, spent = 0) => ["node", root + "/skills/pacing/scripts/budget.mjs",
   "--all", String(all), "--reset", reset, "--source", "hook",
   ...(typeof five === "number" ? ["--five", String(five), ...(fiveReset ? ["--five-reset", fiveReset] : [])] : []),
@@ -157,7 +156,7 @@ export const readingArgv = (root, all, reset, five, fiveReset, dry, m = null, se
     ...(m.categories ? ["--categories", m.categories] : []),
     ...(m.extra ? ["--extra-spent", String(m.extra.spent), "--extra-limit", String(m.extra.limit), ...(m.extra.currency ? ["--extra-currency", m.extra.currency] : [])] : []),
     ...(session ? ["--session", session] : [])] : []),
-  ...(!dry && spent > 0 ? ["--spent", String(Math.round(spent))] : []),
+  ...(!dry && Math.round(spent * 1e6) > 0 ? ["--spent-usd", String(Math.round(spent * 1e6) / 1e6)] : []),
   ...(dry ? ["--dry"] : [])];
 // the last reading budget.mjs stored for the start line (state.json), or null
 async function storedReading($) {
@@ -259,8 +258,8 @@ async function limitsNow($) {
 // One logged reading by budget.mjs, answered as its JSON line, or null. With
 // every meter where the usage tool answers; else, or should budget.mjs
 // refuse those figures, from the two windows the engine gave (`week`,
-// `five`), where it gave any. `spend` ({ total, sent }: the session's tokens
-// so far and as far as a reading took them) hands budget.mjs the tokens
+// `five`), where it gave any. `spend` ({ total, sent }: the session's dollars
+// so far and as far as a reading took them) hands budget.mjs the dollars
 // since, and counts them sent once a reading ran.
 async function runReading($, week, five, session, spend = null) {
   const total = spend ? spend.total : 0;
@@ -334,6 +333,26 @@ export const tierMix = (tokens, tierOf, prices, agentTokens = {}, agentTierOf = 
   const keys = [...byTier.keys()].sort((a, b) => (a === 'Other' ? 1 : b === 'Other' ? -1 : a - b));
   const shares = percents(keys.map(k => byTier.get(k)));
   return keys.map((k, i) => ({ tier: k, share: shares[i] })).filter(x => x.share > 0);
+};
+
+// What the session and its subagents have spent so far, in US dollars: each
+// model's input, output, cache read and cache write at its own prices. The
+// weekly meter weighs cost, not tokens (a cache read costs a tenth of an
+// input token), so budget.mjs learns its rate in dollars (--spent-usd). A
+// model the prices do not know counts at the session model's prices: most
+// likely a newer name of a model like it. With neither priced it is left out.
+export const spentUsd = (tokens, agentTokens, prices, session) => {
+  const own = session ? idOf(session, prices || {}) : null;
+  let usd = 0;
+  for (const seen of [tokens, agentTokens]) {
+    for (const [model, t] of Object.entries(seen || {})) {
+      const id = idOf(model, prices || {}) || own;
+      if (!id) continue;
+      const [pin, pout, pread, pwrite] = prices[id];
+      usd += (t.in * pin + t.out * pout + t.read * pread + t.write * pwrite) / 1e6;
+    }
+  }
+  return usd;
 };
 
 // the status line is plain text, so each tier is marked by a coloured circle:
@@ -495,9 +514,9 @@ const estText = (a, now) => (est(a, now) == null ? '' : '~' + est(a, now) + '%')
 // part is finished (its role text asks for it; the command prints one line).
 // The module sees every tool call of an agent with the agent's id, which is
 // where the step comes from, and reads the two numbers off the command.
-// Then "part 2 of 4" shows wherever the estimate "~60%" would: the line, the
-// row, the 5-minute toast, /pacing-status; and in the same place
-// in what gives way without room (first). An agent that never says a part
+// Then "step 2 of 4" (the user's word for a part) shows wherever the
+// estimate "~60%" would: the row, the 5-minute toast, /pacing-status; and in
+// the same place in what gives way without room (first). An agent that never says a part
 // keeps the estimate by time. Where an agent keeps the build's own to-do
 // list (TodoWrite, the whole list in each call) and said no part itself, the
 // finished entries of that list are its parts. TaskCreate and TaskUpdate are
@@ -515,7 +534,7 @@ export const partOf = (e, was = null) => {
   }
   return was;
 };
-export const partText = a => (a && a.part ? 'part ' + a.part.done + ' of ' + a.part.total : '');
+export const partText = a => (a && a.part ? 'step ' + a.part.done + ' of ' + a.part.total : '');
 // what shows of an agent's progress: its parts, else the estimate
 const progText = (a, now) => partText(a) || estText(a, now);
 // ---- an estimate of the time left ----
@@ -541,16 +560,17 @@ export const leftText = (a, now) => { const ms = leftOf(a, now); return ms == nu
 // how long that kind of run usually takes, for the start toast; '' without three runs to go by
 export const usualText = a => (!Array.isArray(a.runs) || a.runs.length < RUNS_NEEDED ? '' : median(a.runs) < 60000 ? 'under 1m' : 'about ' + about(median(a.runs)));
 // One agent as the user reads it: its name, its assignment (the short
-// description it was started with), what it is doing now, how long it has
-// run, its progress (the parts it said, else the estimate: `parts.est`), in
+// description it was started with), what it is doing now, its progress (the
+// parts it said, else the estimate: `parts.est`), how long it has run, in
 // that order; as much as `parts` asks for. `parts.left` adds the estimate
-// of the time left after it: reader "read the logs", searching 3m ~60%, about 2m left.
-//   with a step      reader: read the logs, searching 3m ~60%
+// of the time left after it: reader "read the logs", searching ~60%, 3m, about 2m left.
+//   with a step      reader: read the logs, searching step 2 of 4, 3m
 //   without one      reader is running: read the logs 3m
-//   no assignment    reader searching 3m ~60%, reader is running 3m
+//   no assignment    reader searching ~60%, 3m, reader is running 3m
+// Without the progress the time follows the words with a space: searching 3m.
 // `parts.task` is how many characters of the assignment show (cut with an
 // ellipsis past it; 0 or absent: none). `parts.quote` is the toasts' form,
-// which says "running" itself: reader "read the logs", searching 3m ~60%.
+// which says "running" itself: reader "read the logs", searching ~60%, 3m.
 // A side session's name is its short title, and it has no assignment beside it.
 const nameOf = a => (a.kind === 'session' ? a.label || 'side session' : roleOf(a.type));
 // an assignment longer than this is cut wherever it shows; one cut shorter
@@ -566,7 +586,9 @@ const detail = (a, now, parts) => {
     : step ? nameOf(a) + (task ? ': ' + task + ', ' : ' ') + step
     : nameOf(a) + (parts.time ? ' is running' : '') + (task ? ': ' + task : '');
   const left = parts.left ? leftText(a, now) : '';
-  return [head, parts.time ? dur(now - a.startedAt) : '', parts.est ? progText(a, now) : ''].filter(Boolean).join(' ') + (left ? ', ' + left : '');
+  const prog = parts.est ? progText(a, now) : '';
+  const time = parts.time ? dur(now - a.startedAt) : '';
+  return head + (prog ? ' ' + prog : '') + (time ? (prog ? ', ' : ' ') + time : '') + (left ? ', ' + left : '');
 };
 // What shows of every agent where its assignment shows too (the toasts and
 // the row above the prompt), from all of it to the names alone: for all of
@@ -636,7 +658,7 @@ export const doneText = (a, ms, tokens, list) => {
 };
 // the 5-minute toast and the row: one line each, the same order of what goes.
 // The toast: "⏳ still running: implementer "Auto-reload on plugin
-// update", editing 12m ~60%.", several joined by "; " while an assignment
+// update", editing ~60%, 12m.", several joined by "; " while an assignment
 // shows and by ", " once none does.
 export const progressText = (agents, now) => {
   const longest = dur(now - Math.min(...agents.map(a => a.startedAt)));
@@ -1141,62 +1163,34 @@ export const lineOf = (j, model, tokens, agentTokens, now, full = false, agents 
   return statusText(j, tierMix(tokens, tierOf, prices, agentTokens, j.agentTierOf), self, now, agents, max);
 };
 
-// ---- a new version: the Reload row ----
+// ---- a new version: the new-version row ----
 // The desktop app syncs installed plugins about every 20 minutes and
 // replaces this plugin's files in place; an open session runs the old code
-// until /reload-plugins. The module offers it:
+// until /reload-plugins. The module says so:
 //   it knows the version it was loaded as (plugin.json, read at load) and
 //   reads the file again RELOAD_AFTER_TURN after a turn ends and every
 //   RELOAD_CHECK_EVERY: one $.fs.read, no process, no model call;
 //   another version there, in a session a person has typed in: a row above
-//   the prompt at once, "📦 Pacing 0.9.11 is installed." with Reload and Not
-//   now, once per version (the band hides it during a turn and under a
-//   survey). Nothing runs by itself: run from a timer, the command never
-//   answered live (0.9.11 to 0.9.13).
-// Reload: /reload-plugins as if typed ($.command.run), raced against
-// RELOAD_WAIT; one attempt at a time, a press while one is open does nothing.
-//   it ran: the copy the reload brings says so at its load, "🔄 updated to
-//   0.9.11 and reloaded." (a mark the copy that pressed left in $.store
-//   under the session's id tells it; the mark goes once it is said);
-//   refused over a remote connection (/remote/ in its text or error): a
-//   toast to reload from the computer, and the row again;
-//   any other refusal, or no answer in RELOAD_WAIT: /reload-plugins in the
-//   prompt box and "📦 Press Enter to reload.", so one key is left (the
-//   mark stays for the reload that key runs); where even the box cannot be
-//   filled, the line to type it.
-// A reload starts changed modules only: a version that left this file as it
-// was keeps this copy running. So RELOAD_SETTLE after the command ran, the
-// copy that pressed looks once more. Its own file on disk as it was loaded:
-// it is the new version's code, and says "updated". Its file changed and it
-// still runs: the reload did not take, and the row shows again.
+//   the prompt at once, "📦 Pacing 0.9.16 is installed: type /reload-plugins
+//   to load it, or open a new session." with Not now, once per version (the
+//   band hides it during a turn and under a survey).
+// Nothing runs /reload-plugins from here, and nothing fills the prompt: run
+// from a timer the command never answered live (0.9.11 to 0.9.13), and a
+// Reload button (0.9.14, 0.9.15) met "/reload-plugins isn't available over
+// a remote connection in this session." on every press there. The person
+// types it, or opens a new session, which loads the new version.
 // The row stays until this copy is replaced or Not now is pressed (that
 // version only; the next one shows it again).
 // A manifest that does not read or names no version (half-written during a
 // sync) is no change, and is read again at the next look. A side session
 // nobody types in is left alone: it loads the new version at its next start.
-// `/pacing reload off`: no row, one toast per version to type the command.
+// `/pacing reload off`: no row, one toast per version with the same text.
 export const RELOAD_CHECK_EVERY = 5 * 60 * 1000;
 export const RELOAD_AFTER_TURN = 2 * 1000;
-export const RELOAD_SETTLE = 10 * 1000;
-// a pressed Reload that has not answered in this long fills the prompt box
-export const RELOAD_WAIT = 3 * 1000;
 // the version a manifest's text names, or null
 export const versionOf = text => { try { const v = JSON.parse(text).version; return typeof v === 'string' && v ? v : null; } catch { return null; } };
-export const reloadedText = version => ICON.updated + ' updated to ' + version + ' and reloaded.';
-export const reloadAskText = version => ICON.waiting + ' Pacing ' + version + ' is installed: type /reload-plugins to load it.';
-export const reloadRowText = version => ICON.waiting + ' Pacing ' + version + ' is installed.';
-export const RELOAD_ENTER = ICON.waiting + ' Press Enter to reload.';
-export const RELOAD_REMOTE = ICON.waiting + ' Reload from the computer: /reload-plugins does not run over a remote connection.';
-// whether a command's answer, or the error it threw, says it does not run
-// over a remote connection ("/reload-plugins isn't available over a remote
-// connection in this session.", seen live)
-export const remoteRefused = x => {
-  if (!x) return false;
-  if (typeof x === 'string') return /remote/i.test(x);
-  const err = x.error;
-  return [x.text, x.message, typeof err === 'string' ? err : err && err.message].some(t => typeof t === 'string' && /remote/i.test(t));
-};
-// whether the reload row is on (config.json's autoReload; on unless false)
+export const reloadText = version => ICON.waiting + ' Pacing ' + version + ' is installed: type /reload-plugins to load it, or open a new session.';
+// whether the new-version row is on (config.json's autoReload; on unless false)
 async function reloadOn($) {
   try {
     const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
@@ -1204,43 +1198,9 @@ async function reloadOn($) {
     return JSON.parse(await $.fs.read(home + '/.claude/pacing/config.json')).autoReload !== false;
   } catch { return true; }
 }
-// the version plugin.json names now, and this module's own text; null when unreadable
+// the version plugin.json names now; null when unreadable
 async function versionOnDisk($) { try { return versionOf(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')); } catch { return null; } }
-async function codeOnDisk($) { try { return await $.fs.read($.plugin.root + '/hooks/readings.mjs'); } catch { return null; } }
-// where this session's mark is kept in the store, or null where the engine gives no id
-async function reloadKey($) { try { const id = await $.session.id(); return id ? 'reload:' + id : null; } catch { return null; } }
 function say($, text) { try { $.ui.toast(text, { timeoutMs: TOAST_LONG }); } catch { /* an engine without toasts */ } }
-async function unmark($, key) { if (key) { try { await $.store.delete(key); } catch { /* no store */ } } }
-// the Reload row for a version, unless Not now was pressed for it
-function offerReload($, rl, version) {
-  if (rl.dismissed.has(version)) return;
-  rl.row = version;
-  redraw($);
-}
-// /reload-plugins in the prompt box for the person to send, and the toast
-// that says so; where the box cannot be filled, the line to type it
-async function fillReload($, version) {
-  try {
-    const r = await $.prompt.fill({ text: '/reload-plugins', mode: 'replace' });
-    if (r && r.isFilled === false) throw new Error('not filled');
-    say($, RELOAD_ENTER);
-  } catch { say($, reloadAskText(version)); }
-}
-// /reload-plugins as if typed, raced against RELOAD_WAIT: { result }, { error }
-// or { silent: true }. The run may never answer the copy it unloads.
-function runReload($) {
-  return new Promise(resolve => {
-    let done = false, timer = null;
-    const end = v => {
-      if (done) return;
-      done = true;
-      try { if (timer) timer.cancel(); } catch { /* fired already */ }
-      resolve(v);
-    };
-    try { timer = $.clock.after(RELOAD_WAIT, () => end({ silent: true })); } catch { /* no timer: the answer alone */ }
-    Promise.resolve().then(() => $.command.run({ command: 'reload-plugins' })).then(result => end({ result }), error => end({ error }));
-  });
-}
 // one look at the version on disk; `rl` is the copy's memory (see register).
 // Never throws: a look is a convenience, and the next one tries again.
 async function look($, rl) {
@@ -1249,68 +1209,17 @@ async function look($, rl) {
   try {
     const disk = await versionOnDisk($);
     if (!disk) return;
-    const key = await reloadKey($);
-    let mark;
-    if (key) { try { mark = await $.store.get(key); } catch { /* no store */ } }
-    if (rl.loaded === null) {
-      // this copy's first look: what it was loaded as. A mark here is the
-      // reload this session asked for, which brought this copy.
-      rl.loaded = disk;
-      rl.code = await codeOnDisk($);
-      if (mark) { await unmark($, key); say($, reloadedText(disk)); }
-      return;
-    }
-    if (rl.asked) {
-      // a pressed Reload ran and this copy still runs (before that: waiting)
-      if (!rl.asked.ran) return;
-      const { version } = rl.asked;
-      rl.asked = null;
-      // the mark gone: a fresh copy has taken over and said so
-      if (key && !mark) return;
-      await unmark($, key);
-      if (rl.code !== null && (await codeOnDisk($)) === rl.code) { rl.loaded = version; rl.row = null; redraw($); say($, reloadedText(version)); }
-      else offerReload($, rl, version);
-      return;
-    }
+    // this copy's first look: what it was loaded as
+    if (rl.loaded === null) { rl.loaded = disk; return; }
     if (disk === rl.loaded || disk === rl.acted || !rl.typed()) return;
     rl.acted = disk;
     // off: one toast for this version, no row
-    if (!(await reloadOn($))) { say($, reloadAskText(disk)); return; }
-    offerReload($, rl, disk);
-  } catch { /* the next look */ } finally { rl.looking = false; }
-}
-// Reload pressed in the row: the mark the copy it brings finds in the store,
-// then the run (see "a new version"). One at a time.
-async function pressReload($, rl, version) {
-  if (rl.pressed) return;
-  rl.pressed = true;
-  try {
-    rl.row = null;
+    if (!(await reloadOn($))) { say($, reloadText(disk)); return; }
+    // the row for this version, unless Not now was pressed for it
+    if (rl.dismissed.has(disk)) return;
+    rl.row = disk;
     redraw($);
-    const key = await reloadKey($);
-    let at = Date.now();
-    try { at = await $.clock.now(); } catch { /* the system's clock */ }
-    rl.asked = { version, ran: false };
-    if (key) { try { await $.store.set(key, { version, at }); } catch { /* no store: this copy's own memory */ } }
-    const got = await runReload($);
-    const failed = 'error' in got || commandFailed(got.result);
-    if (!got.silent && !failed && !remoteRefused(got.result)) {
-      // it ran and this copy still runs: one more look says which it is
-      rl.asked.ran = true;
-      try { $.clock.after(RELOAD_SETTLE, () => { look($, rl); }); } catch { /* the slow timer looks */ }
-      return;
-    }
-    rl.asked = null;
-    if (remoteRefused(got.error) || remoteRefused(got.result)) {
-      // nothing will run from here: the row again, for the computer
-      await unmark($, key);
-      say($, RELOAD_REMOTE);
-      offerReload($, rl, version);
-      return;
-    }
-    // refused otherwise, or no answer: one key left
-    await fillReload($, version);
-  } finally { rl.pressed = false; }
+  } catch { /* the next look */ } finally { rl.looking = false; }
 }
 
 /** @type {import('claude-code').Register} */
@@ -1320,7 +1229,8 @@ export const register = on => {
   // tokens per model id: the session's own turns, and its subagents'
   const tokens = {};
   const agentTokens = {};
-  // all of them in one sum, and how much of it a reading has handed budget.mjs
+  // all of them in one sum, in dollars (spentUsd), and how much of it a
+  // reading has handed budget.mjs
   const spend = { total: 0, sent: 0 };
   let last = null;
   let reading = null;
@@ -1380,13 +1290,12 @@ export const register = on => {
     list: runningAgents, lineNow, reading: () => reading };
   const stopTick = () => stopTickOf(st);
 
-  // the Reload row at a new version (see "a new version"): what the looks
-  // read and write. The version and the text this copy was loaded as, the
-  // version last offered (row or toast), a pressed Reload's request while it
-  // is open ({ version, ran }), whether a press is under way, the timers,
-  // the version the row offers (null: none), the versions Not now dismissed
-  // and whether a person has typed in this session.
-  const rl = { loaded: null, code: null, acted: null, asked: null, pressed: false, looking: false, timer: null, afterTurn: null, row: null, dismissed: new Set(),
+  // the new-version row (see "a new version"): what the looks read and
+  // write. The version this copy was loaded as, the version last offered
+  // (row or toast), the timers, the version the row offers (null: none),
+  // the versions Not now dismissed and whether a person has typed in this
+  // session.
+  const rl = { loaded: null, acted: null, looking: false, timer: null, afterTurn: null, row: null, dismissed: new Set(),
     typed: () => attended };
 
   // An Agent call: its effort, which agent.spawn does not carry, and the
@@ -1477,7 +1386,7 @@ export const register = on => {
   // runs, under a survey, and over a subagent's transcript.
   // One action row at a time, by urgency: a switch away from a model that is
   // out or held, then the offer to compact, then a calm switch (another
-  // model, or one step less effort), then the Reload row (see "a new
+  // model, or one step less effort), then the new-version row (see "a new
   // version"). The background agents' row goes under it.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const p = e.props || {};
@@ -1543,10 +1452,7 @@ export const register = on => {
     if (!offer && rl.row) {
       const version = rl.row;
       const reloadRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
-        Text({ dimColor: true, children: reloadRowText(version) }),
-        Button({ key: 'pacing-reload', label: 'Reload', variant: 'secondary', onPress: () => {
-          pressReload($, rl, version).catch(() => { /* said already, or the next look */ });
-        } }),
+        Text({ dimColor: true, children: reloadText(version) }),
         Button({ key: 'pacing-reload-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { rl.dismissed.add(version); rl.row = null; redraw($); } }),
       ] });
       return stack(reloadRow);
@@ -1867,7 +1773,9 @@ export const register = on => {
       t.out += u.output_tokens || 0;
       t.read += u.cache_read_input_tokens || 0;
       t.write += u.cache_creation_input_tokens || 0;
-      spend.total += (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      // the whole session's again, at the prices of the last reading: a turn
+      // before any reading is priced at the next turn, and nothing is lost
+      spend.total = spentUsd(tokens, agentTokens, reading && reading.prices, sessionModel);
     }
     // a subagent's run ended: one toast, and the line without it
     if (e.agentId && agents.has(e.agentId)) {
