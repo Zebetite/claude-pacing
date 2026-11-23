@@ -194,6 +194,11 @@ const checkRate = () => {
   if (rise >= 5 && v.usd > 0) return learned(v.usd / rise, 'from ' + points + ' this week', rise);
   if (carried) return learned(carried, 'carried from last week', null);
   if (rise >= 2 && v.usd > 0) return learned(v.usd / rise, 'from only ' + points + ' so far', rise);
+  // before that, budget.mjs's estimate from this week's transcripts
+  const e = v.estimate;
+  if (e && fin(e.usd) && e.usd > 0 && fin(e.points) && e.points > 0) {
+    return { status: 'ok', found: 'estimated, ' + usdText(e.usd / e.points) + ' per point, from this week\'s transcripts; learning it: ' + points + ' so far', learned: false, estimated: true, usdPerPoint: Math.round(e.usd / e.points * 1e4) / 1e4, points: rise };
+  }
   return { status: 'ok', found: 'not learned yet: ' + points + ' this week so far', learned: false, points: rise };
 };
 

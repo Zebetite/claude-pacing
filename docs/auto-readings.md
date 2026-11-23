@@ -799,3 +799,36 @@ level in the status line.
   progress, `editing 12m` as before. What gives way first is unchanged.
   The user-visible `part 2 of 4` is now `step 2 of 4`; the command stays
   `config.mjs part <done> <total>`.
+
+## An estimate before the rate is learned, Switch runs /model (0.9.17)
+
+- **Seen live:** after the reload to 0.9.16 the status line read
+  `Budget: 22%` for hours: rate.json started afresh at weekly 38 % with
+  $0, and the first rate needs a 2-point rise.
+- **The estimate.** estimate.mjs prices this week's local transcripts
+  (`~/.claude/projects/**/*.jsonl`, subagents' included; each message id
+  once; lines outside reset − 7 days … now left out) at the same four
+  prices as readings.mjs `spentUsd`. Live: $249 over 2,399 responses in
+  34 files, 2.4 s, $6.56 per point at 38 points.
+- **When.** Only while no rate is learned (this week's 5 points, the
+  carried one, this week's 2 points), from 2 points on the meter, at most
+  once an hour; `--dry` uses a stored one only. rate.json keeps it as
+  `estimate: { usd, points, at }`; a new week starts without it.
+- **The words.** The JSON says `rateFrom` (`week`, `carried`, `early`,
+  `estimate`); the status line marks an estimate `~`
+  (`Budget tokens: ~36M`), and drops the mark once a rate is learned.
+  Doctor: `estimated, $6.5632 per point, from this week's transcripts;
+  learning it: 1 point so far`. saved.mjs uses the estimate the same way.
+- **Errs low.** Use on another device or the web raises the meter without
+  being in these files, so a point looks cheaper and less shows left.
+- **Switch runs /model.** Seen live: a row offering another model ran
+  `/effort` alone. The offer went by the last turn's own model, the press
+  by `$.session.model()`, which already named the target while the turns
+  ran on another. The offer now carries `from` (the model it saw) and the
+  press goes by it: `/model` whenever the offer was for another model,
+  then `/effort`.
+- **Compact now says why.** Seen live: a press with no turn running was
+  told `a compaction cannot start while a turn runs`: every rejection of
+  `$.session.compact` got those words. Now the toast gives the engine's own
+  reason (`❌ the compaction did not start: <reason>. /compact is in the
+  box: press Enter to send it.`) and the box holds `/compact`.

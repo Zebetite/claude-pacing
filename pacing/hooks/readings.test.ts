@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -171,6 +171,9 @@ test('what is left in tokens: K, M from a million, the sign in front, 0K under a
   expect(budgetText({ line: 20, all: 10, left: { points: 10, tokens: 850000 } })).toBe('Budget tokens: 850K')
   expect(budgetText({ line: 20, all: 21.5, left: { points: -1.5, tokens: -120000 } })).toBe('Budget tokens: -120K')
   expect(budgetText({ line: 20, all: 20, left: { points: 0, tokens: 0 } })).toBe('Budget tokens: 0K')
+  // an estimate from this week's transcripts, before a rate is learned
+  expect(budgetText({ line: 60, all: 38, rateFrom: 'estimate', left: { points: 22, tokens: 36100000 } })).toBe('Budget tokens: ~36.1M')
+  expect(budgetText({ line: 60, all: 38, rateFrom: 'early', left: { points: 22, tokens: 36100000 } })).toBe('Budget tokens: 36.1M')
 })
 
 test('until a rate is learned, the points of the week; a dash only with no figure at all', () => {
@@ -737,6 +740,32 @@ const bandText = async ($: any) => {
   await ui.unmount()
   return { text: t?.text as string | undefined }
 }
+
+test('Compact now that the engine refuses: its own reason in the toast, /compact in the box', async ($, on) => {
+  engine(on)
+  big(on)
+  const toasts: string[] = [], fills: string[] = []
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  on('fs.read', () => ({ value: '{}' }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
+  on('session.compact', () => { throw new Error('Not enough messages to compact.') })
+  on('prompt.fill', (_: unknown, e: any) => (fills.push(e.text), { isFilled: true }))
+  on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 320000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-compact' })
+  await ui.unmount()
+  expect(fills).toEqual(['/compact'])
+  // the engine's own words, whatever they are (the test engine words its own refusal)
+  expect(toasts.at(-1)).toMatch(/^❌ the compaction did not start: .+\. \/compact is in the box: press Enter to send it\.$/)
+  expect(toasts.at(-1)).not.toContain('turn runs')
+  expect(compactFailedText('Not enough messages to compact.', true)).toBe('❌ the compaction did not start: Not enough messages to compact. /compact is in the box: press Enter to send it.')
+  expect(compactFailedText(undefined, false)).toBe('❌ the compaction did not start. Type /compact to run it.')
+  expect(compactFailedText('x'.repeat(200), true)).toHaveLength('❌ the compaction did not start: '.length + 120 + '. /compact is in the box: press Enter to send it.'.length)
+})
 
 test('suggest: from 300 000 tokens, a calm row with Compact now; it compacts with the instructions and says the sizes', async ($, on) => {
   engine(on)
@@ -1402,6 +1431,22 @@ test('Fable out: the row in the warning colour; Switch runs /model and /effort a
   expect(seen.runs).toEqual(['/model claude-opus-5-5', '/effort high'])
   expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.')
   expect(await switchText($)).toBe(undefined)
+})
+
+test('Switch goes by the model the offer saw: a session read that already names the target still runs /model', async ($, on) => {
+  engine(on)
+  on('process.run', () => ({ value: switchReading({ premiumHeld: true, recommend: REC_OPUS_HIGH }) }))
+  // the session read says Opus 5.5, the turns run on Fable 5.2
+  const seen = switchEngine(on, { model: 'claude-opus-5-5', effort: 'medium' })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount(BAND)
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('⚠️ Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 high; Fable stays for hard tasks.')
+  await ui.press({ key: 'pacing-switch' })
+  await ui.unmount()
+  expect(seen.runs).toEqual(['/model claude-opus-5-5', '/effort high'])
+  expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.')
 })
 
 test('once per suggestion: Not now holds until the recommendation changes', async ($, on) => {

@@ -2,6 +2,8 @@
 // tier sheet, the premium meter, the context line and the trend.
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { sandbox, RESET, levelOf, lineOf, block, sheetRows, routeOf } from './helpers.mjs';
 
 const sb = sandbox();
@@ -588,6 +590,44 @@ describe('rate.json: dollars per point of the weekly meter', () => {
       assert.equal(j.usdPerPoint, null);
       assert.equal(j.tokensPerPoint, undefined);
       assert.deepEqual(j.left, { points: 10, tokens: null });
+    } finally { s.cleanup(); }
+  });
+  test('before a rate is learned, an estimate from this week\'s transcripts; learning replaces it', () => {
+    const s = sandbox();
+    try {
+      // the week runs from 2026-11-12 12:00 to RESET; the reading is at 11-13 12:00
+      const line = (id, model, t, usage) => JSON.stringify({ type: 'assistant', timestamp: t, requestId: 'r' + id, message: { id, model, usage } });
+      const dir = path.join(s.home, '.claude', 'projects', 'X--proj');
+      fs.mkdirSync(path.join(dir, 'sess', 'subagents'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'sess.jsonl'), [
+        line('a', 'claude-opus-5-5', '2026-11-13T10:00:00Z', { input_tokens: 1e6 }), // $4
+        line('a', 'claude-opus-5-5', '2026-11-13T10:00:00Z', { input_tokens: 1e6 }), // the same response again: once
+        line('b', 'claude-fable-5-1', '2026-11-13T11:00:00Z', { output_tokens: 1e5 }), // an older Fable at Fable's price: $4
+        line('c', 'claude-opus-5-5', '2026-11-11T10:00:00Z', { input_tokens: 1e6 }), // the week before
+        line('d', 'claude-opus-5-5', '2026-11-13T13:00:00Z', { input_tokens: 1e6 }), // after the reading
+        JSON.stringify({ type: 'user', timestamp: '2026-11-13T10:00:00Z', message: { content: 'usage' } }),
+        '{not json',
+      ].join('\n') + '\n');
+      fs.writeFileSync(path.join(dir, 'sess', 'subagents', 'agent-1.jsonl'),
+        line('e', 'claude-sonnet-5-5', '2026-11-13T10:30:00Z', { input_tokens: 5e5, cache_read_input_tokens: 1e7 }) + '\n'); // $1 + $1
+      // under 2 points: no estimate
+      const none = reading(s, 1, null, { dry: true });
+      assert.equal(none.rateFrom, null);
+      const j = reading(s, 10);
+      // $10 over 10 points; 10 points left at Fable 5.2's $8 per million input
+      assert.equal(j.usdPerPoint, 1);
+      assert.equal(j.rateFrom, 'estimate');
+      assert.deepEqual(j.left, { points: 10, tokens: 1250000 });
+      assert.deepEqual(rate(s).estimate, { usd: 10, points: 10, at: Date.parse('2026-11-13T12:00:00Z') });
+      // priced afresh at most once an hour: a new response is not seen yet
+      fs.appendFileSync(path.join(dir, 'sess.jsonl'), line('f', 'claude-opus-5-5', '2026-11-13T11:30:00Z', { input_tokens: 2.5e6 }) + '\n'); // $10
+      assert.equal(reading(s, 11, 0.4, { now: '2026-11-13T12:30:00Z' }).usdPerPoint, 1);
+      // an hour on: f's $10 and d's $4 (13:00, now before the reading) are in
+      assert.equal(reading(s, 11, 0, { now: '2026-11-13T13:30:00Z' }).usdPerPoint, Math.round(24 / 11 * 1e4) / 1e4);
+      // a rise of 2 points learns the week's own rate: $0.4 + $0.6 over 2 points
+      const k = reading(s, 12, 0.6, { now: '2026-11-13T13:40:00Z' });
+      assert.equal(k.rateFrom, 'early');
+      assert.equal(k.usdPerPoint, 0.5);
     } finally { s.cleanup(); }
   });
   test('--spent-usd adds up; a rise of 2 points gives a first rate, 5 points the week\'s', () => {

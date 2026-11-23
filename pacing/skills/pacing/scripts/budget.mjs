@@ -35,6 +35,7 @@ import path from 'node:path';
 import { MODELS, EFFORTS, relabel, checkConfig } from './models.mjs';
 import { loadConfig, projectRoot, markSession } from './paths.mjs';
 import { updateFile, updateJson } from './safe.mjs';
+import { weekSpend } from './estimate.mjs';
 
 const dataDir = path.join(os.homedir(), '.claude', 'pacing');
 fs.mkdirSync(dataDir, { recursive: true });
@@ -899,7 +900,11 @@ const needFull = !(auto && premium && premTop) || premOut || fullAuto ? null
 //      Use by sessions without the hooks module (another device, the web)
 //      raises the meter with nothing counted, so the rate errs low and the
 //      figure shows less left than there is. Rate now: this week's from a
-//      rise of 5 points, else the carried one, else this week's from 2 points.
+//      rise of 5 points, else the carried one, else this week's from 2 points,
+//      else an estimate: what this week's local transcripts cost (estimate.mjs)
+//      over the points the meter shows, kept in rate.json's `estimate` and
+//      priced afresh at most once an hour while nothing better is learned,
+//      from 2 points on. rateFrom says which (week, carried, early, estimate).
 //      A damaged or missing file is an empty one, and so is one without v: 2
 //      (0.9.15 and before learned raw tokens per point: dropped); a failed
 //      write is no error. ----
@@ -930,11 +935,34 @@ try {
   }
 } catch { /* the rate stays as computed, or unknown */ }
 const rateRise = rateState ? rateState.to - rateState.from : 0;
-const rate = !rateState ? null
-  : rateRise >= RISE_MIN && rateState.usd > 0 ? rateState.usd / rateRise
-    : rateState.carried ? rateState.carried
-      : rateRise >= RISE_EARLY && rateState.usd > 0 ? rateState.usd / rateRise
+const rateFrom = !rateState ? null
+  : rateRise >= RISE_MIN && rateState.usd > 0 ? 'week'
+    : rateState.carried ? 'carried'
+      : rateRise >= RISE_EARLY && rateState.usd > 0 ? 'early'
         : null;
+let rate = rateFrom === 'carried' ? rateState.carried : rateFrom ? rateState.usd / rateRise : null;
+let rateSource = rateFrom;
+const ESTIMATE_MS = HOUR, ESTIMATE_MIN = 2;
+const estOk = e => !!e && typeof e === 'object' && fin(e.usd) && e.usd > 0 && fin(e.points) && e.points > 0 && fin(e.at);
+if (rate === null && rateState && used >= ESTIMATE_MIN) {
+  let est = estOk(rateState.estimate) ? rateState.estimate : null;
+  if (!opt.dry && (!est || now.getTime() - est.at >= ESTIMATE_MS || now.getTime() < est.at)) {
+    try {
+      const w = weekSpend({ since: reset.getTime() - 7 * DAY, until: now.getTime() });
+      if (w.usd > 0) {
+        est = { usd: Math.round(w.usd * 1e4) / 1e4, points: used, at: now.getTime() };
+        // into the file as it stands, if it is still this week's
+        updateFile(rateFile, t => {
+          let cur;
+          try { cur = JSON.parse(t); } catch { return null; }
+          if (!cur || cur.v !== RATE_V || Math.abs(Date.parse(cur.reset) - reset) > HOUR) return null;
+          return JSON.stringify({ ...cur, estimate: est }) + '\n';
+        });
+      }
+    } catch { /* no estimate */ }
+  }
+  if (est) { rate = est.usd / est.points; rateSource = 'estimate'; }
+}
 // what a full-price token costs: an input token of the session's model, else
 // of tier 1 on the ladder in force (of the configured ladder when none is left)
 const fullPrice = (() => {
@@ -982,7 +1010,7 @@ if (auto) {
     // what is left under today's line, in points of the week and in
     // full-price tokens of the session's model (the dollars it is worth, at
     // that model's input price)
-    usdPerPoint: rate !== null ? Math.round(rate * 1e4) / 1e4 : null,
+    usdPerPoint: rate !== null ? Math.round(rate * 1e4) / 1e4 : null, rateFrom: rateSource,
     left: { points: r1(budget - used), tokens: rate !== null && fullPrice ? Math.round((budget - used) * rate / fullPrice) : null },
     tierOf, agentTierOf, tierNames, prices,
     premium: prem === null ? null : r1(prem), premiumOut: premOut, premiumLabel: premLabel,

@@ -76,6 +76,9 @@ if (rs && typeof rs === 'object' && rs.v === 2) {
   const rise = fin(rs.from) && fin(rs.to) ? rs.to - rs.from : 0;
   const usd = fin(rs.usd) ? rs.usd : 0;
   rate = rise >= 5 && usd > 0 ? usd / rise : fin(rs.carried) && rs.carried > 0 ? rs.carried : rise >= 2 && usd > 0 ? usd / rise : null;
+  // else budget.mjs's estimate from this week's transcripts
+  const e = rs.estimate;
+  if (rate === null && e && fin(e.usd) && e.usd > 0 && fin(e.points) && e.points > 0) rate = e.usd / e.points;
 }
 
 // ---- prices ----

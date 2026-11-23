@@ -129,6 +129,14 @@ export const nowText = (tokens, lapsed) => (lapsed
 export const compactedText = (before, after) => (before && after
   ? ICON.compacted + ' compacted from ' + kTok(before) + ' to ' + kTok(after) + ' tokens.'
   : ICON.compacted + ' compacted.');
+// Compact now that the engine refused: its reason (one line, 120 characters
+// at most), and /compact in the box to send, where the box took it
+export const compactFailedText = (reason, filled) => {
+  const why = typeof reason === 'string' ? reason.replace(/\s+/g, ' ').trim() : '';
+  const short = why.length > 120 ? why.slice(0, 119) + '…' : why;
+  return ICON.failed + ' the compaction did not start' + (short ? ': ' + short.replace(/[.\s]+$/, '') : '') + '. '
+    + (filled ? '/compact is in the box: press Enter to send it.' : 'Type /compact to run it.');
+};
 // the setting in config.json: on unless it says false
 export const compactAskOf = text => { try { return JSON.parse(text).compactAsk !== false; } catch { return true; } };
 // read when an offer is due, so a change applies at once; any failure: on
@@ -408,9 +416,10 @@ export const levelPhrase = level => PHRASE[level] || level || '';
 // sessions spent ("Budget tokens: 850K", "1.2M" from a million, "-120K"
 // past the line, "0K" under a thousand either way). The rate errs low (use
 // on another device raises the meter with no tokens counted), so the figure
-// shows less than there is. Until a rate is learned, the points of the week,
-// without the word tokens ("Budget: 5%"); "Budget: -" only with no figure at
-// all.
+// shows less than there is. Before a rate is learned, an estimate from this
+// week's transcripts (rateFrom 'estimate'), marked "~": "Budget tokens: ~36M".
+// With neither, the points of the week, without the word tokens
+// ("Budget: 5%"); "Budget: -" only with no figure at all.
 export const tokensText = n => {
   const a = Math.abs(n);
   if (a < 1000) return '0K';
@@ -419,7 +428,7 @@ export const tokensText = n => {
 };
 export const budgetText = j => {
   const left = j && j.left && typeof j.left === 'object' ? j.left : {};
-  if (typeof left.tokens === 'number') return 'Budget tokens: ' + tokensText(left.tokens);
+  if (typeof left.tokens === 'number') return 'Budget tokens: ' + (j.rateFrom === 'estimate' ? '~' : '') + tokensText(left.tokens);
   const points = typeof left.points === 'number' ? left.points : j && typeof j.line === 'number' && typeof j.all === 'number' ? j.line - j.all : null;
   return 'Budget: ' + (points !== null ? Math.round(points) + '%' : '-');
 };
@@ -1046,7 +1055,8 @@ export const switchOffer = (j, curModel, curEffort) => {
   if (!j || typeof curModel !== 'string' || !curModel) return null;
   const rec = j.recommend, prem = j.premiumModelId, name = j.premiumLabel || 'The per-model model';
   const onPrem = sameModel(curModel, prem);
-  const make = (kind, t, text) => ({ kind, model: t.model, label: t.label, effort: t.effort, text, urgent: kind === 'out' || kind === 'held',
+  // from: the model the offer saw the session on, which the press goes by
+  const make = (kind, t, text) => ({ kind, from: curModel, model: t.model, label: t.label, effort: t.effort, text, urgent: kind === 'out' || kind === 'held',
     icon: kind === 'out' ? ICON.stop : kind === 'held' ? ICON.worse : ICON.switched, key: kind + ':' + t.model + ':' + t.effort });
   if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumOut)
     return make('out', rec, name + ' is out until the reset. Switch this session to ' + rec.label + ' ' + rec.effort + '.');
@@ -1408,7 +1418,12 @@ export const register = on => {
           redraw($);
           let ran = true, was = null, modelAsked = false, modelRan = null;
           try {
-            was = ss.model || (await $.session.model());
+            // the model the offer saw (the last turn's own), not $.session.model():
+            // live, that named the target while the turns ran on another, and a
+            // press ran /effort alone. A switch the offer made for the model
+            // runs /model whatever a read now says; /model to the model it
+            // runs on already does no harm.
+            was = target.from || ss.model || (await $.session.model());
             if (!sameModel(was, target.model)) {
               modelAsked = true;
               modelRan = await $.command.run({ command: 'model', args: target.model });
@@ -1478,8 +1493,13 @@ export const register = on => {
             forget();
             contextTokens = (r && r.tokensAfter) || null;
           }
-        } catch {
-          $.ui.toast(ICON.failed + ' a compaction cannot start while a turn runs. Type /compact once it ends.', { timeoutMs: TOAST_LONG });
+        } catch (err) {
+          // the engine rejects while a turn runs, and for other reasons too: a
+          // live press with no turn running was told a turn ran. So the toast
+          // gives the engine's own reason, and /compact goes in the box to send.
+          let filled = false;
+          try { const f = await $.prompt.fill({ text: '/compact', mode: 'replace' }); filled = !f || f.isFilled !== false; } catch { /* the toast alone */ }
+          $.ui.toast(compactFailedText(err && err.message, filled), { timeoutMs: TOAST_LONG });
         }
       } }),
       Button({ key: 'pacing-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => {
