@@ -625,9 +625,13 @@ describe('rate.json: dollars per point of the weekly meter', () => {
       // an hour on: f's $10 and d's $4 (13:00, now before the reading) are in
       assert.equal(reading(s, 11, 0, { now: '2026-11-13T13:30:00Z' }).usdPerPoint, Math.round(24 / 11 * 1e4) / 1e4);
       // a rise of 2 points learns the week's own rate: $0.4 + $0.6 over 2 points
+      // a rise of 2 points is too few to replace the estimate
       const k = reading(s, 12, 0.6, { now: '2026-11-13T13:40:00Z' });
-      assert.equal(k.rateFrom, 'early');
-      assert.equal(k.usdPerPoint, 0.5);
+      assert.equal(k.rateFrom, 'estimate');
+      // 5 points learn the week's own rate: $0.4 + $0.6 + $1.5 over 5 points
+      const w = reading(s, 15, 1.5, { now: '2026-11-13T13:50:00Z' });
+      assert.equal(w.rateFrom, 'week');
+      assert.equal(w.usdPerPoint, 0.5);
     } finally { s.cleanup(); }
   });
   test('--spent-usd adds up; a rise of 2 points gives a first rate, 5 points the week\'s', () => {
@@ -648,17 +652,25 @@ describe('rate.json: dollars per point of the weekly meter', () => {
       assert.deepEqual(k.left, { points: -10, tokens: Math.round(-10 * 0.5 / FULL) });
     } finally { s.cleanup(); }
   });
-  test('the tokens left are full-price tokens of the session\'s model; an unknown one counts as tier 1', () => {
+  test('the tokens left are full-price tokens of tier 1, whatever model the session runs; line.json holds the shared part', () => {
     const s = sandbox();
     try {
       reading(s, 10); reading(s, 15, 1.25);
-      // $0.25 a point, 5 points left: $1.25, at Opus 5.5's $4 per million input
+      // $0.25 a point, 5 points left: $1.25, at tier 1's (Fable 5.2's) $8 per million input
       const opus = reading(s, 15, null, { more: ['--session', 'claude-opus-5-5'] });
       assert.equal(opus.usdPerPoint, 0.25);
-      assert.deepEqual(opus.left, { points: 5, tokens: 312500 });
-      // at Haiku 5.5's $0.10 per million: forty times as many
-      assert.equal(reading(s, 15, null, { more: ['--session', 'claude-haiku-5-5'] }).left.tokens, 12500000);
+      assert.deepEqual(opus.left, { points: 5, tokens: 156250 });
+      assert.equal(reading(s, 15, null, { more: ['--session', 'claude-haiku-5-5'] }).left.tokens, 156250);
       assert.equal(reading(s, 15, null, { more: ['--session', 'claude-mystery-1'] }).left.tokens, 156250);
+      // the account-wide part, for every session's status line
+      const line = JSON.parse(s.read('line.json'));
+      assert.deepEqual(line, { t: '2026-11-13T12:00:00.000Z', all: 15, line: 20, ofBudget: 75, usdPerPoint: 0.25, rateFrom: 'week', left: { points: 5, tokens: 156250 }, premium: null, premiumAt: null, premiumOut: false });
+      assert.equal(opus.t, line.t);
+      // an older reading never replaces a newer one; a dry one writes none
+      reading(s, 14, null, { now: '2026-11-13T11:00:00Z' });
+      assert.equal(JSON.parse(s.read('line.json')).all, 15);
+      reading(s, 17, null, { now: '2026-11-13T13:00:00Z', dry: true });
+      assert.equal(JSON.parse(s.read('line.json')).all, 15);
       // rounded to 4 decimals
       reading(s, 16, 0.123456);
       assert.equal(reading(s, 16).usdPerPoint, Math.round(1.373456 / 6 * 1e4) / 1e4);

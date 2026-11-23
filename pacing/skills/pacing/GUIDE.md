@@ -156,17 +156,20 @@ Fable's, which the session that started it shows:
 
     sub · Budget tokens: 850K · usage: Weekly 36%
 
-**Budget in tokens.** The figure is in full-price tokens of the
-session's model: what is left, at that model's price for an input token.
-The plugin learns what one point of the weekly meter costs from what its
-sessions spend, priced at each model's API rates, over the week (the week
-before's rate until this one has risen 5 points). So cache reads, which a
-long session re-reads every turn, count at their lower price, as they do
-on the meter, and the figure holds steady as a session grows. Until it has
-a rate, the status line shows the points of the week that are left,
-without the word tokens: `Budget: 5%`. Use without the plugin (another
-device, the web) moves the meter with nothing counted, so the figure shows
-less left than there is.
+**Budget in tokens.** The figure is in full-price tokens of tier 1's
+model: what is left, at that model's price for an input token, the same
+in every session whatever model it runs. The plugin learns what one point
+of the weekly meter costs from what its sessions spend, priced at each
+model's API rates, over the week (the week before's rate until this one
+has risen 5 points). So cache reads, which a long session re-reads every
+turn, count at their lower price, as they do on the meter, and the figure
+holds steady as a session grows. Before that, it estimates the rate from
+what this week's sessions on this computer cost, marked `~`; with neither,
+the status line shows the points of the week that are left, without the
+word tokens: `Budget: 5%`. Every session takes the newest reading any of
+them made within a minute, so sessions side by side show one figure. Use
+without the plugin (another device, the web) moves the meter with nothing
+counted, so the figure shows less left than there is.
 
 **Every meter, without the model.** Claude Code hands a plugin only the
 weekly meter and the 5-hour window. In the desktop app the plugin reads the
@@ -500,7 +503,7 @@ Each thing has one name in the guide and in everything the plugin shows:
 | weekly meter | the plan's "Weekly · all models" meter; `Weekly` in the status line. The budget line is drawn against it |
 | per-model meter | the plan's weekly meter for one model (`/pacing premium` names it, Fable by default), called by that model: `Fable` in the status line, "Fable's meter" in a sentence |
 | 5-hour window | the plan's 5-hour limit, shared by all models |
-| budget, budget line | the share of the week the days so far may use, drawn as a line that steps up at midnight; `Budget tokens` is what is still under it, in full-price tokens of the session's model, learned from what the spending cost, so cache reads count at their lower price; until the plugin has learned what a point costs, estimated from what this week's sessions on this computer cost and marked `~` (`Budget tokens: ~36M`), else `Budget` in points |
+| budget, budget line | the share of the week the days so far may use, drawn as a line that steps up at midnight; `Budget tokens` is what is still under it, in full-price tokens of tier 1's model (the same in every session), learned from what the spending cost, so cache reads count at their lower price; until the plugin has learned what a point costs, estimated from what this week's sessions on this computer cost and marked `~` (`Budget tokens: ~36M`), else `Budget` in points |
 | level | where the weekly meter stands against the budget line: ahead, on pace, over, throttle, stop in the report; under budget, on budget, over budget, far over budget, stop in toasts. The per-model meter's model is "held" or "out" |
 | reading | one look at the meters, logged; "full" when it has the per-model meter, "automatic" when the plugin took it. One is taken, never "measured" |
 | tier, ladder | a tier is one model with its effort; the ladder is the tiers in order, tier 1 on top. A model is named with its effort, `Opus 5.5 high` |

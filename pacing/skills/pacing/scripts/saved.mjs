@@ -75,10 +75,11 @@ let rate = null;
 if (rs && typeof rs === 'object' && rs.v === 2) {
   const rise = fin(rs.from) && fin(rs.to) ? rs.to - rs.from : 0;
   const usd = fin(rs.usd) ? rs.usd : 0;
-  rate = rise >= 5 && usd > 0 ? usd / rise : fin(rs.carried) && rs.carried > 0 ? rs.carried : rise >= 2 && usd > 0 ? usd / rise : null;
-  // else budget.mjs's estimate from this week's transcripts
+  rate = rise >= 5 && usd > 0 ? usd / rise : fin(rs.carried) && rs.carried > 0 ? rs.carried : null;
+  // else budget.mjs's estimate from this week's transcripts, else this week's from 2 points
   const e = rs.estimate;
   if (rate === null && e && fin(e.usd) && e.usd > 0 && fin(e.points) && e.points > 0) rate = e.usd / e.points;
+  if (rate === null && rise >= 2 && usd > 0) rate = usd / rise;
 }
 
 // ---- prices ----

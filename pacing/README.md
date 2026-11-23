@@ -70,6 +70,7 @@ folder, which an update replaces:
 |---|---|
 | `config.json` | the ladder, the last-day weight, the per-model meter and its fallback, the reader's model, the next-session switch and the other settings (`compact`, `notify`, `switch`, `reload`) |
 | `log.jsonl`, `state.json` | the readings, and the last one for the hook |
+| `line.json` | the newest reading's account-wide part (meters, budget line, what is left, the rate), which every session's status line takes in |
 | `BRIEF.local.md` | the user's own rules for subagents (never part of the plugin) |
 | `notes/<project>/<role>.md` | what each role agent learned about a project, a line per fact, for the next agent of that role |
 | `agents/<project>.jsonl` | each task a role agent finished: role, agent id, model, effort, tokens |

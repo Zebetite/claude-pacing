@@ -891,7 +891,7 @@ const needFull = !(auto && premium && premTop) || premOut || fullAuto ? null
 //      cache read costs a tenth of an input token, and a long session
 //      re-reads its whole context each turn, so a raw token count tracks the
 //      meter poorly. The rate is learned in dollars and shown in full-price
-//      tokens of the session's model (left, below).
+//      tokens of tier 1's model, the same in every session (left, below).
 //      rate.json holds this week's baseline (from: the meter at the week's
 //      first reading, to: the highest since) and the dollars the sessions
 //      reported (--spent-usd) since then; a new week keeps the week before's
@@ -900,11 +900,12 @@ const needFull = !(auto && premium && premTop) || premOut || fullAuto ? null
 //      Use by sessions without the hooks module (another device, the web)
 //      raises the meter with nothing counted, so the rate errs low and the
 //      figure shows less left than there is. Rate now: this week's from a
-//      rise of 5 points, else the carried one, else this week's from 2 points,
-//      else an estimate: what this week's local transcripts cost (estimate.mjs)
-//      over the points the meter shows, kept in rate.json's `estimate` and
-//      priced afresh at most once an hour while nothing better is learned,
-//      from 2 points on. rateFrom says which (week, carried, early, estimate).
+//      rise of 5 points, else the carried one, else an estimate: what this
+//      week's local transcripts cost (estimate.mjs) over the points the meter
+//      shows, kept in rate.json's `estimate` and priced afresh at most once an
+//      hour while nothing better is learned, from 2 points on; else this
+//      week's from 2 points. rateFrom says which (week, carried, estimate,
+//      early).
 //      A damaged or missing file is an empty one, and so is one without v: 2
 //      (0.9.15 and before learned raw tokens per point: dropped); a failed
 //      write is no error. ----
@@ -938,10 +939,12 @@ const rateRise = rateState ? rateState.to - rateState.from : 0;
 const rateFrom = !rateState ? null
   : rateRise >= RISE_MIN && rateState.usd > 0 ? 'week'
     : rateState.carried ? 'carried'
-      : rateRise >= RISE_EARLY && rateState.usd > 0 ? 'early'
-        : null;
+      : null;
 let rate = rateFrom === 'carried' ? rateState.carried : rateFrom ? rateState.usd / rateRise : null;
 let rateSource = rateFrom;
+// this week's from 2 points: only where no estimate can be had (live it
+// swung while the sessions' spending caught up after a reload)
+const early = rateState && rateRise >= RISE_EARLY && rateState.usd > 0 ? rateState.usd / rateRise : null;
 const ESTIMATE_MS = HOUR, ESTIMATE_MIN = 2;
 const estOk = e => !!e && typeof e === 'object' && fin(e.usd) && e.usd > 0 && fin(e.points) && e.points > 0 && fin(e.at);
 if (rate === null && rateState && used >= ESTIMATE_MIN) {
@@ -963,10 +966,13 @@ if (rate === null && rateState && used >= ESTIMATE_MIN) {
   }
   if (est) { rate = est.usd / est.points; rateSource = 'estimate'; }
 }
-// what a full-price token costs: an input token of the session's model, else
-// of tier 1 on the ladder in force (of the configured ladder when none is left)
+if (rate === null && early !== null) { rate = early; rateSource = 'early'; }
+// what a full-price token costs: an input token of tier 1 on the configured
+// ladder (of the ladder in force when none is configured), in every session
+// alike. It was the session's own model's: live, a session on Fable 5.2 ($8
+// a million) showed half the tokens of one on Opus 5.5 ($4) for one budget.
 const fullPrice = (() => {
-  const m = MODELS[sessionModel] || MODELS[(ladder[0] || tiers[0] || {}).model];
+  const m = MODELS[(tiers[0] || ladder[0] || {}).model];
   return m ? m.price[0] / 1e6 : null;
 })();
 if (auto) {
@@ -1006,12 +1012,27 @@ if (auto) {
   if (readerCfg && readerCfg !== 'ladder') nameAt(tierOf[idOf(readerCfg)], readerCfg);
   if (verifierCfg && verifierCfg !== 'ladder') nameAt(tierOf[idOf(verifierCfg)], verifierCfg);
   const prices = Object.fromEntries(Object.values(MODELS).map(m => [m.id, m.price]));
-  print(JSON.stringify({ level, all: r1(used), line: r1(budget), ofBudget: budget > 0 ? Math.round(100 * used / budget) : null,
+  // the account-wide part of this reading, the same for every session: in
+  // line.json too, where every session's status line takes the newest one
+  // (readings.mjs, "the newest shared reading"); an older one never replaces it
+  const shared = { t: now.toISOString(), all: r1(used), line: r1(budget), ofBudget: budget > 0 ? Math.round(100 * used / budget) : null,
     // what is left under today's line, in points of the week and in
-    // full-price tokens of the session's model (the dollars it is worth, at
-    // that model's input price)
+    // full-price tokens of tier 1's model (the dollars it is worth, at that
+    // model's input price)
     usdPerPoint: rate !== null ? Math.round(rate * 1e4) / 1e4 : null, rateFrom: rateSource,
     left: { points: r1(budget - used), tokens: rate !== null && fullPrice ? Math.round((budget - used) * rate / fullPrice) : null },
+    premium: prem === null ? null : r1(prem), premiumAt: premFrom ? premFrom.at : null, premiumOut: premOut };
+  if (!opt.dry) {
+    try {
+      updateFile(path.join(dataDir, 'line.json'), t => {
+        let cur = null;
+        try { cur = JSON.parse(t); } catch { /* none or damaged: replaced */ }
+        if (cur && Date.parse(cur.t) > now.getTime()) return null;
+        return JSON.stringify(shared) + '\n';
+      });
+    } catch { /* each session keeps its own */ }
+  }
+  print(JSON.stringify({ level, ...shared,
     tierOf, agentTierOf, tierNames, prices,
     premium: prem === null ? null : r1(prem), premiumOut: premOut, premiumLabel: premLabel,
     premiumAt: premFrom ? premFrom.at : null, premiumLevel: premLevel, premiumHeld: premHeld, levelBy,

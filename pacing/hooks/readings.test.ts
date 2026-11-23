@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -195,6 +195,31 @@ test('the status line in tokens once budget.mjs has a rate, negative past the li
   next = answer('throttle', 26, { rate: 85000 })
   await $.session.measure(measure(26))
   expect(status.at(-1)).toBe('Budget tokens: -510K · usage: Weekly 26% Fable 40%')
+})
+
+test('every minute the status line takes the newest shared reading another session wrote; an older one changes nothing', async ($, on) => {
+  const status = engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  let shared = ''
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  on('fs.read', (_: unknown, e: any) => ({ value: /[\\/]\.claude[\\/]pacing[\\/]line\.json$/.test(String(e.path)) ? shared : '{}' }))
+  on('process.run', () => ({ value: answer('ahead', 10, { rate: 85000, t: '2026-11-13T10:00:00.000Z' }) }))
+  on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('Budget tokens: 850K · usage: Weekly 10% Fable 40%')
+  // another session's reading, newer: taken at the next minute
+  shared = JSON.stringify({ t: '2026-11-13T10:05:00.000Z', all: 12, line: 20, ofBudget: 60, usdPerPoint: 1, rateFrom: 'week', left: { points: 8, tokens: 680000 }, premium: 41, premiumAt: null, premiumOut: false })
+  await clock.advance(SHARED_EVERY + 1000)
+  expect(status.at(-1)).toBe('Budget tokens: 680K · usage: Weekly 12% Fable 41%')
+  // an older one, or one without the per-model figure, leaves what is held
+  const n = status.length
+  shared = JSON.stringify({ t: '2026-11-13T09:00:00.000Z', all: 30, line: 20, left: { points: -10, tokens: -850000 }, premium: 50 })
+  await clock.advance(SHARED_EVERY)
+  expect(status.length).toBe(n)
+  expect(sharedOf(JSON.stringify({ t: '2026-11-13T11:00:00.000Z', all: 13, line: 20, premium: null, premiumAt: null, level: 'over' }))).toEqual({ t: '2026-11-13T11:00:00.000Z', all: 13, line: 20 })
+  expect(sharedOf('not json')).toBe(null)
+  expect(sharedOf('{"all": 1, "line": 2}')).toBe(null)
 })
 
 test('--spent-usd: every dollar of the session and its agents since the last reading that ran; a failed run keeps them for the next', async ($, on) => {

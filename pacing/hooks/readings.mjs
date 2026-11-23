@@ -1209,6 +1209,43 @@ async function reloadOn($) {
     return JSON.parse(await $.fs.read(home + '/.claude/pacing/config.json')).autoReload !== false;
   } catch { return true; }
 }
+// ---- the newest shared reading ----
+// Each session took its own readings and kept its own figure, so two
+// sessions side by side showed different budgets (live: 28.9M and 10.4M). A
+// reading's account-wide part (the meters, the budget line, what is left and
+// the rate) is the same for every session, and budget.mjs writes it to
+// line.json as well; every SHARED_EVERY each session takes it in where it
+// is newer than the reading it holds, and redraws its status line. The
+// level and its toasts stay the session's own readings'.
+export const SHARED_EVERY = 60 * 1000;
+const SHARED_KEYS = ['t', 'all', 'line', 'ofBudget', 'usdPerPoint', 'rateFrom', 'left', 'premium', 'premiumAt', 'premiumOut'];
+export const sharedOf = text => {
+  let j;
+  try { j = JSON.parse(text); } catch { return null; }
+  if (!j || typeof j !== 'object' || Number.isNaN(Date.parse(j.t)) || typeof j.all !== 'number' || typeof j.line !== 'number') return null;
+  const out = {};
+  for (const k of SHARED_KEYS) if (k in j) out[k] = j[k];
+  // a reading without the per-model figure leaves the one held
+  if (out.premium === null) { delete out.premium; delete out.premiumAt; delete out.premiumOut; }
+  return out;
+};
+async function readShared($) {
+  try {
+    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
+    return home ? await $.fs.read(home + '/.claude/pacing/line.json') : null;
+  } catch { return null; }
+}
+// `sh`: the reading held (held), taking the shared part in (take), the line
+async function takeShared($, sh) {
+  const held = sh.held();
+  if (!held) return;
+  const j = sharedOf(await readShared($));
+  if (!j || !(Date.parse(j.t) > (Date.parse(held.t) || 0))) return;
+  sh.take(j);
+  let now;
+  try { now = await $.clock.now(); } catch { now = Date.now(); }
+  $.ui.status(sh.lineNow(now));
+}
 // the version plugin.json names now; null when unreadable
 async function versionOnDisk($) { try { return versionOf(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')); } catch { return null; } }
 function say($, text) { try { $.ui.toast(text, { timeoutMs: TOAST_LONG }); } catch { /* an engine without toasts */ } }
@@ -1245,6 +1282,10 @@ export const register = on => {
   const spend = { total: 0, sent: 0 };
   let last = null;
   let reading = null;
+  // the newest shared reading (see "the newest shared reading"): its timer,
+  // and what takeShared reads and writes
+  let sharedTimer = null;
+  const sh = { held: () => reading, take: j => { reading = { ...reading, ...j }; }, lineNow: now => lineNow(now) };
   let running = false;
   // for the warning after a pause: when the main thread's last turn ended (a
   // subagent's turn keeps only its own cache warm), the session's size at the
@@ -1649,6 +1690,10 @@ export const register = on => {
       if (rl.timer) rl.timer.cancel();
       rl.timer = $.clock.every(RELOAD_CHECK_EVERY, () => { look($, rl); });
     } catch { /* an engine without timers: the look after a turn */ }
+    try {
+      if (sharedTimer) sharedTimer.cancel();
+      sharedTimer = $.clock.every(SHARED_EVERY, () => { takeShared($, sh).catch(() => { /* its own stands */ }); });
+    } catch { /* an engine without timers: its own readings alone */ }
     return result;
   });
   on('command.run', { command: 'pacing-status' }, async ($) => {

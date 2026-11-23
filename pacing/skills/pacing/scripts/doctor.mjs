@@ -176,7 +176,8 @@ const checkSettings = () => {
 
 // ---- the token rate (rate.json): dollars per point of the weekly meter, by
 //      budget.mjs's rule: this week's from a rise of 5 points, else the one
-//      carried from last week, else this week's from 2 points. A file
+//      carried from last week, else the estimate from this week's
+//      transcripts, else this week's from 2 points. A file
 //      without v: 2 holds 0.9.15's raw tokens per point, which budget.mjs
 //      drops at its next reading. ----
 const usdText = n => '$' + (n >= 1 ? n.toFixed(2) : n.toFixed(4));
@@ -193,12 +194,12 @@ const checkRate = () => {
   const learned = (usd, how, pts) => ({ status: 'ok', found: 'learned, ' + usdText(usd) + ' per point, ' + how, learned: true, usdPerPoint: Math.round(usd * 1e4) / 1e4, points: pts });
   if (rise >= 5 && v.usd > 0) return learned(v.usd / rise, 'from ' + points + ' this week', rise);
   if (carried) return learned(carried, 'carried from last week', null);
-  if (rise >= 2 && v.usd > 0) return learned(v.usd / rise, 'from only ' + points + ' so far', rise);
   // before that, budget.mjs's estimate from this week's transcripts
   const e = v.estimate;
   if (e && fin(e.usd) && e.usd > 0 && fin(e.points) && e.points > 0) {
     return { status: 'ok', found: 'estimated, ' + usdText(e.usd / e.points) + ' per point, from this week\'s transcripts; learning it: ' + points + ' so far', learned: false, estimated: true, usdPerPoint: Math.round(e.usd / e.points * 1e4) / 1e4, points: rise };
   }
+  if (rise >= 2 && v.usd > 0) return learned(v.usd / rise, 'from only ' + points + ' so far', rise);
   return { status: 'ok', found: 'not learned yet: ' + points + ' this week so far', learned: false, points: rise };
 };
 

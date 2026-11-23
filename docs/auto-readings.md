@@ -844,3 +844,28 @@ level in the status line.
   `🗜️ compacting: /compact runs as soon as the session is free.` Only where
   that fails too does the toast give the reason and the box hold
   `/compact`. A reason that starts with the plugin's name loses it.
+
+## One budget figure in every session (0.9.19)
+
+- **Seen live:** two sessions side by side showed `Budget tokens: 28.9M`
+  and `10.4M`. Three causes: each priced the dollars left at its own
+  model's input price (a session on Fable 5.2 at $8 a million shows half
+  the tokens of one on Opus 5.5 at $4); each kept the figure of its own
+  last reading; and the rate learned from a 2-point rise swung while the
+  sessions' spending caught up after a reload.
+- **One unit.** `left.tokens` = points left × dollars per point ÷ the
+  input price of tier 1 on the configured ladder (of the ladder in force
+  when none is configured), whatever model the session runs.
+- **The newest shared reading.** budget.mjs writes a reading's
+  account-wide part to `line.json` (`t`, `all`, `line`, `ofBudget`,
+  `usdPerPoint`, `rateFrom`, `left`, `premium`, `premiumAt`,
+  `premiumOut`); an older reading never replaces a newer one and a dry one
+  writes none. The JSON carries `t` too. Every minute (`SHARED_EVERY`)
+  each session takes it in where it is newer than the reading it holds
+  and redraws its status line; one without the per-model figure leaves
+  the one held. The level, its toasts and the switch offers stay with the
+  session's own readings.
+- **A steadier rate.** The order is now this week's from 5 points, the
+  carried one, the transcript estimate, and only then this week's from
+  2 points (where no estimate can be had). doctor.mjs and saved.mjs follow
+  the same order.

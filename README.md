@@ -38,8 +38,8 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   Budget tokens: 850K · usage: Weekly 36% Fable 40%
   ```
 
-  What is left under today's budget line, in full-price tokens of the
-  session's model (learned from what the spending cost, so cache reads
+  What is left under today's budget line, in full-price tokens of tier
+  1's model, the same in every session (learned from what the spending cost, so cache reads
   count at their lower price; until then estimated from this week's
   transcripts and marked `~`, as in `Budget tokens: ~36M`), then the usage of the weekly meters; while subagents run, how many first (`⏳ 2 Subagents
   running`). The budget and the usage always show whole; where room is
