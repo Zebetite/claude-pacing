@@ -35,14 +35,15 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 - **A status line after every turn** (new in 0.8):
 
   ```
-  Budget left: 850K · usage: Weekly 36% Fable 40%
+  Budget tokens: 850K · usage: Weekly 36% Fable 40%
   ```
 
   What is left under today's budget line, in tokens, then the usage of the
   weekly meters; while subagents run, how many first (`⏳ 2 Subagents
-  running`). In the desktop app, which cuts a plugin's status at about 35
-  characters, the line keeps within 34 (`⏳ 2 Subagents · Budget left:
-  850K`). `/pacing-status` shows the whole status line in words, with
+  running`). The budget and the usage always show whole; where room is
+  short (70 characters in the desktop app, 75 in a terminal) only the
+  agents' part shrinks (`⏳ 2 Subagents · Budget tokens: 850K · usage:
+  Weekly 36% Fable 40%`). `/pacing-status` shows the whole status line in words, with
   how this session's own use splits over the ladder's models
   (subagents included).
   It comes from readings the plugin takes by itself after a turn, on a

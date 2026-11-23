@@ -5,7 +5,7 @@
 // line, and answers in one JSON line. The status line shows the result, each
 // tier marked by a coloured circle, and a change of level one toast:
 //
-//   Budget left: 850K, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)
+//   Budget tokens: 850K, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)
 //
 // The tier shares are this session's own use: every turn's tokens, the
 // subagents' included (turn.complete), priced per model and summed by the
@@ -365,7 +365,7 @@ export const fullReadingAsk = j => (j && j.needFull
 
 // A session another session started (a side session in the desktop app)
 // says so up front, with the tier of the model it runs on:
-//   ⚪Tier 2 Sub Agent - Budget left: 850K, ⚪Tier 2[90%] 🟤Tier 4[10%], (36% Weekly, 40% Fable)
+//   ⚪Tier 2 Sub Agent - Budget tokens: 850K, ⚪Tier 2[90%] 🟤Tier 4[10%], (36% Weekly, 40% Fable)
 // `self` is that tier ('Other' off the ladder), or null for any other session.
 // `now` (ms) dates a carried per-model figure: "71% Fable 15h ago, est. 90%".
 // The status line, compact. The desktop app gives it what is left of the
@@ -373,7 +373,7 @@ export const fullReadingAsk = j => (j && j.needFull
 // an ellipsis: about 33 characters while a turn runs. So what matters comes
 // first and a cut takes only the tail:
 //   a side session's own tier   🟡T1 sub
-//   what is left of the budget  Budget left: 850K
+//   what is left of the budget  Budget tokens: 850K
 //   the session's tier split    🟡T1 45% ⚪T2 55%
 //   the meters                  week 48% Fable 71% (2h old est 80%)
 // `/pacing-status` shows the whole line in the long form (fullText).
@@ -386,11 +386,12 @@ const PHRASE = { 'ahead': 'under budget', 'on pace': 'on budget', 'over': 'over 
 export const levelPhrase = level => PHRASE[level] || level || '';
 // What is left under today's budget line, wherever it shows: in tokens, by
 // the tokens per point of the weekly meter budget.mjs learned from what the
-// sessions spent ("Budget left: 850K", "1.2M" from a million, "-120K"
+// sessions spent ("Budget tokens: 850K", "1.2M" from a million, "-120K"
 // past the line, "0K" under a thousand either way). The rate errs low (use
 // on another device raises the meter with no tokens counted), so the figure
-// shows less than there is. Until a rate is learned, the points of the week
-// ("Budget left: 5%"); "-" only with no figure at all.
+// shows less than there is. Until a rate is learned, the points of the week,
+// without the word tokens ("Budget: 5%"); "Budget: -" only with no figure at
+// all.
 export const tokensText = n => {
   const a = Math.abs(n);
   if (a < 1000) return '0K';
@@ -399,9 +400,9 @@ export const tokensText = n => {
 };
 export const budgetText = j => {
   const left = j && j.left && typeof j.left === 'object' ? j.left : {};
-  if (typeof left.tokens === 'number') return 'Budget left: ' + tokensText(left.tokens);
+  if (typeof left.tokens === 'number') return 'Budget tokens: ' + tokensText(left.tokens);
   const points = typeof left.points === 'number' ? left.points : j && typeof j.line === 'number' && typeof j.all === 'number' ? j.line - j.all : null;
-  return 'Budget left: ' + (points !== null ? Math.round(points) + '%' : '-');
+  return 'Budget: ' + (points !== null ? Math.round(points) + '%' : '-');
 };
 
 // ---- subagents at work ----
@@ -420,16 +421,17 @@ export const budgetText = j => {
 //   a background agent still running after the turn ended gets a row in the
 //   band above the prompt, under the offer to compact, never over it.
 // Toasts and the row are one line each, within MSG_MAX.
-// The whole status line keeps within the room the surface gives it. The
-// desktop app cuts the plugin's status at about 35 visible characters (seen
-// live: "⏳ implementer editing 5m, ⏳ impl…"), so where the desktop app or
-// the mobile app draws the session, LINE_MAX_NARROW; in a terminal alone (or
+// The status line's agents part keeps within the room the surface gives it.
+// Where the desktop app or the mobile app draws the session, LINE_MAX_NARROW
+// (70: the footer of a normal window has room for about 65 to 70 characters;
+// the cut seen at about 35 was a narrow window, and at 34 the usage was
+// dropped, which the user wants always shown); in a terminal alone (or
 // where the engine does not say), LINE_MAX: a line of 75 was seen whole. The
 // surfaces come from $.session.surfaces(), asked again when one attaches or
-// detaches. The order is the agents, the budget left, the usage: a cut takes
-// the least important end.
+// detaches. The order is the agents, the budget, the usage; the budget and
+// the usage always show whole, and only the agents part gives way.
 export const LINE_MAX = 75;
-export const LINE_MAX_NARROW = 34;
+export const LINE_MAX_NARROW = 70;
 export const NARROW = ['desktop', 'mobile'];
 // the room for the line on these surfaces (the narrowest of them counts)
 export const lineMaxOf = surfaces => (Array.isArray(surfaces) && surfaces.some(x => NARROW.includes(x)) ? LINE_MAX_NARROW : LINE_MAX);
@@ -585,7 +587,8 @@ export const countText = list => subagentsText(list.length);
 export const runningText = (list, word = '') => countText(list) + (list.length === 1 ? ' is ' : ' are ') + (word ? word + ' ' : '') + 'running';
 // The status line's agent part: the count alone, "⏳ 1 Subagent running",
 // "⏳ 2 Subagents running", side sessions counted in; where that does not
-// fit, without "running": "⏳ 2 Subagents"; with no room even for that, "⏳2".
+// fit, without "running": "⏳ 2 Subagents"; with no room even for that, "⏳2",
+// which shows even where it does not fit (the line then runs past the room).
 export const subagentsText = n => n + (n === 1 ? ' Subagent' : ' Subagents');
 export const agentPart = (agents, now, room) => {
   const n = agents.length;
@@ -1054,16 +1057,16 @@ export const switchedText = (target, nowModel, nowEffort, was = null) => (sameMo
 const sideOf = (j, self) => self !== null || j.spawned === true;
 // The compact line: what is left of the budget (budgetText), then the usage
 // meters, with no tiers (the tier split is /pacing-status's, in the long form):
-//   Budget left: 850K · usage: Weekly 36% Fable 40%
+//   Budget tokens: 850K · usage: Weekly 36% Fable 40%
 // A side session leads with a plain "sub" and shows no per-model meter.
-// While subagents run (`agents`, see "subagents at work"), the line leads
-// with their count. The whole line stays within `max` (LINE_MAX, or
-// LINE_MAX_NARROW where the desktop app draws it): "sub" if it costs the
-// agents nothing, the agents' count (without "running" where that does not
-// fit), the budget part (always, whole), then the usage only as far as it
-// fits whole, the per-model figure going before the weekly one:
-//   ⏳ 2 Subagents · Budget left: 850K                 (the desktop app)
-//   ⏳ 1 Subagent running · Budget left: 850K · usage: Weekly 36% Fable 40%
+// The budget part and the usage always show, whole, at any width. While
+// subagents run (`agents`, see "subagents at work"), the line leads with
+// their count in what is left of `max` (LINE_MAX, or LINE_MAX_NARROW where
+// the desktop app draws it): "sub" if it costs the agents nothing, the
+// agents' count, without "running" where that does not fit, "⏳2" where even
+// that does not (shown all the same, past `max`):
+//   ⏳ 2 Subagents · Budget tokens: 850K · usage: Weekly 36% Fable 40%   (desktop)
+//   ⏳ 1 Subagent running · Budget tokens: 850K · usage: Weekly 36% Fable 40%
 // `mix` is no longer drawn here; it stays in the signature for fullText's sake.
 export const statusText = (j, mix, self = null, now = Date.now(), agents = [], max = LINE_MAX) => {
   const side = sideOf(j, self);
@@ -1072,23 +1075,19 @@ export const statusText = (j, mix, self = null, now = Date.now(), agents = [], m
   // under zero is over. The toast on a change of level says the rest.
   const level = budgetText(j);
   const sub = side ? 'sub' : null;
-  const weekly = 'usage: Weekly ' + Math.round(j.all) + '%';
-  let usage = weekly;
+  let usage = 'usage: Weekly ' + Math.round(j.all) + '%';
   // the per-model figure as last read, plainly: its age and the estimate are
   // /pacing-status's, and a stale one still brings the note asking for a
   // full reading
   if (j.premium != null && name) usage += ' ' + name + ' ' + Math.round(j.premium) + '%';
-  let line = [sub, level].filter(Boolean).join(' · ');
-  if (agents.length) {
-    // the agents' share: what the budget part leaves. "sub" goes first only
-    // where it costs the agents no word.
-    const room = max - chars(level) - 3;
-    const lead = agentPart(agents, now, room);
-    const withSub = sub && agentPart(agents, now, room - chars(sub) - 3) === lead;
-    line = [withSub ? sub : null, lead, level].filter(Boolean).join(' · ');
-  }
-  for (const more of [usage, weekly]) if (chars(line + ' · ' + more) <= max) return line + ' · ' + more;
-  return line;
+  const tail = level + ' · ' + usage;
+  if (!agents.length) return [sub, tail].filter(Boolean).join(' · ');
+  // the agents' share: what the budget and the usage leave. "sub" goes first
+  // only where it costs the agents no word.
+  const room = max - chars(tail) - 3;
+  const lead = agentPart(agents, now, room);
+  const withSub = sub && agentPart(agents, now, room - chars(sub) - 3) === lead;
+  return [withSub ? sub : null, lead, tail].filter(Boolean).join(' · ');
 };
 
 // a tier number as the user reads it: the model with its effort, as

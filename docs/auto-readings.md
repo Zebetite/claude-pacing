@@ -22,8 +22,8 @@ level in the status line.
   `node <$.plugin.root>/skills/pacing/scripts/budget.mjs --all .. --reset ..
   --source hook --five .. --five-reset ..`, and shows one toast when the
   level changes. The status line shows
-  `Budget left: 850K · usage: Weekly 36% Fable 40%`
-  (before 0.9.13: `Budget 77% · ...`; before 0.9.5: `77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)`):
+  `Budget tokens: 850K · usage: Weekly 36% Fable 40%`
+  (before 0.9.15: `Budget left: 850K · ...`; before 0.9.13: `Budget 77% · ...`; before 0.9.5: `77% of budget, 🟡Tier 1[80%] ⚪Tier 2[15%] 🟤Tier 4[5%], (36% Weekly, 40% Fable)`):
   the meter as a share of the line; the session's own use by tier, from
   every turn's tokens (`turn.complete`, subagents included) priced per
   model, in shares that add up to 100; the two meters. The status line is
@@ -729,3 +729,24 @@ level in the status line.
   command where the timer got none, the form the remote refusal takes for
   a module (an answer or an error), and whether `$.prompt.fill` reaches the
   box over a remote connection.
+
+## Budget tokens, the usage always whole (0.9.15)
+
+- **Seen live:** in the desktop app (0.9.13) the status line read only
+  `Budget left: 850K`: LINE_MAX_NARROW (34) left no room for the usage.
+  The user's screenshot showed the footer of a normal window has room for
+  about 65 to 70 characters; the cut seen at about 35 was a narrow window.
+- **The words.** `Budget left:` becomes `Budget tokens:` wherever the
+  token figure shows (`Budget tokens: 850K`, `1.2M`, `-120K`, `0K`), in
+  the status line and `/pacing-status`. Before a rate is learned the figure
+  is points and reads `Budget: 5%`; with no figure `Budget: -`.
+- **The width.** LINE_MAX_NARROW is 70 (LINE_MAX stays 75). The budget and
+  the usage (`usage: Weekly 33% Fable 53%`, no per-model figure in a side
+  session) always show whole and are never dropped. The agents' part takes
+  what is left: `⏳ 2 Subagents running`, `⏳ 2 Subagents`, `⏳2`; where even
+  `⏳2` does not fit it shows all the same and the line runs past the
+  limit. A side session's `sub` still goes first only where it costs the
+  agents' part no word.
+- **Desktop, as drawn:** `Budget tokens: 850K · usage: Weekly 33% Fable
+  53%`; `⏳ 1 Subagent · Budget tokens: 850K · usage: Weekly 33% Fable 53%`;
+  `⏳ 2 Subagents · Budget tokens: -120K · usage: Weekly 33% Fable 53%`.

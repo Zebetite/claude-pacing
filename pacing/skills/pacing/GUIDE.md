@@ -35,7 +35,7 @@ the cheaper Opus 5.5 medium (`/pacing fallback` changes or removes that).
 <!-- /help -->
 
 That is all. <!-- help -->You can see your weekly budget in the status line:
-`Budget left` is what the days so far may still use of your allowance.
+`Budget tokens` is what the days so far may still use of your allowance.
 Below zero, work moves to lower tiers. `/pacing-status` shows how much
 each model is used.<!-- /help -->
 
@@ -130,16 +130,16 @@ fresh for the next session and shows it in the status line, with one
 toast when the level changes:
 
 <!-- help -->
-    Budget left: 850K · usage: Weekly 36% Fable 40%
+    Budget tokens: 850K · usage: Weekly 36% Fable 40%
 
 That is what is left under today's budget line, in tokens (below zero
 means over it; a toast says when the level changes), then the two
 weekly meters' usage. `/pacing-status` shows the whole status line in
 words, with how this session's own use splits over the ladder's models
-(`🟡Fable 5.2 high 80%`), subagents included.<!-- /help --> The desktop app cuts a plugin's status at about
-35 characters, so there the status line keeps within 34: what is left of the
-budget always, the usage only where it fits whole (`Budget left:
-850K`). The split is an estimate: each
+(`🟡Fable 5.2 high 80%`), subagents included.<!-- /help --> The budget and
+the usage always show whole, in the desktop app too, whose footer has room
+for about 70 characters in a normal window (a narrow window cuts the line
+sooner). The split is an estimate: each
 model's tokens priced at its API rates, which is how the weekly meter
 weighs the models too. The tiers are those in force at the reading:
 while Fable's meter is out or held, the fallback (Opus 5.5 high) is tier
@@ -154,13 +154,13 @@ hold. A session that another session started (a side session in the
 desktop app) leads with `sub`, and shows the weekly meter only, not
 Fable's, which the session that started it shows:
 
-    sub · Budget left: 850K · usage: Weekly 36%
+    sub · Budget tokens: 850K · usage: Weekly 36%
 
-**Budget left in tokens.** The plugin learns how many tokens one point
+**Budget in tokens.** The plugin learns how many tokens one point
 of the weekly meter is from what its sessions spend, over the week (the
 week before's rate until this one has risen 5 points). Until it has
-one, the status line shows the points of the week that are left: `Budget left:
-5%`. Use without the plugin (another device, the web) moves the meter
+one, the status line shows the points of the week that are left, without
+the word tokens: `Budget: 5%`. Use without the plugin (another device, the web) moves the meter
 with no tokens counted, so the figure shows less left than there is.
 
 **Every meter, without the model.** Claude Code hands a plugin only the
@@ -367,15 +367,17 @@ each with its own instructions and tools:
 | researcher | documentation and the web, with sources | no |
 
 **Seeing them work.** While agents run, the status line leads with how
-many, and still shows the budget: `⏳ 1 Subagent running · Budget left:
-850K · usage: Weekly 36% Fable 40%`, `⏳ 2 Subagents running`. Side
+many, and still shows the budget and the usage: `⏳ 1 Subagent running ·
+Budget tokens: 850K · usage: Weekly 36% Fable 40%`, `⏳ 2 Subagents running`. Side
 sessions this session started count in (in the desktop app, which says
 which sessions are working). Who they are, what each is doing, for how
 long and how far it has come are in the toasts, the row above the prompt
 and `/pacing-status`. The status line keeps within 75 characters in a terminal
-and within 34 in the desktop app, which cuts it at about 35: the usage
-figures make room first, then "running" goes, the budget always whole:
-`⏳ 2 Subagents · Budget left: 850K`. A reload of the plugins keeps a
+and within 70 in the desktop app. The budget and the usage always show
+whole; only the agents' part makes room, "running" first, then down to
+the bare count, which shows even where the line then runs longer:
+`⏳ 2 Subagents · Budget tokens: 850K · usage: Weekly 36% Fable 40%`,
+`⏳2 · …`. A reload of the plugins keeps a
 running agent as it was, its time counted from its start. An agent shows
 the moment the session calls it, before Claude Code has started it. The
 status line goes back to its plain form when the last one ends.
@@ -494,7 +496,7 @@ Each thing has one name in the guide and in everything the plugin shows:
 | weekly meter | the plan's "Weekly · all models" meter; `Weekly` in the status line. The budget line is drawn against it |
 | per-model meter | the plan's weekly meter for one model (`/pacing premium` names it, Fable by default), called by that model: `Fable` in the status line, "Fable's meter" in a sentence |
 | 5-hour window | the plan's 5-hour limit, shared by all models |
-| budget, budget line | the share of the week the days so far may use, drawn as a line that steps up at midnight; `Budget left` is what is still under it |
+| budget, budget line | the share of the week the days so far may use, drawn as a line that steps up at midnight; `Budget tokens` is what is still under it (`Budget` in points until the plugin has learned how many tokens a point is) |
 | level | where the weekly meter stands against the budget line: ahead, on pace, over, throttle, stop in the report; under budget, on budget, over budget, far over budget, stop in toasts. The per-model meter's model is "held" or "out" |
 | reading | one look at the meters, logged; "full" when it has the per-model meter, "automatic" when the plugin took it. One is taken, never "measured" |
 | tier, ladder | a tier is one model with its effort; the ladder is the tiers in order, tier 1 on top. A model is named with its effort, `Opus 5.5 high` |

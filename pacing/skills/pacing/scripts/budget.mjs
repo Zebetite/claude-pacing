@@ -883,7 +883,7 @@ const needFull = !(auto && premium && premTop) || premOut || fullAuto ? null
     : premAgeMs !== null && premAgeMs >= (premHeld ? FULL_AGE_HELD : FULL_AGE) ? 'the ' + premLabel + ' figure is ' + mins(premAgeMs) + ' old'
       : !premHeld && allMoved !== null && allMoved >= FULL_MOVED ? 'the weekly meter moved ' + r1(allMoved) + ' points since ' + premLabel + '\'s meter was read'
         : null;
-// ---- tokens per point of the weekly meter, for "Budget left: 850K".
+// ---- tokens per point of the weekly meter, for "Budget tokens: 850K".
 //      rate.json holds this week's baseline (from: the meter at the week's
 //      first reading, to: the highest since) and the tokens the sessions
 //      reported (--spent) since then; a new week keeps the week before's rate

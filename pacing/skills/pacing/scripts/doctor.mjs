@@ -51,7 +51,7 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 // "Thu 26 Nov 11:00", in local time
 const stamp = ms => { const d = new Date(ms); return DAYS[d.getDay()] + ' ' + d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
-// 850K, 2.1M: as the status line says "Budget left"
+// 850K, 2.1M: as the status line says "Budget tokens"
 const tok = n => (n >= 1e6 ? Math.round(n / 1e5) / 10 + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(Math.round(n)));
 const kindOf = e => (e.source === 'hook' ? (e.full ? 'automatic and full' : 'automatic') : 'full');
 const labelOf = m => (m && MODELS[m] ? MODELS[m].label : 'the per-model meter');
