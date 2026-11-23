@@ -1500,6 +1500,22 @@ test('Switch goes by the model the offer saw: a session read that already names 
   expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.')
 })
 
+test('Switch runs /model even where the offer saw the target model already, then /effort', async ($, on) => {
+  engine(on)
+  on('process.run', () => ({ value: switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }) }))
+  // the turns' usage names Opus 5.5 (what the module goes by); the session may run on another
+  const seen = switchEngine(on, { model: 'claude-opus-5-5', effort: 'high' })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-opus-5-5', 1))
+  const ui = await $.ui.mount(BAND)
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔁 This week\'s budget suggests Opus 5.5 medium for this session.')
+  await ui.press({ key: 'pacing-switch' })
+  await ui.unmount()
+  expect(seen.runs).toEqual(['/model claude-opus-5-5', '/effort medium'])
+  expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 medium.')
+})
+
 test('once per suggestion: Not now holds until the recommendation changes', async ($, on) => {
   engine(on)
   let next = switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } })

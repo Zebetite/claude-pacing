@@ -869,3 +869,16 @@ level in the status line.
   carried one, the transcript estimate, and only then this week's from
   2 points (where no estimate can be had). doctor.mjs and saved.mjs follow
   the same order.
+
+## Switch always runs /model, then /effort (0.9.20)
+
+- **Seen live (0.9.19):** a press of Switch ran `/effort medium` alone; the
+  turns went on running on Fable 5.2. The press ran `/model` only where the
+  model the offer saw differed from the target, and the module's idea of
+  the session's model (the last set, else the last turn's usage) had
+  named the target.
+- **Now:** every press runs `/model <target>` and then `/effort <target>`,
+  whatever the module takes the session to run on. `/model` to the model
+  the session already runs on does no harm, and `/effort` runs after it
+  in case `/model` reset the effort. A failed run still fills the box with
+  `/model <target>`.

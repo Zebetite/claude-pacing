@@ -1458,21 +1458,18 @@ export const register = on => {
         Button({ key: 'pacing-switch', label: 'Switch', variant: target.urgent ? 'primary' : 'secondary', onPress: async () => {
           sw = null;
           redraw($);
-          let ran = true, was = null, modelAsked = false, modelRan = null;
+          let ran = true, was = null, modelRan = null;
           try {
-            // the model the offer saw (the last turn's own), not $.session.model():
-            // live, that named the target while the turns ran on another, and a
-            // press ran /effort alone. A switch the offer made for the model
-            // runs /model whatever a read now says; /model to the model it
-            // runs on already does no harm.
+            // /model runs on every press, then /effort. What the module takes
+            // for the session's model can be wrong: live, a read named the
+            // target while the turns ran on another, and later the offer's own
+            // model did, and each time a press ran /effort alone. /model to
+            // the model the session runs on already does no harm.
             was = target.from || ss.model || (await $.session.model());
-            if (!sameModel(was, target.model)) {
-              modelAsked = true;
-              modelRan = await $.command.run({ command: 'model', args: target.model });
-              if (commandFailed(modelRan)) throw new Error('refused');
-              ss.model = target.model;
-            }
-            if (target.effort && (await effortNow($, ss)) !== target.effort) {
+            modelRan = await $.command.run({ command: 'model', args: target.model });
+            if (commandFailed(modelRan)) throw new Error('refused');
+            ss.model = target.model;
+            if (target.effort) {
               if (commandFailed(await $.command.run({ command: 'effort', args: target.effort }))) throw new Error('refused');
               ss.effort = target.effort;
             }
@@ -1493,7 +1490,7 @@ export const register = on => {
           };
           let nowModel = null;
           try { nowModel = await $.session.model(); } catch { /* no read-back */ }
-          if (sameModel(nowModel, target.model) || !modelAsked) { tell(sameModel(was, target.model) ? target.model : nowModel); return; }
+          if (sameModel(nowModel, target.model)) { tell(target.model); return; }
           try {
             $.clock.after(READ_BACK_LAG, async () => {
               let again = nowModel;
