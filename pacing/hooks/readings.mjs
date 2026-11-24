@@ -1006,7 +1006,7 @@ async function tick($, st) {
   redraw($);
   if (st.agents.size && t - st.progressAt >= PROGRESS_EVERY) {
     st.progressAt = t;
-    if (await noticesOn($)) $.ui.toast(progressText(st.list(), t));
+    if ((await noticesOn($)) && !(await paneShown($, st))) $.ui.toast(progressText(st.list(), t));
   }
 }
 // the room for the status line, from the surfaces that draw the session
@@ -1064,11 +1064,23 @@ async function pollSessions($, st, t) {
     const since = st.watchSince && t - st.watchSince <= WATCH_FOR ? st.watchSince : t;
     st.agents.set(r.sessionId, { id: r.sessionId, kind: 'session', type: r.name || r.title || 'session', label: shortTitle(r), description: r.title, startedAt: since, background: true, runs: [], step: null });
     changed = true;
-    if (notify) $.ui.toast(sessionStartedText(r, st.list()));
+    if (notify && !(await paneShown($, st))) $.ui.toast(sessionStartedText(r, st.list()));
   }
   st.quiet = false;
   if (st.agents.size) startTick($, st);
   if (changed) { $.ui.status(st.lineNow(t)); redraw($); }
+}
+// Whether the pacing pane is on show in full: it lists the agents at work,
+// so a toast that one started, or that they still run, says nothing new
+// there. A finished agent's toast stays (the pane only shows the running).
+// A pane behind another tab, waiting undrawn or minimized (`st.paneGlance`,
+// set as it is drawn) shows no agents, and the toasts go on.
+async function paneShown($, st) {
+  try {
+    if (st && st.paneGlance) return false;
+    const panes = await $.ui.panes();
+    return !!panes && panes.some(p => p.id === PANE_ID && p.isShown !== false && p.isPlaced !== false);
+  } catch { return false; }
 }
 // whether the toasts about agents are on (config.json's agentNotices; on unless false)
 async function noticesOn($) {
@@ -1715,7 +1727,7 @@ export const register = on => {
         $.ui.status(lineNow(now));
         redraw($);
         try { const all = await $.store.get('agentRuns'); if (all && typeof all === 'object' && Array.isArray(all[type])) a.runs = all[type]; } catch { /* no history */ }
-        if (await noticesOn($)) $.ui.toast(startedText(a, runningAgents()));
+        if ((await noticesOn($)) && !(await paneShown($, st))) $.ui.toast(startedText(a, runningAgents()));
       }
     } catch { /* an engine without timers or toasts: the count alone */ }
     return r;
@@ -2086,6 +2098,7 @@ export const register = on => {
   });
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
     if (e.plugin && e.plugin !== 'pacing') return next(e);
+    st.paneGlance = !!(e.props && e.props.placement === 'widget');
     let now = Date.now();
     try { now = await $.clock.now(); } catch { /* the system's clock */ }
     return paneView($.ui.resolve(e), paneNow(now), { surface: e.surface, placement: e.props && e.props.placement, onRefresh: () => {

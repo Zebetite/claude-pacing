@@ -1418,6 +1418,25 @@ test('one agent: a toast when it starts, the line leads with the count, the assi
   expect(status.at(-1)).toBe('Budget: 10% · usage: Weekly 10% Fable 40%')
 })
 
+test('with the pane on show: no toast that an agent started or still runs (the pane lists them); the toast that it is done stays', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = agentEngine(on, { list: () => [{ id: 'ag1', status: 'running' }] })
+  let panes: any[] = [{ id: PANE_ID, title: PANE_TITLE, isShown: true, isFocused: false, isPlaced: true }]
+  on('ui.panes', () => ({ value: panes }))
+  await $.session.measure(measure(10))
+  await spawn($, 'pacing:reader')
+  await clock.advance(6 * 60000)
+  expect(seen.toasts).toEqual([])
+  await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
+  expect(seen.toasts.length).toBe(1)
+  expect(seen.toasts[0]).toMatch(/^✅ reader is done with "a task"/)
+  // behind another tab, or waiting undrawn: the pane shows nothing, so the toasts are back
+  panes = [{ id: PANE_ID, title: PANE_TITLE, isShown: false, isFocused: false, isPlaced: true }]
+  await spawn($, 'pacing:reader')
+  expect(seen.toasts.at(-1)).toMatch(/^▶️ reader is running/)
+})
 test('several agents: counted in the line; a progress toast every 5 minutes and no more often; the line follows as each ends', async ($, on) => {
   const status = engine(on)
   big(on)

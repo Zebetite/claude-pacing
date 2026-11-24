@@ -1084,3 +1084,30 @@ in the manner of a film's head-up display, then of a ship's console.
 - **Not seen by the tests.** How the app spaces an Svg against a tinted
   Box, and whether SMIL animation runs in the pane: the user looked at a
   preview mod with sample figures while it was drawn.
+
+## With the pane on show, fewer agent toasts (0.9.28)
+
+The user's word: with the pane open the toasts are not needed. Asked which,
+they chose the agent toasts. While the pacing pane is on show in full
+(`paneShown`: listed by `$.ui.panes()` as shown and placed, and not drawn
+as a widget), the started toast (an agent's and a side session's) and the
+5-minute still-running toast are not raised: "Agents at work" says both.
+The done toast stays, as the pane only lists what runs, and so do the
+toasts about the level. Behind another tab, waiting undrawn or minimized,
+the pane lists nothing and the toasts are as before.
+
+## A hold on the per-model meter stays for the day (0.9.28)
+
+The user's word: the Switch row sent the session off Fable and back too
+often. The log of one day showed the hold (`premiumHeld`) come and go
+seven times with the meter's figure barely moving: the meter's level
+follows its trend, which swings between readings, and a session that has
+left the model lets the trend fall, so the hold released and the session
+was offered Fable again, used it, and was held again. Now `budget.mjs`
+keeps a hold: a model held at the last logged reading stays held for the
+rest of the day the hold began (`premiumHeldLine`, that day's budget
+line, carried in the log) and after the line steps until its meter is
+`HOLD_RELEASE` (5) points or more under the line by its figure alone.
+That is two switches a day at most. The reading says so: "Fable 5.2 stays
+held for now". Not changed: the calm offer of one step less effort at
+"over", which still follows the level.

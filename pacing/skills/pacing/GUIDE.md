@@ -372,6 +372,10 @@ sessions too, until you type `/pacing-pane`. From the top:
 - **Context**: how full the session's context is, one figure.
 - **Models this session**: the share each model took.
 
+While the pane is on show, the toasts that an agent started or is still
+running stay away, since the pane lists the agents; the toast that one is
+done still comes.
+
 It measures the context again after each of your turns. **Refresh** does
 that at once and takes a new reading of every meter too. In a terminal the
 pane has the same figures as rows of blocks, without the drawings.

@@ -495,6 +495,29 @@ describe('the per-model meter, paced on the same line', () => {
     assert.doesNotMatch(dry(sun, 35, '--premium', '40').out, /^Fable 5\.2 trend/m);
     sb.write('log.jsonl', '');
   });
+  test('a hold stays: for the rest of the day, and after the line steps until the meter is 5 points under it', () => {
+    const s = sandbox();
+    try {
+      const at = (t, prem) => s.budget(['--all', '10', '--reset', RESET, '--premium', String(prem), '--now', t, '--session', 'claude-opus-5-5']).out;
+      // Friday, line 20 %: 30 % is its throttle, held
+      assert.match(at(now, 30), /Fable 5.2 held$/m);
+      // a lower figure the same day (only "over" by itself): still held, and said so
+      const kept = at('2026-11-13T12:30:00Z', 24);
+      assert.match(kept, /Fable 5.2 held$/m);
+      assert.match(kept, /^do: Fable 5\.2 stays held for now: this session belongs on Opus 5\.5 high now/m);
+      assert.match(kept.replace(/\s+/g, ' '), /it was at "throttle" earlier, and a hold stays for the rest of the day/);
+      // even under its line, the same day
+      assert.match(at('2026-11-13T13:00:00Z', 18), /Fable 5.2 held$/m);
+      // Saturday, line 33.3 %: the day of the hold is over, but 3 points under is not yet enough
+      assert.match(at('2026-11-14T12:00:00Z', 30), /Fable 5.2 held$/m);
+      // 6 points under: let back
+      const back = at('2026-11-14T12:30:00Z', 27);
+      assert.doesNotMatch(back, /held/);
+      assert.match(back, /^next session: Fable 5.2 high$/m);
+      // and with no hold before it, "over" alone holds nothing
+      assert.doesNotMatch(at('2026-11-14T13:00:00Z', 36), /held/);
+    } finally { s.cleanup(); }
+  });
   test('the log marks the meter that set the level, and a held model', () => {
     const s = sandbox();
     try {

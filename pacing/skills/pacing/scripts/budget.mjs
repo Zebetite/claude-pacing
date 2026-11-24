@@ -381,11 +381,28 @@ const levelBefore = level;
 // 'premium' when the per-model meter set the level
 let levelBy = 'all';
 let premHeld = false;
+// A hold stays. The meter's level moves with its trend, which swings from
+// one reading to the next, and a session that has left the model lets the
+// trend fall again: the hold came and went within the hour and the session
+// was sent off the model and back (live: seven times in a day). So a model
+// held at the last logged reading stays held for the rest of that day (the
+// budget line steps once a day), and after the step until its meter is
+// HOLD_RELEASE points or more under the line by its figure alone. That is
+// two switches a day at most. `premKept`: held by this rule, not by the
+// level now.
+const HOLD_RELEASE = 5;
+let premKept = false, premHeldLine = null;
 if (premLevel && premTop && level !== 'stop') {
   // held only when another model can take tier 1; with none, its throttle
   // routes like any other
   const others = tiers.some(t => t.model !== premium) || (fallbackTier && fallbackTier.model !== premium);
-  if (premLevel === 'throttle' && others) premHeld = true;
+  const before = weekLog.at(-1);
+  const wasHeld = !!before && before.premiumHeld === true && before.premiumModel === premium;
+  // the day the hold began, by its budget line (carried in the log)
+  const since = wasHeld ? (typeof before.premiumHeldLine === 'number' ? before.premiumHeldLine : before.line) : null;
+  const sameDay = typeof since === 'number' && Math.abs(since - budget) < 0.06;
+  const keep = wasHeld && premLevel !== 'throttle' && (sameDay || premDelta > -HOLD_RELEASE);
+  if ((premLevel === 'throttle' || keep) && others) { premHeld = true; premKept = keep; premHeldLine = keep && typeof since === 'number' ? since : Math.round(budget * 10) / 10; }
   else if (below(level, premLevel)) { level = premLevel; levelBy = 'premium'; }
 }
 // the model is off tier 1 either way: out (its meter full) or held (over its line)
@@ -554,7 +571,8 @@ let why = (levelBy === 'premium'
   // with every tier on the premium model and no fallback, nothing takes tier 1
   + (premOut ? ' ' + premLabel + '\'s meter is at 100 %, so it left the ladder until the reset'
     + (ladder[0] ? ' and ' + name(ladder[0]) + ' takes tier 1.' : ' and no model is left.') : '')
-  + (premHeld ? ' ' + premWhy + ': "throttle" for that meter, so the session moves to ' + name(ladder[0]) + ' at tier 1 and keeps '
+  + (premHeld ? ' ' + premWhy + (premKept ? ': it was at "throttle" earlier, and a hold stays for the rest of the day and until the meter is ' + HOLD_RELEASE + ' points under its line, so the session stays on '
+    : ': "throttle" for that meter, so the session moves to ') + name(ladder[0]) + ' at tier 1 and keeps '
     + premLabel + ' for judgment work, one contained hard task at a time.' : '');
 console.log('');
 wrap(why, WIDTH).forEach(l => console.log(l));
@@ -708,7 +726,7 @@ if (!ladder.length) {
     'stop': extraOn ? 'the week is nearly used; from 100 % the work is charged to extra usage, so go on only with the user\'s word' : 'wrap up, the week is nearly used',
   };
   const switchNow = premOut ? premLabel + ' is out until the reset: this session belongs on ' + name(pick(1)) + ' now' + offered(pick(1)) + '. '
-    : premHeld ? premLabel + '\'s meter is at throttle: this session belongs on ' + name(pick(1)) + ' now, and ' + premLabel + ' is kept for judgment work' + offered(pick(1)) + '. ' : '';
+    : premHeld ? premLabel + (premKept ? ' stays held for now' : '\'s meter is at throttle') + ': this session belongs on ' + name(pick(1)) + ' now, and ' + premLabel + ' is kept for judgment work' + offered(pick(1)) + '. ' : '';
   console.log('do: ' + switchNow + notes[level]);
   // At "over" the cheapest lever comes first: one step less effort on the
   // session's own model saves on every turn and keeps the work where it is.
@@ -752,7 +770,7 @@ if (!opt.dry) {
     && lastEntry.level === level && !!lastEntry.premiumOut === premOut && !!lastEntry.premiumHeld === premHeld;
   if (!same) {
     const entry = { t: now.toISOString(), all: r1(used), premium: prem === null ? null : r1(prem), premiumModel: premium, premiumOut: premOut, five: five === null ? null : r1(five), fiveReset: opt['five-reset'] || null, line: r1(budget), level, reset: opt.reset,
-      ...(premLevel ? { premiumLevel: premLevel } : {}), ...(premHeld ? { premiumHeld: true } : {}), ...(levelBy === 'premium' ? { levelBy } : {}),
+      ...(premLevel ? { premiumLevel: premLevel } : {}), ...(premHeld ? { premiumHeld: true, premiumHeldLine: premHeldLine } : {}), ...(levelBy === 'premium' ? { levelBy } : {}),
       ...(auto ? { source: 'hook' } : {}), ...(fullAuto ? { full: true } : {}), ...(premFrom ? { premiumAt: premFrom.at } : {}) };
     fs.appendFileSync(logFile, JSON.stringify(entry) + '\n');
     // swapped in whole (safe.mjs), and never over a newer reading that
