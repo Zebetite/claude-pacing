@@ -940,3 +940,28 @@ level in the status line.
   as if typed), then `/model` and `/effort`; a compaction that does not
   start fills `/compact` and leaves the model alone. Not where the model
   is out, nor for an effort alone.
+
+## A press never waits for its command (0.9.22)
+
+Live, in the desktop app: Compact now ran `/compact` (71 s for 310 000
+tokens), Switch was pressed while it ran, and all that came was `pacing:
+ui.press hook skipped: ran past its 10s budget`; no `/model` ever ran.
+A press hook that has waited 10 s is dropped, and the command it queued
+goes with it. `$.command.run` resolves when the command has run, not when
+it is queued: `/compact` takes a minute by itself, and a `/model` queued
+behind a turn or a compaction waits as long.
+
+- **The press returns at once.** Compact now, Switch and Compact, then
+  switch hide their row and hand their work to `later($, work)`: a
+  `$.clock.after(0, ...)` timer, which no dispatch waits on (run directly
+  where the engine has no timers). The work is what it was: `/model`, then
+  `/effort`, the read-back and its toast; `$.session.compact`, else
+  `/compact` as if typed (`typedCompact`), else `/compact` in the box.
+- **A toast while it waits.** A queued command that has not run after
+  `RUN_WAIT` (1.5 s) means the session is busy: `🔁 the switch to Opus 5.5
+  high runs as soon as the session is free.` (`switchWaitText`), `🗜️
+  compacting: /compact runs as soon as the session is free.`
+  (`COMPACT_WAIT_TEXT`, before 0.9.22 shown only after the compaction had
+  ended). A command that runs at once says nothing of waiting.
+- **When it has run.** The switch toasts as before; a typed compaction
+  ends with `🗜️ compacted.` (the sizes are known only to the direct call).

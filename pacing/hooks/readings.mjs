@@ -1140,6 +1140,20 @@ export const switchOffer = (j, curModel, curEffort, ctx = null) => {
 // so. A read-back that disagrees right after the press is read again after
 // READ_BACK_LAG; a command that ran without an error is trusted over it.
 export const READ_BACK_LAG = 2000;
+// Work a press starts and must not wait for. A press hook that has waited
+// 10 s is dropped, and the command it queued with it (live: "ui.press hook
+// skipped: ran past its 10s budget", and no switch). A queued command waits
+// for the session to be free: /compact itself takes a minute, and a /model
+// queued behind one waits as long. So a press returns at once and its work
+// runs from a timer, which no dispatch waits on.
+function later($, work) {
+  const run = () => { Promise.resolve().then(work).catch(() => { /* its own toasts say what failed */ }); };
+  try { $.clock.after(0, run); } catch { run(); }
+}
+// a queued command that has not run after this long gets a toast saying it waits
+export const RUN_WAIT = 1500;
+export const switchWaitText = target => ICON.switched + ' the switch to ' + target.label + (target.effort ? ' ' + target.effort : '') + ' runs as soon as the session is free.';
+export const COMPACT_WAIT_TEXT = ICON.compacted + ' compacting: /compact runs as soon as the session is free.';
 export const switchedText = (target, nowModel, nowEffort, was = null) => (sameModel(nowModel, target.model)
   ? ICON.switched + ' this session now runs on ' + modelLabel(nowModel) + (nowEffort ? ' ' + nowEffort : target.effort ? ' ' + target.effort : '')
     + (typeof was === 'string' && was && !sameModel(was, target.model) ? '; the model menu may still show ' + modelLabel(was) : '') + '.'
@@ -1536,11 +1550,28 @@ export const register = on => {
       ? Text({ dimColor: true, children: backgroundText(background, now, typeof p.bodyColumns === 'number' ? p.bodyColumns : MSG_MAX) })
       : null;
     const stack = row => (agentRow ? Box({ flexDirection: 'column', children: [row, agentRow] }) : row);
+    // a toast when a queued command has not run after RUN_WAIT: the session
+    // is busy, and the command runs when it is free
+    const whileWaiting = text => {
+      let timer = null;
+      try { timer = $.clock.after(RUN_WAIT, () => { try { $.ui.toast(text); } catch { /* no toast */ } }); } catch { /* no timers: no toast */ }
+      return () => { try { if (timer) timer.cancel(); } catch { /* fired already */ } };
+    };
+    // /compact as if typed (command.run, queued until the session is free);
+    // it resolves once the compaction has run, and throws where none started
+    const typedCompact = async () => {
+      const waited = whileWaiting(COMPACT_WAIT_TEXT);
+      try {
+        const ran = await $.command.run({ command: 'compact', args: COMPACT_INSTRUCTIONS });
+        if (commandFailed(ran)) throw new Error((ran && ran.text) || 'the /compact command failed');
+      } finally { waited(); }
+    };
     if (sw && (sw.urgent || !offer)) {
       const target = sw;
       // the switch itself: /model, then /effort, and the toast
       const runSwitch = async () => {
         let ran = true, was = null, modelRan = null;
+        const waited = whileWaiting(switchWaitText(target));
         try {
           // /model runs on every press, then /effort. What the module takes
           // for the session's model can be wrong: live, a read named the
@@ -1557,6 +1588,7 @@ export const register = on => {
           }
           await keepSwitch($, ss);
         } catch { ran = false; }
+        waited();
         if (!ran) {
           // the command as text in the box, for the user to send
           try { await $.prompt.fill({ text: '/model ' + target.model, mode: 'replace' }); } catch { /* the menu alone */ }
@@ -1591,8 +1623,7 @@ export const register = on => {
           contextTokens = (r && r.tokensAfter) || null;
         } catch (err) {
           try {
-            const ran = await $.command.run({ command: 'compact', args: COMPACT_INSTRUCTIONS });
-            if (commandFailed(ran)) throw new Error((ran && ran.text) || 'the /compact command failed');
+            await typedCompact();
           } catch (err2) {
             let filled = false;
             try { const f = await $.prompt.fill({ text: '/compact', mode: 'replace' }); filled = !f || f.isFilled !== false; } catch { /* the toast alone */ }
@@ -1605,15 +1636,15 @@ export const register = on => {
       };
       const switchRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
         Text(target.urgent ? { color: 'warning', children: target.icon + ' ' + target.text } : { dimColor: true, children: target.icon + ' ' + target.text }),
-        ...(target.compactFirst ? [Button({ key: 'pacing-compact-switch', label: 'Compact, then switch', variant: target.urgent ? 'primary' : 'secondary', onPress: async () => {
+        ...(target.compactFirst ? [Button({ key: 'pacing-compact-switch', label: 'Compact, then switch', variant: target.urgent ? 'primary' : 'secondary', onPress: () => {
           sw = null;
           redraw($);
-          await compactThenSwitch();
+          later($, compactThenSwitch);
         } })] : []),
-        Button({ key: 'pacing-switch', label: 'Switch', variant: target.urgent && !target.compactFirst ? 'primary' : 'secondary', onPress: async () => {
+        Button({ key: 'pacing-switch', label: 'Switch', variant: target.urgent && !target.compactFirst ? 'primary' : 'secondary', onPress: () => {
           sw = null;
           redraw($);
-          await runSwitch();
+          later($, runSwitch);
         } }),
         Button({ key: 'pacing-switch-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { sw = null; redraw($); } }),
       ] });
@@ -1635,11 +1666,13 @@ export const register = on => {
     if (shown.level === 'now') nowFor = shown.pause;
     const offerRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
       Text(urge ? { color: 'warning', children: words } : { dimColor: true, children: words }),
-      Button({ key: 'pacing-compact', label: 'Compact now', variant: urge ? 'primary' : 'secondary', onPress: async () => {
+      Button({ key: 'pacing-compact', label: 'Compact now', variant: urge ? 'primary' : 'secondary', onPress: () => {
         offer = null;
         offered[shown.level] = shown.tokens;
         clearTimers();
         redraw($);
+        // the compaction takes a minute: it runs after the press (later)
+        later($, async () => {
         try {
           const r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS });
           if (r && r.skip) $.ui.toast(ICON.failed + ' the compaction did not run: ' + r.skip, { timeoutMs: TOAST_LONG });
@@ -1652,13 +1685,12 @@ export const register = on => {
           // The engine rejects while a turn runs, and in the desktop app always:
           // "$.session.compact: not available in a headless (-p / SDK) session
           // yet: compaction here runs inside a turn" (seen live), while a typed
-          // /compact works there. So /compact runs as if typed (command.run,
-          // queued until the session is idle); only where that fails too does
-          // the toast give the engine's reason and /compact go in the box.
+          // /compact works there. So /compact runs as if typed (typedCompact);
+          // only where that fails too does the toast give the engine's reason
+          // and /compact go in the box.
           try {
-            const ran = await $.command.run({ command: 'compact', args: COMPACT_INSTRUCTIONS });
-            if (commandFailed(ran)) throw new Error((ran && ran.text) || 'the /compact command failed');
-            $.ui.toast(ICON.compacted + ' compacting: /compact runs as soon as the session is free.');
+            await typedCompact();
+            $.ui.toast(ICON.compacted + ' compacted.');
             forget();
           } catch (err2) {
             let filled = false;
@@ -1666,6 +1698,7 @@ export const register = on => {
             $.ui.toast(compactFailedText((err2 && err2.message) || (err && err.message), filled), { timeoutMs: TOAST_LONG });
           }
         }
+        });
       } }),
       Button({ key: 'pacing-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => {
         if (shown.level === 'now') clearTimers();

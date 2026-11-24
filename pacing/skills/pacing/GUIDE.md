@@ -325,7 +325,9 @@ turn stores the whole session again at the new model's price. The row
 then says so, with what it costs of the budget (`A switch stores this
 session's 400k tokens again (about 20m of the budget): compact first.`),
 and has **Compact, then switch** before Switch: the compaction first, so
-the switch stores only the summary. One row shows at a time: a switch away
+the switch stores only the summary. Pressed while the session is busy, a
+switch or a compaction runs as soon as the session is free, and a toast
+says so. One row shows at a time: a switch away
 from a model that is out or held first, then the offer to compact, then
 a calm switch. `/pacing switch off` turns it off.
 

@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -871,8 +871,12 @@ const bandText = async ($: any) => {
   return { text: t?.text as string | undefined }
 }
 
-test('Compact now in the desktop app: the direct call is refused, so /compact runs as if typed', async ($, on) => {
+// Live, a press hook that waited 10 s was dropped ("ui.press hook skipped:
+// ran past its 10s budget") and the command it had queued with it: /compact
+// takes a minute. So the press returns before its command has run.
+test('Compact now in the desktop app: the direct call is refused, so /compact runs as if typed, after the press and not within it', async ($, on) => {
   engine(on)
+  const clock = mock.clock(on, { now: T0 })
   big(on)
   const toasts: string[] = [], fills: string[] = [], runs: string[] = []
   on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
@@ -880,23 +884,38 @@ test('Compact now in the desktop app: the direct call is refused, so /compact ru
   on('ui.invalidate', () => ({ value: undefined }))
   on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
   on('session.compact', () => { throw new Error('pacing: $.session.compact: not available in a headless (-p / SDK) session yet') })
-  on('command.run', (_: unknown, e: any) => (runs.push('/' + e.command + ' ' + e.args), { text: '' }))
+  // the compaction answers only when the test lets it: a minute, live
+  let done = () => {}
+  const compacting = new Promise<void>(r => { done = r })
+  on('command.run', async (_: unknown, e: any) => { runs.push('/' + e.command + ' ' + e.args); await compacting; return { text: '' } })
   on('prompt.fill', (_: unknown, e: any) => (fills.push(e.text), { isFilled: true }))
   on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
   await $.prompt.submit({ text: 'work on', asUser: true })
   await $.session.measure(measure(10, [], 320000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
+  const said = toasts.length
   const ui = await $.ui.mount(BAND)
+  // the press is back with nothing run yet
   await ui.press({ key: 'pacing-compact' })
+  expect(runs).toEqual([])
+  await clock.advance(1)
   await ui.unmount()
   expect(runs).toEqual(['/compact ' + COMPACT_INSTRUCTIONS])
-  expect(fills).toEqual([])
-  expect(toasts.at(-1)).toBe('🗜️ compacting: /compact runs as soon as the session is free.')
+  expect(toasts.slice(said)).toEqual([])
   expect((await bandText($)).text).toBe(undefined)
+  // still running after a moment: a toast says it runs when the session is free
+  await clock.advance(RUN_WAIT)
+  expect(toasts.slice(said)).toEqual(['🗜️ compacting: /compact runs as soon as the session is free.'])
+  expect(COMPACT_WAIT_TEXT).toBe('🗜️ compacting: /compact runs as soon as the session is free.')
+  done()
+  await clock.advance(1)
+  expect(fills).toEqual([])
+  expect(toasts.slice(said)).toEqual([COMPACT_WAIT_TEXT, '🗜️ compacted.'])
 })
 
 test('Compact now that the engine refuses both ways: its own reason in the toast, /compact in the box', async ($, on) => {
   engine(on)
+  const clock = mock.clock(on, { now: T0 })
   big(on)
   const toasts: string[] = [], fills: string[] = []
   on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
@@ -912,6 +931,7 @@ test('Compact now that the engine refuses both ways: its own reason in the toast
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
   await ui.press({ key: 'pacing-compact' })
+  await clock.advance(1)
   await ui.unmount()
   expect(fills).toEqual(['/compact'])
   // the engine's own words, whatever they are (the test engine words its own refusal)
@@ -925,6 +945,7 @@ test('Compact now that the engine refuses both ways: its own reason in the toast
 
 test('suggest: from 300 000 tokens, a calm row with Compact now; it compacts with the instructions and says the sizes', async ($, on) => {
   engine(on)
+  const clock = mock.clock(on, { now: T0 })
   big(on)
   const seen = offers(on, { compacted: { tokensBefore: 320000, tokensAfter: 38000 } })
 
@@ -936,6 +957,7 @@ test('suggest: from 300 000 tokens, a calm row with Compact now; it compacts wit
   expect(text).toBe('🗜️ This session is 320k tokens. Compacting now makes every later turn cheaper.')
   expect(text).toBe('🗜️ ' + offerText('suggest', 320000))
   await ui.press({ key: 'pacing-compact' })
+  await clock.advance(1)
   expect(seen.compacts).toEqual([COMPACT_INSTRUCTIONS])
   expect(COMPACT_INSTRUCTIONS).toContain('the goal; the decisions made and why; the open items, in order; the files and commands that matter; what was tried and ruled out')
   expect(seen.toasts).toEqual(['🗜️ compacted from 320k to 38k tokens.'])
@@ -1027,6 +1049,7 @@ test('now: left idle, the row warns 10 minutes before the cache lapses and again
   const ui = await $.ui.mount(BAND)
   expect((await ui.find({ type: 'Text', text: /session is/ }))?.text).toBe('💤 This session is 420k tokens and its cache has lapsed, so the next turn stores all of it again. Compacting first is cheaper.')
   await ui.press({ key: 'pacing-compact' })
+  await clock.advance(1)
   await ui.unmount()
   expect(seen.compacts).toEqual([COMPACT_INSTRUCTIONS])
   expect(seen.toasts).toEqual(['🗜️ compacted from 420k to 41k tokens.'])
@@ -1533,11 +1556,13 @@ const REC_OPUS_HIGH = { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'hi
 const switchReading = (extra: Record<string, unknown> = {}) => answer('ahead', 10, { premiumModelId: 'claude-fable-5-2', recommend: { model: 'claude-fable-5-2', label: 'Fable 5.2', effort: 'high' }, ...extra })
 // the engine beneath for a switch: the commands run, what the session runs
 // on (it follows /model and /effort), the box filled, the toasts, the config
-const switchEngine = (on: any, opts: { model?: string; effort?: string; config?: string; failRun?: boolean; sticky?: boolean } = {}) => {
+const switchEngine = (on: any, opts: { model?: string; effort?: string; config?: string; failRun?: boolean; sticky?: boolean; busy?: Promise<void> } = {}) => {
   const seen = { runs: [] as string[], fills: [] as string[], toasts: [] as string[], model: opts.model ?? 'claude-fable-5-2', effort: opts.effort ?? 'high' }
-  on('command.run', (_: unknown, e: any) => {
+  on('command.run', async (_: unknown, e: any) => {
     if (opts.failRun) throw new Error('no such command here')
     seen.runs.push('/' + e.command + ' ' + e.args)
+    // a busy session runs a queued command only once it is free
+    if (opts.busy) await opts.busy
     if (!opts.sticky && e.command === 'model') seen.model = e.args
     if (!opts.sticky && e.command === 'effort') seen.effort = e.args
     return { text: 'ok' }
@@ -1575,6 +1600,7 @@ test('the switch: wording by case, the urgent ones first', async () => {
 
 test('Fable out: the row in the warning colour; Switch runs /model and /effort and a toast reads back what the session runs on', async ($, on) => {
   engine(on)
+  const clock = mock.clock(on, { now: T0 })
   on('process.run', () => ({ value: switchReading({ premiumOut: true, recommend: REC_OPUS_HIGH }) }))
   const seen = switchEngine(on, { effort: 'medium' })
   await $.prompt.submit({ text: 'work on', asUser: true })
@@ -1583,6 +1609,7 @@ test('Fable out: the row in the warning colour; Switch runs /model and /effort a
   const ui = await $.ui.mount(BAND)
   expect((await ui.find({ type: 'Text' }))?.text).toBe('🔴 Fable 5.2 is out until the reset. Switch this session to Opus 5.5 high.')
   await ui.press({ key: 'pacing-switch' })
+  await clock.advance(1)
   await ui.unmount()
   expect(seen.runs).toEqual(['/model claude-opus-5-5', '/effort high'])
   expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.')
@@ -1591,6 +1618,7 @@ test('Fable out: the row in the warning colour; Switch runs /model and /effort a
 
 test('Switch goes by the model the offer saw: a session read that already names the target still runs /model', async ($, on) => {
   engine(on)
+  const clock = mock.clock(on, { now: T0 })
   on('process.run', () => ({ value: switchReading({ premiumHeld: true, recommend: REC_OPUS_HIGH }) }))
   // the session read says Opus 5.5, the turns run on Fable 5.2
   const seen = switchEngine(on, { model: 'claude-opus-5-5', effort: 'medium' })
@@ -1600,6 +1628,7 @@ test('Switch goes by the model the offer saw: a session read that already names 
   const ui = await $.ui.mount(BAND)
   expect((await ui.find({ type: 'Text' }))?.text).toBe('⚠️ Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 high; Fable stays for hard tasks.')
   await ui.press({ key: 'pacing-switch' })
+  await clock.advance(1)
   await ui.unmount()
   expect(seen.runs).toEqual(['/model claude-opus-5-5', '/effort high'])
   expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.')
@@ -1607,6 +1636,7 @@ test('Switch goes by the model the offer saw: a session read that already names 
 
 test('Switch runs /model even where the offer saw the target model already, then /effort', async ($, on) => {
   engine(on)
+  const clock = mock.clock(on, { now: T0 })
   on('process.run', () => ({ value: switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }) }))
   // the turns' usage names Opus 5.5 (what the module goes by); the session may run on another
   const seen = switchEngine(on, { model: 'claude-opus-5-5', effort: 'high' })
@@ -1616,9 +1646,40 @@ test('Switch runs /model even where the offer saw the target model already, then
   const ui = await $.ui.mount(BAND)
   expect((await ui.find({ type: 'Text' }))?.text).toBe('🔁 This week\'s budget suggests Opus 5.5 medium for this session.')
   await ui.press({ key: 'pacing-switch' })
+  await clock.advance(1)
   await ui.unmount()
   expect(seen.runs).toEqual(['/model claude-opus-5-5', '/effort medium'])
   expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 medium.')
+})
+
+test('Switch while the session is busy: the press is back at once, a toast says the switch waits, and it runs when the session is free', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  on('process.run', () => ({ value: switchReading({ premiumOut: true, recommend: REC_OPUS_HIGH }) }))
+  let free = () => {}
+  const seen = switchEngine(on, { effort: 'medium', busy: new Promise<void>(r => { free = r }) })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const said = seen.toasts.length
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-switch' })
+  await ui.unmount()
+  // nothing ran within the press, and the row is gone
+  expect(seen.runs).toEqual([])
+  expect(await switchText($)).toBe(undefined)
+  await clock.advance(1)
+  expect(seen.runs).toEqual(['/model claude-opus-5-5'])
+  expect(seen.toasts.slice(said)).toEqual([])
+  await clock.advance(RUN_WAIT)
+  expect(seen.toasts.slice(said)).toEqual(['🔁 the switch to Opus 5.5 high runs as soon as the session is free.'])
+  expect(switchWaitText(REC_OPUS_HIGH)).toBe('🔁 the switch to Opus 5.5 high runs as soon as the session is free.')
+  free()
+  await clock.advance(1)
+  expect(seen.runs).toEqual(['/model claude-opus-5-5', '/effort high'])
+  expect(seen.toasts.slice(said)).toEqual([switchWaitText(REC_OPUS_HIGH), '🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.'])
+  // a switch that ran at once says nothing of waiting
+  expect(RUN_WAIT).toBe(1500)
 })
 
 test('a switch in a large session says what it costs and offers the compaction first; a small one, an effort alone and a model that is out do not', () => {
@@ -1644,6 +1705,7 @@ test('a switch in a large session says what it costs and offers the compaction f
 
 test('Compact, then switch: the compaction first, then /model and /effort; Switch alone still switches at once', async ($, on) => {
   engine(on)
+  const clock = mock.clock(on, { now: T0 })
   on('process.run', () => ({ value: switchReading({ premiumHeld: true, premiumLabel: 'Fable 5.2', recommend: REC_OPUS_HIGH }) }))
   const seen = switchEngine(on, { effort: 'medium' })
   on('session.compact', (_: unknown, e: any) => (seen.runs.push('compact'), { messages: [{ role: 'assistant', text: 's', toolUses: [] }], tokensBefore: 250000, tokensAfter: 40000 }))
@@ -1654,6 +1716,7 @@ test('Compact, then switch: the compaction first, then /model and /effort; Switc
   expect(await bandKeys($)).toEqual(['pacing-compact-switch', 'pacing-switch', 'pacing-switch-not-now'])
   const ui = await $.ui.mount(BAND)
   await ui.press({ key: 'pacing-compact-switch' })
+  await clock.advance(1)
   await ui.unmount()
   expect(seen.runs).toEqual(['compact', '/model claude-opus-5-5', '/effort high'])
   expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.')
@@ -1662,6 +1725,7 @@ test('Compact, then switch: the compaction first, then /model and /effort; Switc
 
 test('Compact, then switch in the desktop app: /compact as if typed, then the switch; a compaction that does not start leaves the model alone', async ($, on) => {
   engine(on)
+  const clock = mock.clock(on, { now: T0 })
   on('process.run', () => ({ value: switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }) }))
   const seen = switchEngine(on)
   on('session.compact', () => { throw new Error('pacing: $.session.compact: not available in a headless (-p / SDK) session yet') })
@@ -1670,6 +1734,7 @@ test('Compact, then switch in the desktop app: /compact as if typed, then the sw
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
   await ui.press({ key: 'pacing-compact-switch' })
+  await clock.advance(1)
   await ui.unmount()
   expect(seen.runs).toEqual(['/compact ' + COMPACT_INSTRUCTIONS, '/model claude-opus-5-5', '/effort medium'])
   expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 medium; the model menu may still show Fable 5.2.')
@@ -1677,6 +1742,7 @@ test('Compact, then switch in the desktop app: /compact as if typed, then the sw
 
 test('Compact, then switch where no compaction starts: /compact in the box and the reason, the model left alone', async ($, on) => {
   engine(on)
+  const clock = mock.clock(on, { now: T0 })
   on('process.run', () => ({ value: switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }) }))
   const seen = switchEngine(on, { failRun: true })
   on('session.compact', () => { throw new Error('pacing: $.session.compact: not available here') })
@@ -1685,6 +1751,7 @@ test('Compact, then switch where no compaction starts: /compact in the box and t
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
   await ui.press({ key: 'pacing-compact-switch' })
+  await clock.advance(1)
   await ui.unmount()
   expect(seen.runs).toEqual([])
   expect(seen.fills).toEqual(['/compact'])
@@ -1717,6 +1784,7 @@ test('once per suggestion: Not now holds until the recommendation changes', asyn
 
 test('the switch that cannot run fills the box for the user to send; one that did not take says so', async ($, on) => {
   engine(on)
+  const clock = mock.clock(on, { now: T0 })
   on('process.run', () => ({ value: switchReading({ premiumOut: true, recommend: REC_OPUS_HIGH }) }))
   const seen = switchEngine(on, { failRun: true })
   await $.prompt.submit({ text: 'work on', asUser: true })
@@ -1724,6 +1792,7 @@ test('the switch that cannot run fills the box for the user to send; one that di
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
   await ui.press({ key: 'pacing-switch' })
+  await clock.advance(1)
   await ui.unmount()
   expect(seen.fills).toEqual(['/model claude-opus-5-5'])
   expect(seen.toasts.at(-1)).toBe('🔁 press Enter to switch to Opus 5.5; then set effort high in the model menu.')
@@ -1791,6 +1860,7 @@ test('Switch: a read-back that still names the old model is read again after a m
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
   await ui.press({ key: 'pacing-switch' })
+  await clock.advance(1)
   await ui.unmount()
   expect(seen.runs).toEqual(['/model claude-opus-5-5', '/effort high'])
   // right after the press: no failure said, and no word yet
