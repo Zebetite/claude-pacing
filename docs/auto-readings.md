@@ -1185,3 +1185,17 @@ the pane says "Reading the meters…" instead of "No reading yet".
 
 The OVER tag on the per-model bar no longer pulses: the user's word, it
 drew too much. It stays red.
+
+## Pictures of the pane (0.9.33)
+
+The user's word: demo pictures on GitHub, and on the organization's
+plugin page. `scripts/pane-images.mjs` draws the pane with its own code
+(`paneView`) and sample figures, laid out as HTML standing in for the
+app's Box, Text, Button and Svg, shot with a headless Chrome or Edge and
+cut to the pane's height: `docs/images/pane-agents.png` (Fable over its
+line, three agents), `pane-within.png` and `pane-week-over.png`. The
+library page shows only the manifest's description on its overview and
+renders the plugin's README under Innehåll (Contents), so the plugin's
+README has a section with the three pictures, linked from GitHub
+(raw.githubusercontent.com) rather than shipped, so every install stays
+as small as before.
