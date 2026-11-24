@@ -357,10 +357,24 @@ The categories are Claude Code's own estimate, as `/context` shows them;
 the tool results are counted from the last compaction or the plugin's last
 load, so after a reload they start again from nothing.
 
-**The pane.** `/pacing-pane` opens a pane beside the chat with the same:
-the budget in time, the usage, what to do now, the agents running, and
-what fills the context. It measures the context again after each of your
-turns, and **Refresh** does it at once.
+**The pane.** A pane beside the chat, drawn as a ship's console. It opens
+by itself when a session starts; close it and it stays closed, in later
+sessions too, until you type `/pacing-pane`. From the top:
+
+- **The reactor**: how much of the week is used, with an amber pointer at
+  the budget line and a word, NOMINAL or OVER LINE, for which side of it
+  you are on. Beside it, the time you have left to use today and stay on
+  budget ("9h 30m left to use today and stay on budget"; past the line,
+  "40m over today's budget"), never in tokens or dollars.
+- **This week**: the weekly meter with its budget line, and the per-model
+  meter.
+- **Agents at work**: each running agent as a small robot with its task.
+- **Context**: how full the session's context is, one figure.
+- **Models this session**: the share each model took.
+
+It measures the context again after each of your turns. **Refresh** does
+that at once and takes a new reading of every meter too. In a terminal the
+pane has the same figures as rows of blocks, without the drawings.
 
 **When a new session is the only way.** The plugin never offers one: a
 session that cannot be compacted, or your own wish to start afresh, is

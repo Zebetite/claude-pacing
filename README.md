@@ -51,8 +51,10 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   how this session's own use splits over the ladder's models
   (subagents included), and what fills the session's context: tool
   results by tool, the largest of them, and the fixed parts.
-- **A pacing pane** (`/pacing-pane`): the budget, the usage, the agents
-  and the context beside the chat, measured again after every turn.
+- **A pacing pane**, open beside the chat from the session's start and
+  drawn as a ship's console: a reactor dial for the week, the time left
+  today to stay on budget, the meters, the agents at work as small
+  robots, the context and the models (`/pacing-pane` reopens it).
   It comes from readings the plugin takes by itself after a turn, on a
   Claude Code version with hooks modules; older versions run the rest of
   the plugin as before.

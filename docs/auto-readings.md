@@ -1048,3 +1048,39 @@ week's budget suggests Fable 5.2 high.` (the model alone where the effort
 is not known). The model and effort it names, and goes by, are the main
 thread's last request's (`here`) before what was noted from a command or
 `CLAUDE_EFFORT`, which stays at the effort the session started with.
+
+## The pane redrawn as a console, and open by itself (0.9.27)
+
+The user found the pane's rows of text bad to read and asked for graphics
+in the manner of a film's head-up display, then of a ship's console.
+
+- **Where it is drawn.** `pane.mjs`, a pure file `readings.mjs` imports:
+  `paneView(table, model, { surface, placement, onRefresh })` returns the
+  tree, and `readings.mjs` builds the model (`paneModel`). The drawings are
+  `Svg` elements, which the desktop app, VS Code and mobile have; the
+  terminal has none (its table may carry an `Svg` that draws nothing, so
+  the view goes by `surface`) and gets the same figures as block
+  characters. A minimized pane (`placement: 'widget'`) is the budget and
+  the week's bar. An Svg cannot see the theme: its colours are fixed and
+  every figure the person must read is a `Text` beside it, save the
+  percentage inside the dial.
+- **What the user chose, in order.** The reactor of four dials offered
+  (`DIALS`; ring, gauge, reactor, level), redrawn flat and thin-lined, no
+  glow. No "Now" box, no largest results, the context as one figure (all
+  three stay in `/pacing-status`). The budget as time left today in plain
+  words, never tokens or dollars. A colour run along the bars (`SWEEPS`)
+  and an accent a section (`ACCENTS`). A drawn edge above and below the
+  pane (`edgeSvg`) and, for each section, a frame of its own above and
+  below with a light tint behind (`frameSvg`): the user disliked plain
+  boxes. Agents as small animated robots (`robotSvg`). The order: week,
+  agents, context, models.
+- **Open by itself.** At `session.start` the module opens the pane unless
+  `$.store` holds `paneClosed`, set when a person closes it (`ui.close`,
+  origin `person`) and cleared by `/pacing-pane`. The agents panel of
+  before it was removed in 0.9.13 at the user's word (see above); this one is
+  the user's own ask.
+- **Refresh** takes a reading of every meter as well as the context, so the
+  per-model meter need not wait for a turn's end.
+- **Not seen by the tests.** How the app spaces an Svg against a tinted
+  Box, and whether SMIL animation runs in the pane: the user looked at a
+  preview mod with sample figures while it was drawn.

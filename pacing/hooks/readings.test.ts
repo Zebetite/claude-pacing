@@ -4,7 +4,8 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { DIALS, FRAMES, frameSvg } from './pane.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -1146,17 +1147,27 @@ test('the pane: /pacing-pane opens it; it shows the budget, what to do and the c
   expect(opened).toEqual([{ id: PANE_ID, title: PANE_TITLE }])
   const ui = await $.ui.mount(PANE)
   const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
-  expect(texts[0]).toMatch(/^🟢 Budget: /)
-  expect(texts).toContain('Context: 183k of 1M (18%); it compacts by itself at 967k')
-  expect(texts).toContain('  Messages 160k')
+  // the time or share left today in plain words, then the level
+  expect(texts.slice(0, 3)).toEqual(['10%', 'of the week left to use today and stay on budget', '● Within budget'])
+  // never in tokens or dollars, and no Now, parts of the context or largest results
+  expect(texts.some((s: string) => /tokens|\$|NOW|LARGEST|Messages|compacts/.test(s))).toBe(false)
+  // the meters: a figure each, the weekly one with its budget line
+  for (const s of ['▸ THIS WEEK', 'Weekly', 'budget line 20%', 'Fable 5.2', '40%', '▸ MODELS THIS SESSION', 'Fable 5.2 high', '100%']) expect(texts).toContain(s)
+  // the context: how full it is, one figure
+  for (const s of ['▸ CONTEXT', '183k of 1M', '18%']) expect(texts).toContain(s)
+  // drawn, on a surface with Svg: the pane's two edges, the week's dial, the ruler under it, and for the week, the models and the context an edge above, one below and their bars
+  const svgs = await ui.findAll({ type: 'Svg' })
+  expect(svgs.length).toBe(14)
+  for (const s of svgs) { expect(s.props.source.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true); expect(s.props.alt.length).toBeGreaterThan(0) }
   await ui.press({ key: 'pacing-pane-refresh' })
   await clock.advance(1)
   await ui.unmount()
-  expect(usage).toBe(2)
+  // Refresh asks for the context and then takes a reading (the engine's windows are a second ask)
+  expect(usage).toBe(3)
   // open: each turn's end measures the context again
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(1)
-  expect(usage).toBe(3)
+  expect(usage).toBe(4)
 })
 
 test('a pane the engine does not place: /pacing-pane says why', async ($, on) => {
@@ -1167,8 +1178,64 @@ test('a pane the engine does not place: /pacing-pane says why', async ($, on) =>
   expect((await $.command.run({ command: 'pacing-pane', args: '' } as any)).text).toBe('Pacing pane: not shown (no surface attached).')
   // the pane before any reading or turn
   const ui = await $.ui.mount(PANE)
-  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', ' ', 'Context: not measured yet; it shows after the next turn.'])
+  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', '▸ CONTEXT', 'Not measured yet; it shows after the next turn.'])
   await ui.unmount()
+})
+
+test('the pane on a surface without Svg, and minimized: the same figures as rows of blocks; the glance has the budget and the week', async ($, on) => {
+  engine(on)
+  big(on)
+  offers(on)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 182700, window: 1000000, percent: 18, breakdown: BREAKDOWN }, rateLimits: [] } }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  mock.clock(on, { now: T0 })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 182700))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await $.command.run({ command: 'pacing-pane', args: '' } as any)
+  const term = await $.ui.mount({ ...PANE, surface: 'terminal' } as any)
+  expect((await term.findAll({ type: 'Svg' })).length).toBe(0)
+  const texts = (await term.findAll({ type: 'Text' })).map((t: any) => t.text)
+  expect(texts.some((s: string) => /^█+░+$/.test(s))).toBe(true)
+  expect(texts).toContain('183k of 1M')
+  await term.unmount()
+  const glance = await $.ui.mount({ ...PANE, props: { ...PANE.props, placement: 'widget' } } as any)
+  expect((await glance.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['10% of the week left to use today and stay on budget', 'Weekly 10%'])
+  expect((await glance.findAll({ type: 'Button' })).length).toBe(0)
+  await glance.unmount()
+})
+
+test('the pane opens by itself at a session\'s start; closed by the person it stays closed, until /pacing-pane', async ($, on) => {
+  engine(on)
+  offers(on)
+  const opened: any[] = []
+  const store = new Map<string, unknown>()
+  on('store.get', (_: unknown, e: any) => ({ value: store.get(e.key) }))
+  on('store.set', (_: unknown, e: any) => (store.set(e.key, e.value), { value: undefined }))
+  on('store.delete', (_: unknown, e: any) => (store.delete(e.key), { value: undefined }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000 } } }))
+  on('ui.open', (_: unknown, e: any) => (opened.push(e.id), { value: { isPlaced: true } }))
+  on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+  const clock = mock.clock(on, { now: T0 })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
+  await clock.advance(1)
+  expect(opened).toEqual([PANE_ID])
+  // only the person closing pacing's own pane counts (the test kit raises no ui.close of a person's)
+  expect(closedByPerson({ id: 'other', origin: { kind: 'person' } })).toBe(false)
+  expect(closedByPerson({ id: PANE_ID, origin: { kind: 'plugin' } })).toBe(false)
+  expect(closedByPerson({ id: PANE_ID, origin: { kind: 'unload' } })).toBe(false)
+  expect(closedByPerson({ id: PANE_ID, origin: { kind: 'person' } })).toBe(true)
+  // closed by the person: the next start leaves it closed
+  store.set(PANE_CLOSED, true)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
+  await clock.advance(1)
+  expect(opened).toEqual([PANE_ID])
+  // asked for again: open, and by itself from then on
+  await $.command.run({ command: 'pacing-pane', args: '' } as any)
+  expect(store.has(PANE_CLOSED)).toBe(false)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
+  await clock.advance(1)
+  expect(opened).toEqual([PANE_ID, PANE_ID, PANE_ID])
 })
 
 // Live, another plugin's session.compact hook ran first and skipped pacing's:
@@ -3483,4 +3550,44 @@ test('the toasts with it: the 5-minute toast per agent, the start toast with the
   // the status line and the row above the prompt do not have it
   expect(agentPart([hist], T0, LINE_MAX)).toBe('⏳ 1 Subagent running')
   expect(backgroundText([hist], T0)).toBe('In the background: ⏳ implementer: Auto-reload on plugin update, editing ~60%, 12m')
+})
+
+test('the pane says the budget as time left today, never in tokens or dollars; past the line, as time over', () => {
+  const base = { all: 50, line: 73.3, level: 'ok', tokenUsd: 0.000008, paceUsd: 14.05, left: { points: 23.3, tokens: 16600000 } }
+  expect(paneModel({ j: base }).budget).toEqual({ big: '9h 30m', sub: 'left to use today and stay on budget' })
+  expect(paneModel({ j: { ...base, rateFrom: 'estimate' } }).budget!.big).toBe('~9h 30m')
+  expect(paneModel({ j: { ...base, level: 'over', left: { points: -5, tokens: -1200000 } } }).budget).toEqual({ big: '40m', sub: 'over today\'s budget' })
+  // no pace: the points of the week
+  expect(paneModel({ j: { all: 50, line: 60, level: 'ok' } }).budget).toEqual({ big: '10%', sub: 'of the week left to use today and stay on budget' })
+  expect(paneModel({ j: { all: 70, line: 60, level: 'over' } }).budget).toEqual({ big: '10%', sub: 'of the week over today\'s budget' })
+  // the level names the meter that set it
+  expect(paneModel({ j: { ...base, level: 'over', levelBy: 'premium', premium: 74, premiumLabel: 'Fable 5.2' } }).levelText).toBe('Over the budget line (Fable\'s meter)')
+  // the context: one figure
+  expect(paneModel({ bd: { totalTokens: 171000, maxTokens: 1000000, percentage: 17.1, categories: [] } }).context).toEqual({ used: '171k', of: '1M', pct: 17.1 })
+})
+
+test('every dial draws the figure, the label and a mark at the budget line', () => {
+  for (const [name, dial] of Object.entries(DIALS)) {
+    const svg = dial(50, '#22d3ee', 73)
+    expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true)
+    expect(svg.endsWith('</svg>')).toBe(true)
+    expect(svg).toContain('>50%</text>')
+    expect(svg).toMatch(/>WEEK( USED)?<\/text>/)
+    expect(svg).toMatch(/#e5e7eb|#fbbf24/)
+    expect(svg).not.toContain('NaN')
+    expect(dial(0, '#22d3ee'), name).not.toContain('NaN')
+    expect(dial(140, '#22d3ee', 100), name).not.toContain('NaN')
+  }
+})
+
+test('every section has a frame of its own, above and below, in its accent', () => {
+  const seen = new Set<string>()
+  for (const kind of FRAMES) for (const bottom of [false, true]) {
+    const svg = frameSvg(kind, bottom, '#a78bfa')
+    expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true)
+    expect(svg).toContain('#a78bfa')
+    expect(svg).not.toMatch(/NaN|undefined/)
+    seen.add(svg)
+  }
+  expect(seen.size).toBe(8)
 })
