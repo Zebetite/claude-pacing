@@ -91,6 +91,25 @@ const SHOTS = [
       context: { used: '96k', of: '1M', pct: 10 },
     },
   },
+  {
+    // the week itself over its line: the top area in amber, time over
+    name: 'pane-week-over',
+    m: {
+      ...base,
+      level: 'over', levelText: 'Over the budget line',
+      budget: { big: '1h 40m', sub: 'over today\'s budget' },
+      meters: [
+        { label: 'Weekly', pct: 79, line: 73.3, note: 'budget line 73%' },
+        { label: 'Fable 5.2', pct: 68, line: 73.3, loud: true, over: false, note: 'budget line 73%' },
+      ],
+      running: [
+        'researcher: reading the API docs · 1m 20s (Sonnet 5.5 medium)',
+        'implementer: step 1 of 3, the settings page · 2m (Opus 5.5 medium)',
+      ],
+      mix: [{ name: 'Opus 5.5 high', share: 48 }, { name: 'Sonnet 5.5 medium', share: 34 }, { name: 'Haiku 5.5 medium', share: 18 }],
+      context: { used: '312k', of: '1M', pct: 31 },
+    },
+  },
 ];
 
 const browser = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',

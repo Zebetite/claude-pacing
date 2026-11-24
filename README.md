@@ -62,8 +62,9 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   the plugin as before.
 
   <p>
-  <img src="docs/images/pane-agents.png" width="380" alt="The pacing pane with sample figures: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, three agents at work, the context at 18% and the models this session">
-  <img src="docs/images/pane-within.png" width="380" alt="The pacing pane with sample figures: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, one agent at work">
+  <img src="docs/images/pane-agents.png" width="260" alt="The pacing pane with sample figures: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, three agents at work, the context at 18% and the models this session">
+  <img src="docs/images/pane-within.png" width="260" alt="The pacing pane with sample figures: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, one agent at work">
+  <img src="docs/images/pane-week-over.png" width="260" alt="The pacing pane with the week over its budget line: the week at 79% against a line of 73%, 1h 40m over today's budget, Fable 5.2 at 68% under its line, two agents at work">
   </p>
 
   Sample figures, drawn by the pane's own code (`node scripts/pane-images.mjs`
