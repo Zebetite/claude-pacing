@@ -312,8 +312,9 @@ until the reset. Switch this session to Opus 5.5 high.` (`⚠️` when the
 meter is over its budget line). Otherwise it is
 calm: `🔁 This week's budget suggests Opus 5.5 medium for this session.`, or
 at over budget `🔁 Over budget: one step less effort saves the most. Switch
-to Fable 5.2 medium.` Switch runs `/model` and `/effort` for this session
-only, and a toast says what the session now runs on (`🔁 this session now
+to Fable 5.2 medium.` Switch runs `/model`, `/effort` or both for this
+session only, only what differs from what the session runs on (a change of
+effort alone is one `/effort`), and a toast says what the session now runs on (`🔁 this session now
 runs on Opus 5.5 high; the model menu may still show Fable 5.2.`: the
 app's model menu can lag behind the switch for a while); where that cannot
 run, the box is filled with the command for you to send. The plugin

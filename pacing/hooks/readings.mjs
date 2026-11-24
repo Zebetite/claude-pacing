@@ -1507,6 +1507,13 @@ export const register = on => {
   // "the session's model and effort as last set"): the model until the next
   // turn's usage names one
   const ss = { model: null, effort: null };
+  // What the session runs on now, by the latest of two facts: the model and
+  // effort the main thread's last request carried (turn.step), and a /model
+  // or /effort that ran since, pressed or typed. Switch runs only the
+  // command whose part differs, so a switch of effort alone is one command
+  // (a typed /model keeps the session's effort: the engine sets the model
+  // alone). Unknown before the first request: both run, as before.
+  const here = { model: null, effort: null };
   const modelNow = () => ss.model || sessionModel;
   // the offer to compact: the one in the band ({ level, tokens }) or null, the
   // size at each level's last offer, and whether a person has typed here
@@ -1708,13 +1715,20 @@ export const register = on => {
           // model did, and each time a press ran /effort alone. /model to
           // the model the session runs on already does no harm.
           was = target.from || ss.model || (await $.session.model());
-          modelRan = await $.command.run({ command: 'model', args: target.model });
-          if (commandFailed(modelRan)) throw new Error('refused');
-          ss.model = target.model;
-          if (target.effort) {
-            if (commandFailed(await $.command.run({ command: 'effort', args: target.effort }))) throw new Error('refused');
-            ss.effort = target.effort;
+          // only the part that differs from what the session runs on (here);
+          // with neither known to differ, /model all the same
+          const modelSame = sameModel(here.model, target.model);
+          const effortSame = !target.effort || here.effort === target.effort;
+          if (!modelSame || effortSame) {
+            modelRan = await $.command.run({ command: 'model', args: target.model });
+            if (commandFailed(modelRan)) throw new Error('refused');
           }
+          ss.model = target.model;
+          here.model = target.model;
+          if (target.effort && !effortSame) {
+            if (commandFailed(await $.command.run({ command: 'effort', args: target.effort }))) throw new Error('refused');
+          }
+          if (target.effort) { ss.effort = target.effort; here.effort = target.effort; }
           await keepSwitch($, ss);
         } catch { ran = false; }
         waited();
@@ -1728,7 +1742,7 @@ export const register = on => {
         // a /model that answered without an error is trusted over it
         const effort = await effortNow($, ss);
         const tell = nowModel => {
-          const model = sameModel(nowModel, target.model) || (modelRan && !commandFailed(modelRan)) ? target.model : nowModel;
+          const model = sameModel(nowModel, target.model) || !modelRan || !commandFailed(modelRan) ? target.model : nowModel;
           $.ui.toast(switchedText(target, model, effort, was), sameModel(model, target.model) ? undefined : { timeoutMs: TOAST_LONG });
         };
         let nowModel = null;
@@ -1873,12 +1887,12 @@ export const register = on => {
   // without an error (see "the session's model and effort as last set")
   on('command.run', { command: 'model' }, async ($, e, next) => {
     const r = await next(e);
-    try { if (!commandFailed(r)) await noteSet($, ss, 'model', e.args); } catch { /* not noted */ }
+    try { if (!commandFailed(r) && (await noteSet($, ss, 'model', e.args))) here.model = ss.model; } catch { /* not noted */ }
     return r;
   });
   on('command.run', { command: 'effort' }, async ($, e, next) => {
     const r = await next(e);
-    try { if (!commandFailed(r)) await noteSet($, ss, 'effort', e.args); } catch { /* not noted */ }
+    try { if (!commandFailed(r) && (await noteSet($, ss, 'effort', e.args))) here.effort = ss.effort; } catch { /* not noted */ }
     return r;
   });
 
@@ -2279,6 +2293,16 @@ export const register = on => {
       })().catch(() => { /* the pane keeps the last */ });
     }
     return result;
+  });
+
+  on('turn.step', async function* ($, e, next) {
+    try {
+      if (!e.agentId) {
+        if (typeof e.model === 'string' && e.model) here.model = e.model;
+        if (typeof e.effort === 'string' && EFFORT_ORDER.includes(e.effort)) here.effort = e.effort;
+      }
+    } catch { /* not noted */ }
+    return yield* next(e);
   });
 
   on('session.measure', async ($, e, next) => {

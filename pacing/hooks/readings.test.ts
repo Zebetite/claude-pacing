@@ -1822,6 +1822,70 @@ test('Switch runs /model even where the offer saw the target model already, then
   expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 medium.')
 })
 
+// The user found a switch too many commands: only the part that differs runs.
+test('Switch runs only what differs from what the session runs on: an effort already set needs no /effort, a model already set no /model', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  on('process.run', () => ({ value: switchReading({ premiumOut: true, recommend: REC_OPUS_HIGH }) }))
+  const seen = switchEngine(on, { effort: 'medium' })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  // the session is set to high already (typed); the model is Fable
+  await $.command.run({ command: 'effort', args: 'high' } as any)
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  seen.runs.length = 0
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-switch' })
+  await clock.advance(1)
+  await ui.unmount()
+  expect(seen.runs).toEqual(['/model claude-opus-5-5'])
+  expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.')
+})
+
+test('what the main thread\'s last request carried counts as what the session runs on; a subagent\'s does not', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  on('process.run', () => ({ value: switchReading({ premiumOut: true, recommend: REC_OPUS_HIGH }) }))
+  const seen = switchEngine(on, { effort: 'medium' })
+  on('turn.step', async function* (_: unknown, e: any) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null } as any })
+  const step = async (extra: Record<string, unknown>) => {
+    const s = ($.turn as any).step({ turnId: 't', index: 0, messageCount: 1, ...extra })
+    for await (const _ of s) { /* drained */ }
+  }
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await step({ model: 'claude-fable-5-2', effort: 'high' })
+  // a subagent on another effort changes nothing
+  await step({ model: 'claude-haiku-5-5', effort: 'low', agentId: 'a1' })
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-switch' })
+  await clock.advance(1)
+  await ui.unmount()
+  expect(seen.runs).toEqual(['/model claude-opus-5-5'])
+})
+
+test('a switch of effort alone, on the model the session runs on: /effort only', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  on('process.run', () => ({ value: switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }) }))
+  const seen = switchEngine(on, { model: 'claude-opus-5-5', effort: 'high' })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  // set to Opus 5.5 high by the commands (typed)
+  await $.command.run({ command: 'model', args: 'claude-opus-5-5' } as any)
+  await $.command.run({ command: 'effort', args: 'high' } as any)
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-opus-5-5', 1))
+  seen.runs.length = 0
+  const ui = await $.ui.mount(BAND)
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔁 This week\'s budget suggests Opus 5.5 medium for this session.')
+  await ui.press({ key: 'pacing-switch' })
+  await clock.advance(1)
+  await ui.unmount()
+  expect(seen.runs).toEqual(['/effort medium'])
+  expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 medium.')
+})
+
 test('Switch while the session is busy: the press is back at once, a toast says the switch waits, and it runs when the session is free', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })

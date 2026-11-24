@@ -1018,3 +1018,20 @@ behind a turn or a compaction waits as long.
   the main thread's turn end measures the context again when
   `$.ui.panes()` has it open. A pane the engine does not place:
   `Pacing pane: not shown (<reason>).`
+
+## A switch runs only what differs (0.9.25)
+
+The user found a switch too many commands. Switch ran `/model` and
+`/effort` on every press (0.9.20), because what the module took for the
+session's model had been wrong. Now it keeps `here`, what the session runs
+on by the latest of two facts: the model and effort the main thread's last
+request carried (a `turn.step` hook, an async generator that only reads
+`e.model` and `e.effort` and forwards the stream), and a `/model` or
+`/effort` that ran since, pressed or typed. A press runs `/model` only
+where the model differs and `/effort` only where the effort does; with
+neither known to differ (nothing recorded yet), `/model` all the same. A
+typed `/model` keeps the session's effort: in the engine the command sets
+`mainLoopModel` alone (only the model picker sets `sessionEffort` too).
+So a change of effort alone is one `/effort`, a change of model at the
+same effort one `/model`, and Compact, then switch is two commands where
+it was three. Before the session's first request, both run as before.
