@@ -50,7 +50,8 @@ export const BAR_CELLS = 36;
 // `loud` (a per-model meter's budget line, the user's word: very visible,
 // more so when over): a thick line in amber with a tag above it naming the
 // line; past it, the cells over the line turn red on a red band, and the
-// line and its tag in red pulse, the tag saying by how much.
+// line and its tag turn red, the tag saying by how much (still: the user's
+// word, a pulse drew too much).
 export const LINE_TAG = 18;
 export const barSvg = (segments, marker = null, w = 480, h = 34, loud = false) => {
   if (loud && marker !== null) return loudBarSvg(segments, marker, w, h + LINE_TAG + 10);
@@ -113,11 +114,10 @@ const loudBarSvg = (segments, marker, w, h) => {
   const xEnd = lit / n * (w - slant) + slant / 2;
   const band = over && xEnd > x
     ? '<rect x="' + num(x) + '" y="' + (top - 3) + '" width="' + num(xEnd - x) + '" height="' + (ch + 6) + '" fill="' + LEVEL_COLORS.stop + '" fill-opacity="0.22"/>' : '';
-  const pulse = over ? '<animate attributeName="opacity" values="1;0.45;1" dur="1.4s" repeatCount="indefinite"/>' : '';
   const word = over ? 'OVER +' + Math.round(total - m) : 'BUDGET ' + Math.round(m) + '%';
   const tw = word.length * 8 + 12, lw = over ? 6 : 5;
   const tx = clamp(x - tw / 2, 0, w - tw);
-  const tag = '<g>' + pulse
+  const tag = '<g>'
     + '<rect x="' + num(tx) + '" y="0" width="' + num(tw) + '" height="' + LINE_TAG + '" rx="2" fill="' + lineCol + '"/>'
     + '<text x="' + num(tx + tw / 2) + '" y="' + (LINE_TAG - 5) + '" text-anchor="middle" ' + FONT + ' font-size="12.5" font-weight="700" letter-spacing="0.5" fill="#0b1220">' + word + '</text>'
     + '<rect x="' + num(x - lw / 2) + '" y="' + (LINE_TAG + 6) + '" width="' + lw + '" height="' + (h - 9 - LINE_TAG) + '" rx="1.5" fill="' + lineCol + '" filter="url(#glow)"/>'

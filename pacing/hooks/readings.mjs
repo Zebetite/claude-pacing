@@ -435,7 +435,7 @@ export const closedByPerson = e => !!e && e.id === PANE_ID && !!e.origin && e.or
 // The budget is said as time alone, never in tokens or dollars: "9h 30m" and
 // "left to use today to stay on budget"; past the line, "40m" and "over
 // today's budget". Without a pace there is no time: the points of the week.
-export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky = null, now = Date.now() } = {}) => {
+export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky = null, now = Date.now(), busy = false } = {}) => {
   const m = { level: 'ok', levelText: '', budget: null, meters: [], notes: [], mix, running, context: null, contextNote: '', empty: '' };
   if (j) {
     // The top area is the week alone (the user's word: do not mix the weekly
@@ -475,7 +475,8 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky =
         note: [state, read].filter(Boolean).join(' · ') });
     }
     if (typeof j.unused === 'number') m.notes.push('At this pace about ' + j.unused + '% of the week goes unused at the reset; it does not carry over.');
-  } else m.empty = 'No reading yet in this session: /pacing usage takes one.';
+  // a reading on its way (at load, or Refresh): said so, not "none"
+  } else m.empty = busy ? 'Reading the meters…' : 'No reading yet in this session: /pacing usage takes one.';
   const b = bulkyStatus(bulky);
   if (b) m.notes.push(b.replace(/^\n/, ''));
   if (bd && typeof bd.totalTokens === 'number') {
@@ -1518,6 +1519,7 @@ async function takeShared($, sh) {
   let now;
   try { now = await $.clock.now(); } catch { now = Date.now(); }
   $.ui.status(sh.lineNow(now));
+  redraw($);
 }
 // the version plugin.json names now; null when unreadable
 async function versionOnDisk($) { try { return versionOf(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')); } catch { return null; } }
@@ -1606,6 +1608,8 @@ export const register = on => {
   let sharedTimer = null;
   const sh = { held: () => reading, take: j => { hold({ ...reading, ...j }); }, lineNow: now => lineNow(now) };
   let running = false;
+  // the reading at load on its way (the pane says so)
+  let loading = false;
   // for the warning after a pause: when the main thread's last turn ended (a
   // subagent's turn keeps only its own cache warm), the session's size at the
   // last measure, and the pause already warned of
@@ -2050,10 +2054,16 @@ export const register = on => {
     (async () => {
       let now;
       try { now = await $.clock.now(); } catch { now = Date.now(); }
-      await learnSurfaces($, st);
-      const { week, five } = await limitsNow($);
-      const known = !!(week && week.resetsAt);
-      if (running) return;
+      // from here the pane says a reading is on its way (`loading`, apart
+      // from `running`: a measure's own reading may still go first)
+      loading = true;
+      let week, five, known;
+      try {
+        await learnSurfaces($, st);
+        ({ week, five } = await limitsNow($));
+        known = !!(week && week.resetsAt);
+      } finally { loading = false; }
+      if (running) { redraw($); return; }
       running = true;
       try {
         let j = await runReading($, week, five, sessionModel, spend);
@@ -2070,8 +2080,11 @@ export const register = on => {
           // a logged reading counts as the last one; a dry one leaves the next due
           if (logged) last = { pct: known ? week.percentUsed : j.all, at: now };
           $.ui.status(lineNow(now));
+          // the pane drawn before it came in shows it (live: "No reading yet"
+          // after a reload, the pane drawn first and never again)
+          redraw($);
         }
-      } finally { running = false; }
+      } finally { running = false; redraw($); }
     })().catch(() => { /* a failure draws nothing new */ });
     // the side sessions already working (a reload mid-work): in the line, no toast
     // the subagents a reload found at work, with what was known of them (see
@@ -2132,7 +2145,7 @@ export const register = on => {
       mix: j ? tierMix(tokens, j.tierOf || {}, j.prices || {}, agentTokens, j.agentTierOf).map(x => ({ name: tierName(j, x.tier), share: x.share })) : [],
       running: runningAgents().map(a => (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { task: TASK_MAX, time: 1, est: 1, step: 1 })
         + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.kind === 'session' && a.description ? ', ' + a.description : '')),
-      bd: ctxNow, bulky, now,
+      bd: ctxNow, bulky, now, busy: running || loading,
     });
   };
   // a person's close keeps it closed in later sessions; a plugin's own, or an
@@ -2202,6 +2215,7 @@ export const register = on => {
             sayUnused($, j, un).catch(() => { /* a convenience */ });
             hold(j);
             $.ui.status(lineNow(now));
+            redraw($);
             out = await scriptOut($, 'budget.mjs', ['last']);
           }
         } catch { /* the reason stands */ } finally { running = false; }
@@ -2495,6 +2509,7 @@ export const register = on => {
           sayLevel($, reading, j);
           sayUnused($, j, un).catch(() => { /* a convenience */ });
           hold(j);
+          redraw($);
         }
       }
       // the tier shares move every turn: the line is redrawn even when no

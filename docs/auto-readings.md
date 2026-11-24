@@ -1170,3 +1170,18 @@ was loaded by a reload, and writes the version to `reloadedTo`
 seconds after a turn), drops the row for that version, or does not raise
 it. A new session notes its version and tells nothing. The other sessions
 still run the older code until their own reload or a new session.
+
+## The pane after a reload: the reading, not "No reading yet" (0.9.32)
+
+The user's word: after a reload the pane said "No reading yet" and they do
+not want it without data. A reload starts the module over with no
+reading; the pane, still open, was drawn at once, and the reading the
+module takes at load came in after it without a redraw, while the pane's
+own first-draw refresh gave up because that reading was running. Now
+every reading taken in redraws the pane (at load, a measure's, the shared
+one, `/pacing-usage`'s), and the load's ends with a redraw whatever it
+found. While the load's reading is on its way (`loading`, or `running`)
+the pane says "Reading the meters…" instead of "No reading yet".
+
+The OVER tag on the per-model bar no longer pulses: the user's word, it
+drew too much. It stays red.

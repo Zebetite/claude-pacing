@@ -2396,6 +2396,26 @@ test('a load with the meters the last response reported: a full reading at once,
   expect(seen.runs.length).toBe(1)
 })
 
+test('a pane drawn before the load reading came in shows it when it comes; meanwhile it says a reading is on its way', async ($, on) => {
+  const status = engine(on)
+  loadEngine(on, {
+    limits: [{ kind: 'seven_day', percentUsed: 12, resetsAt: RESET }],
+    state: { all: 9, reset: RESET }, answers: () => answer('ahead', 12),
+  })
+  await start($)
+  const ui = await $.ui.mount(PANE)
+  const first = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
+  expect(first.some((s: string) => s === 'Reading the meters…' || s === '8%')).toBe(true)
+  await settled(status, 0)
+  await new Promise(r => setTimeout(r, 50))
+  const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
+  expect(texts).toContain('8%')
+  expect(texts.some((s: string) => /No reading yet|Reading the meters/.test(s))).toBe(false)
+  await ui.unmount()
+  expect(paneModel({ busy: true }).empty).toBe('Reading the meters…')
+  expect(paneModel({}).empty).toBe('No reading yet in this session: /pacing usage takes one.')
+})
+
 test('a load with nothing stored and no meters draws nothing new, silently', async ($, on) => {
   const status = engine(on)
   const seen = loadEngine(on, { state: null, answers: () => answer('ahead', 10) })
@@ -3704,11 +3724,12 @@ test('the pane says the budget as time left today, never in tokens or dollars; p
   expect(held.meters[1]).toEqual({ label: 'Fable 5.2', pct: 83, line: 73.3, loud: true, over: true, note: '10 points over its budget line 73%: held, kept for hard tasks' })
   const under = paneModel({ j: { ...base, level: 'ahead', all: 55, line: 73.3, premium: 60, premiumLabel: 'Fable 5.2' } })
   expect(under.meters[1]).toEqual({ label: 'Fable 5.2', pct: 60, line: 73.3, loud: true, over: false, note: 'budget line 73%' })
-  // drawn: a tag above the line, BUDGET under it, OVER and a pulse past it
+  // drawn: a tag above the line, BUDGET under it, OVER past it
   expect(barSvg([{ pct: 60, color: '#22d3ee' }], 73.3, 480, 34, true)).toContain('>BUDGET 73%<')
   const loud = barSvg([{ pct: 83, color: '#fbbf24' }], 73.3, 480, 34, true)
   expect(loud).toContain('>OVER +10<')
-  expect(loud).toContain('<animate attributeName="opacity"')
+  // still, not pulsing (the user's word)
+  expect(loud).not.toContain('<animate')
   // a terminal: the line as ┃ in its place
   expect(barText([{ pct: 50, color: '#fff' }], 10, 80)).toBe('█████░░┃░░')
   // the context: one figure
