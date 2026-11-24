@@ -310,7 +310,9 @@ offers it, with **Switch** and **Not now**. When Fable's meter is out
 or over its budget line, it says so in the warning colour: `🔴 Fable 5.2 is out
 until the reset. Switch this session to Opus 5.5 high.` (`⚠️` when the
 meter is over its budget line). Otherwise it is
-calm: `🔁 This week's budget suggests Opus 5.5 medium for this session.`, or
+calm: `🔁 This session runs on Fable 5.2 high; this week's budget suggests Opus 5.5 medium.`
+(what the session's last request ran on, which the app's model menu can
+lag behind after a `/model`), or
 at over budget `🔁 Over budget: one step less effort saves the most. Switch
 to Fable 5.2 medium.` Switch runs `/model`, `/effort` or both for this
 session only, only what differs from what the session runs on (a change of

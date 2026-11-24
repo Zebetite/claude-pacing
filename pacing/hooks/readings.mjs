@@ -1224,7 +1224,11 @@ export const switchOffer = (j, curModel, curEffort, ctx = null) => {
   if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumHeld)
     return make('held', rec, name + '\'s meter is over its budget line. Switch to ' + rec.label + ' ' + rec.effort + '; ' + name.split(' ')[0] + ' stays for hard tasks.');
   if (rec && (!sameModel(curModel, rec.model) || (curEffort && curEffort !== rec.effort && !j.effortStep)))
-    return make('model', rec, 'This week\'s budget suggests ' + rec.label + ' ' + rec.effort + ' for this session.');
+    // what the session runs on, from its requests: the app's model menu can
+    // go on naming the model it had before a /model (live: the menu said
+    // Fable 5.2 High on a session that ran on Opus 5.5, and the row read as
+    // an offer of what was already set)
+    return make('model', rec, 'This session runs on ' + modelLabel(curModel) + (curEffort ? ' ' + curEffort : '') + '; this week\'s budget suggests ' + rec.label + ' ' + rec.effort + '.');
   const step = j.effortStep;
   if (step && sameModel(curModel, step.model) && (!curEffort || EFFORT_ORDER.indexOf(curEffort) > EFFORT_ORDER.indexOf(step.effort)))
     return make('effort', step, 'Over budget: one step less effort saves the most. Switch to ' + step.label + ' ' + step.effort + '.');
@@ -2251,9 +2255,10 @@ export const register = on => {
     // once per suggestion; one that no longer needs it loses the row.
     if (!e.agentId && attended && reading) {
       try {
-        let model = modelNow();
+        // the request's own model and effort first: they are what runs
+        let model = here.model || modelNow();
         if (!model) { try { model = await $.session.model(); } catch { /* not known */ } }
-        const o = (await switchOn($)) ? switchOffer(reading, model, await effortNow($, ss), contextTokens) : null;
+        const o = (await switchOn($)) ? switchOffer(reading, model, here.effort || await effortNow($, ss), contextTokens) : null;
         if (!o || (sw && sw.key !== o.key)) { if (sw) { sw = null; redraw($); } }
         if (o && !switchSeen.has(o.key)) { switchSeen.add(o.key); sw = o; redraw($); }
       } catch { /* an engine without the band: the start line says it */ }

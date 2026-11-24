@@ -1035,3 +1035,16 @@ typed `/model` keeps the session's effort: in the engine the command sets
 So a change of effort alone is one `/effort`, a change of model at the
 same effort one `/model`, and Compact, then switch is two commands where
 it was three. Before the session's first request, both run as before.
+
+## The row says what the session runs on (0.9.26)
+
+The user saw the row offer Fable 5.2 high while the app's model menu said
+Fable 5.2 High, and took it for an offer of what was already set. The
+session ran on Opus 5.5: a Switch had run `/model claude-opus-5-5`, which
+changes the session but not the menu, and every request since carried
+Opus 5.5. The offer was right; it only did not say what it saw. Now a
+model offer names it first: `🔁 This session runs on Opus 5.5 high; this
+week's budget suggests Fable 5.2 high.` (the model alone where the effort
+is not known). The model and effort it names, and goes by, are the main
+thread's last request's (`here`) before what was noted from a command or
+`CLAUDE_EFFORT`, which stays at the effort the session started with.

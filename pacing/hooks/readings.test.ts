@@ -1757,7 +1757,9 @@ test('the switch: wording by case, the urgent ones first', async () => {
   const base = { premiumModelId: 'claude-fable-5-2', premiumLabel: 'Fable 5.2', recommend: REC_OPUS_HIGH }
   expect(switchOffer({ ...base, premiumOut: true }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'out', urgent: true, text: 'Fable 5.2 is out until the reset. Switch this session to Opus 5.5 high.' })
   expect(switchOffer({ ...base, premiumHeld: true }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'held', urgent: true, text: 'Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 high; Fable stays for hard tasks.' })
-  expect(switchOffer({ ...base, recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'model', urgent: false, text: 'This week\'s budget suggests Opus 5.5 medium for this session.' })
+  expect(switchOffer({ ...base, recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'model', urgent: false, text: 'This session runs on Fable 5.2 high; this week\'s budget suggests Opus 5.5 medium.' })
+  // no effort known: the model alone
+  expect(switchOffer({ ...base, recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }, 'claude-fable-5-2', null)?.text).toBe('This session runs on Fable 5.2; this week\'s budget suggests Opus 5.5 medium.')
   // the right model, another effort
   expect(switchOffer({ ...base, recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }, 'claude-opus-5-5', 'high')).toMatchObject({ kind: 'model' })
   const step = { ...base, recommend: { model: 'claude-fable-5-2', label: 'Fable 5.2', effort: 'high' }, effortStep: { model: 'claude-fable-5-2', label: 'Fable 5.2', effort: 'medium' } }
@@ -1814,7 +1816,7 @@ test('Switch runs /model even where the offer saw the target model already, then
   await $.session.measure(measure(10))
   await $.turn.complete(turn('claude-opus-5-5', 1))
   const ui = await $.ui.mount(BAND)
-  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔁 This week\'s budget suggests Opus 5.5 medium for this session.')
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔁 This session runs on Opus 5.5 high; this week\'s budget suggests Opus 5.5 medium.')
   await ui.press({ key: 'pacing-switch' })
   await clock.advance(1)
   await ui.unmount()
@@ -1865,6 +1867,21 @@ test('what the main thread\'s last request carried counts as what the session ru
   expect(seen.runs).toEqual(['/model claude-opus-5-5'])
 })
 
+test('the row names what the last request ran on, though CLAUDE_EFFORT still says the effort the session started at', async ($, on) => {
+  engine(on)
+  mock.clock(on, { now: T0 })
+  on('process.run', () => ({ value: switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }) }))
+  switchEngine(on, { effort: 'medium' })
+  on('turn.step', async function* (_: unknown, e: any) { return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null } as any })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  for await (const _ of ($.turn as any).step({ turnId: 't', index: 0, messageCount: 1, model: 'claude-fable-5-2', effort: 'high' })) { /* drained */ }
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount(BAND)
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔁 This session runs on Fable 5.2 high; this week\'s budget suggests Opus 5.5 medium.')
+  await ui.unmount()
+})
+
 test('a switch of effort alone, on the model the session runs on: /effort only', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
@@ -1878,7 +1895,7 @@ test('a switch of effort alone, on the model the session runs on: /effort only',
   await $.turn.complete(turn('claude-opus-5-5', 1))
   seen.runs.length = 0
   const ui = await $.ui.mount(BAND)
-  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔁 This week\'s budget suggests Opus 5.5 medium for this session.')
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔁 This session runs on Opus 5.5 high; this week\'s budget suggests Opus 5.5 medium.')
   await ui.press({ key: 'pacing-switch' })
   await clock.advance(1)
   await ui.unmount()
@@ -1918,7 +1935,7 @@ test('Switch while the session is busy: the press is back at once, a toast says 
 
 test('a switch in a large session says what it costs and offers the compaction first; a small one, an effort alone and a model that is out do not', () => {
   const base = { premiumModelId: 'claude-fable-5-2', premiumLabel: 'Fable 5.2', prices: PRICES, recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }
-  const plain = 'This week\'s budget suggests Opus 5.5 medium for this session.'
+  const plain = 'This session runs on Fable 5.2 high; this week\'s budget suggests Opus 5.5 medium.'
   expect(SWITCH_LARGE).toBe(200000)
   // 250 000 tokens at Opus 5.5's $5 a million to store: $1.25
   expect(switchOffer(base, 'claude-fable-5-2', 'high', 250000)).toMatchObject({ kind: 'model', compactFirst: true,
@@ -1932,7 +1949,7 @@ test('a switch in a large session says what it costs and offers the compaction f
   expect(switchOffer(base, 'claude-fable-5-2', 'high', 199999)).toMatchObject({ compactFirst: false, text: plain })
   expect(switchOffer(base, 'claude-fable-5-2', 'high')).toMatchObject({ compactFirst: false, text: plain })
   // the same model at another effort stores nothing again
-  expect(switchOffer(base, 'claude-opus-5-5', 'high', 250000)).toMatchObject({ compactFirst: false, text: plain })
+  expect(switchOffer(base, 'claude-opus-5-5', 'high', 250000)).toMatchObject({ compactFirst: false, text: 'This session runs on Opus 5.5 high; this week\'s budget suggests Opus 5.5 medium.' })
   // out: the compaction would run on the model that is out
   expect(switchOffer({ ...base, premiumOut: true }, 'claude-fable-5-2', 'high', 250000)).toMatchObject({ kind: 'out', compactFirst: false })
 })
@@ -2002,7 +2019,7 @@ test('once per suggestion: Not now holds until the recommendation changes', asyn
   await $.session.measure(measure(10))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
-  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔁 This week\'s budget suggests Opus 5.5 medium for this session.')
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔁 This session runs on Fable 5.2 high; this week\'s budget suggests Opus 5.5 medium.')
   await ui.press({ key: 'pacing-switch-not-now' })
   await ui.unmount()
   await $.turn.complete(turn('claude-fable-5-2', 1))
@@ -2121,11 +2138,11 @@ test('a typed /effort is noted: the session runs at it, though CLAUDE_EFFORT sti
   await $.prompt.submit({ text: 'work on', asUser: true })
   await $.session.measure(measure(10))
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(await switchText($)).toBe('🔁 This week\'s budget suggests Fable 5.2 medium for this session.')
+  expect(await switchText($)).toBe('🔁 This session runs on Fable 5.2 high; this week\'s budget suggests Fable 5.2 medium.')
   // an effort the command does not take is not noted
   await $.command.run({ command: 'effort', args: 'turbo' } as any)
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(await switchText($)).toBe('🔁 This week\'s budget suggests Fable 5.2 medium for this session.')
+  expect(await switchText($)).toBe('🔁 This session runs on Fable 5.2 high; this week\'s budget suggests Fable 5.2 medium.')
   await $.command.run({ command: 'effort', args: 'medium' } as any)
   await $.turn.complete(turn('claude-fable-5-2', 1))
   expect(await switchText($)).toBe(undefined)
