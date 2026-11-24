@@ -5,7 +5,7 @@
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
 import { DIALS, FRAMES, frameSvg } from './pane.mjs'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -485,12 +485,18 @@ test('after an hour idle, a large session is told once, before the turn, and the
   // a second prompt in the same pause: no second warning
   await $.prompt.submit({ text: 'and the docs', asUser: true })
   expect(order.filter(o => o.startsWith('toast')).length).toBe(1)
-  // the next pause is a new one
+  // the next pause at about the same size: told already, not again
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(61 * 60000)
   await $.prompt.submit({ text: 'next', asUser: true })
+  expect(order.filter(o => o.startsWith('toast')).length).toBe(1)
+  // 250 000 tokens on, a pause is told again
+  await $.session.measure(measure(10, [], 670000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(62 * 60000)
+  await $.prompt.submit({ text: 'later', asUser: true })
   expect(order.filter(o => o.startsWith('toast')).length).toBe(2)
-  expect(order.at(-2)).toContain('sat idle 1 h 1 min')
+  expect(order.at(-2)).toContain('670k tokens and sat idle 1 h 2 min')
 })
 
 test('no warning under an hour, under 300 000 tokens, or before any turn', async ($, on) => {
@@ -978,7 +984,7 @@ test('urge: from 500 000 tokens, plainer words with what each turn sends again',
   expect(text).toBe('🗜️ This session is 540k tokens, and every turn sends all 540k again. Compact now to cut that.')
 })
 
-test('once per level: Not now holds until the session grows by 100 000 more; a new level comes at once', async ($, on) => {
+test('once per level: Not now holds until the session grows by 250 000 more; a new level comes at once', async ($, on) => {
   engine(on)
   big(on)
   const seen = offers(on)
@@ -991,20 +997,50 @@ test('once per level: Not now holds until the session grows by 100 000 more; a n
   await first.unmount()
   expect(seen.compacts).toEqual([])
 
-  for (const size of [330000, 410000]) {
+  for (const size of [330000, 425000, 495000]) {
     await $.session.measure(measure(10, [], size))
     await $.turn.complete(turn('claude-fable-5-2', 1))
     expect((await bandText($)).text).toBe(undefined)
   }
-  await $.session.measure(measure(10, [], 425000))
-  await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect((await bandText($)).text).toContain('425k')
-  // the user's next prompt answers it: gone, and not back at once
-  await $.prompt.submit({ text: 'go on', asUser: true })
-  expect((await bandText($)).text).toBe(undefined)
   await $.session.measure(measure(10, [], 505000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   expect((await bandText($)).text).toContain('every turn sends all 505k again')
+  // the user's next prompt answers it: gone, and not back until 250 000 on
+  await $.prompt.submit({ text: 'go on', asUser: true })
+  expect((await bandText($)).text).toBe(undefined)
+  for (const size of [610000, 750000]) {
+    await $.session.measure(measure(10, [], size))
+    await $.turn.complete(turn('claude-fable-5-2', 1))
+    expect((await bandText($)).text).toBe(undefined)
+  }
+  await $.session.measure(measure(10, [], 760000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect((await bandText($)).text).toContain('every turn sends all 760k again')
+})
+
+test('now: a pause is warned of once per size; the next pause at about the same size brings no row and no notice', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = offers(on)
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 420000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(50 * 60000)
+  expect((await bandText($)).text).toContain('lapses in about 10 minutes')
+  await clock.advance(10 * 60000)
+  expect((await bandText($)).text).toContain('its cache has lapsed')
+  await $.prompt.submit({ text: 'back', asUser: true })
+  await $.session.measure(measure(10, [], 450000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(75 * 60000)
+  expect((await bandText($)).text).toBe(undefined)
+  await $.prompt.submit({ text: 'back again', asUser: true })
+  expect(seen.toasts).toEqual([])
+  expect(pauseDue(450000, 2, { now: 420000, nowPause: 1 })).toBe(false)
+  expect(pauseDue(420000, 1, { now: 420000, nowPause: 1 })).toBe(true)
+  expect(pauseDue(670000, 2, { now: 420000, nowPause: 1 })).toBe(true)
+  expect(pauseDue(420000, 1, {})).toBe(true)
 })
 
 test('never while a turn runs, never before a person has typed, gone after the user\'s own /compact', async ($, on) => {

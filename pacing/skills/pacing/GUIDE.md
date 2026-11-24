@@ -285,7 +285,8 @@ plugin also watches for the expensive moment itself. When you send a
 prompt after an hour or more without a turn, and the session holds
 300 000 tokens or more, one toast says how large the session is, how
 long it sat idle, and that compacting first is cheaper. It
-comes once per pause and never holds or changes your prompt: Claude Code
+comes once, and again only after the session has grown by another
+250 000 tokens, and never holds or changes your prompt: Claude Code
 lets no plugin compact while a prompt waits to be sent. So the plugin
 warns earlier instead (below). An hour is assumed for the cache's
 lifetime, since Claude Code does not tell a plugin.
@@ -294,10 +295,12 @@ lifetime, since Claude Code does not tell a plugin.
 tokens or more, a row above the prompt says how large it is, with
 **Compact now** and **Not now**. From 500 000 tokens the row says what
 each turn sends again, in the warning colour. It never interrupts, and
-comes again only after the session has grown by another 100 000 tokens.
+comes again only after the session has grown by another 250 000 tokens:
+at 300 000, 500 000 and 750 000 between two compactions.
 Left idle, the row turns to the warning colour 10 minutes before the
 cache lapses, and again once it has: compacting then costs less than the
-next turn storing it all again. Compact now keeps the goal, the
+next turn storing it all again. A pause is warned of once per size too:
+the next pause at about the same size brings no row and no toast. Compact now keeps the goal, the
 decisions and why, the open items, the files and commands that matter,
 and what was ruled out; one line then gives the size before and after.
 `/pacing compact off` turns the row off; the toast after a pause then

@@ -109,15 +109,20 @@ export const pauseNote = (tokens, idleMs) => (tokens >= PAUSE_SIZE && idleMs >= 
 // before, unless the row already said it for that pause. No dialog: the
 // question dialog interrupts, and one raised while nobody is there resolves
 // itself when the person is away.
-// Once per level; again only after the session grew by a further 100 000
-// tokens, or (now) after a new pause. Never while a turn runs, never in a
+// Once per level; again only after the session grew by a further 250 000
+// tokens (it was 100 000 until 0.9.29: a row every 100 000 tokens and at
+// every pause came too often). So between two compactions the size is
+// offered at 300 000, 500 000 and 750 000. A pause is told once per such
+// step too, as the row or as the notice at the next prompt, whichever comes:
+// a second pause at about the same size is not told again (pauseDue).
+// Never while a turn runs, never in a
 // subagent, and only once a person has typed in the session (a side session
 // another session drives has nobody to ask). `/pacing compact off` turns the
 // offers off; the pause notice then shows as it did before them. An engine
 // without the band, the timers or $.session.compact keeps the notice too.
 export const SUGGEST_AT = 300000;
 export const URGE_AT = 500000;
-export const OFFER_STEP = 100000;
+export const OFFER_STEP = 250000;
 export const COMPACT_INSTRUCTIONS = 'Keep what this session must not lose: the goal; the decisions made and why; '
   + 'the open items, in order; the files and commands that matter; what was tried and ruled out.';
 const kTok = n => Math.round(n / 1000) + 'k';
@@ -132,6 +137,10 @@ export const COMPACT_DROP = 50000;
 export const compactedBetween = (before, after) => typeof before === 'number' && typeof after === 'number'
   && before - after >= COMPACT_DROP && after <= before / 2;
 export const offerDue = (level, tokens, offered) => !!level && (offered[level] == null || tokens >= offered[level] + OFFER_STEP);
+// whether a pause may be told (row or notice): the first at this size, the
+// same pause again (before the lapse, then after it), or 250 000 tokens on
+export const pauseDue = (tokens, pause, offered) => offered.now == null || (pause != null && offered.nowPause === pause)
+  || (typeof tokens === 'number' && tokens >= offered.now + OFFER_STEP);
 export const offerText = (level, tokens) => (level === 'urge'
   ? 'This session is ' + kTok(tokens) + ' tokens, and every turn sends all ' + kTok(tokens) + ' again. Compact now to cut that.'
   : 'This session is ' + kTok(tokens) + ' tokens. Compacting now makes every later turn cheaper.');
@@ -1871,7 +1880,7 @@ export const register = on => {
     const urge = shown.level !== 'suggest';
     const words = shown.level === 'now' ? ICON.pause + ' ' + nowText(shown.tokens, shown.lapsed) : ICON.compacted + ' ' + offerText(shown.level, shown.tokens);
     // drawn: the notice after this pause need not say it again
-    if (shown.level === 'now') nowFor = shown.pause;
+    if (shown.level === 'now') { nowFor = shown.pause; offered.now = shown.tokens; offered.nowPause = shown.pause; }
     const offerRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
       Text(urge ? { color: 'warning', children: words } : { dimColor: true, children: words }),
       Button({ key: 'pacing-compact', label: 'Compact now', variant: urge ? 'primary' : 'secondary', onPress: () => {
@@ -2210,7 +2219,11 @@ export const register = on => {
       if (typed && lastTurnAt !== null && warnedFor !== lastTurnAt) {
         const note = pauseNote(contextTokens, (await $.clock.now()) - lastTurnAt);
         // the row before and after the lapse said it already: no second notice
-        if (note && nowFor !== lastTurnAt) $.ui.toast(note, { timeoutMs: TOAST_LONG });
+        // and a pause at a size already told is not told again (pauseDue)
+        if (note && nowFor !== lastTurnAt && pauseDue(contextTokens, lastTurnAt, offered)) {
+          offered.now = contextTokens; offered.nowPause = lastTurnAt;
+          $.ui.toast(note, { timeoutMs: TOAST_LONG });
+        }
         if (note) warnedFor = lastTurnAt;
       }
       // what the session is told beside this prompt, in blocks the user does
@@ -2368,7 +2381,7 @@ export const register = on => {
         if (on_) {
           const pause = lastTurnAt, size = contextTokens;
           const raise = lapsed => () => {
-            if (lastTurnAt !== pause) return;
+            if (lastTurnAt !== pause || !pauseDue(size, pause, offered)) return;
             offer = { level: 'now', tokens: size, lapsed, pause };
             redraw($);
           };

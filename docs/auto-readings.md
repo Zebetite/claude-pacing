@@ -1111,3 +1111,18 @@ line, carried in the log) and after the line steps until its meter is
 That is two switches a day at most. The reading says so: "Fable 5.2 stays
 held for now". Not changed: the calm offer of one step less effort at
 "over", which still follows the level.
+
+## Offers to compact come rarer (0.9.29)
+
+The user's word: compacting comes up very often and is annoying. A
+session of 300 000 tokens or more got the row at 300 000 and at every
+further 100 000, and a warning row or toast at every pause of 50 minutes
+or more, and a working day has several of those. Now `OFFER_STEP` is
+250 000: between two compactions the size is offered at 300 000, 500 000
+and 750 000. A pause is told once per such step too (`pauseDue`): the
+row before the lapse and after it in one pause count as one, the notice
+at the next prompt is the same telling, and the next pause is told only
+when the session has grown by 250 000 tokens since. A compaction starts
+all of it over, as before. Not changed: the sizes the levels start at,
+the words, `/pacing compact off`, and what the session itself says of
+its context in a reading.
