@@ -55,9 +55,19 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   drawn as a ship's console: a reactor dial for the week, the time left
   today to stay on budget, the meters, the agents at work as small
   robots, the context and the models (`/pacing-pane` reopens it).
+  Fable's own meter marks its budget line: a `BUDGET` tag under it, and
+  past it a red `OVER` tag and the stretch over the line in red.
   It comes from readings the plugin takes by itself after a turn, on a
   Claude Code version with hooks modules; older versions run the rest of
   the plugin as before.
+
+  <p>
+  <img src="docs/images/pane-agents.png" width="380" alt="The pacing pane with sample figures: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, three agents at work, the context at 18% and the models this session">
+  <img src="docs/images/pane-within.png" width="380" alt="The pacing pane with sample figures: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, one agent at work">
+  </p>
+
+  Sample figures, drawn by the pane's own code (`node scripts/pane-images.mjs`
+  makes them again); the desktop app's type and spacing differ a little.
 - **Role agents the session keeps.** A reader (Haiku 5.5 by default) for
   logs, searches and unfamiliar code, a verifier for tests and checks, an
   implementer for specified edits, and a researcher for documentation.
