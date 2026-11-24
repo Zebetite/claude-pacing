@@ -68,6 +68,9 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   the recommended model with Switch. In a session of 200 000 tokens or
   more it says what storing the session again on the new model costs,
   and offers **Compact, then switch**.
+- **Large results flagged.** A tool result of 10 000 tokens or more in
+  the session gets a toast with its size: every later turn sends it
+  again, and the reader agent reads such things for less.
 - **Room left over.** When the trend leaves 10 points or more of the week
   unused at the reset, one toast and `/pacing-status` say so: the
   allowance does not carry over.

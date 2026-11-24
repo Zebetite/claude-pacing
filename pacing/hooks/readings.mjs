@@ -55,6 +55,7 @@ export const ICON = {
   compacted: '🗜️', // compacted, or a compaction on offer
   pause: '💤', // the cache lapsed, or is about to, in a pause
   room: '💡', // allowance that goes unused at the reset
+  bulky: '🧱', // a tool result large enough to weigh on every later turn
 };
 // Routine toasts (started, still running, a switch or a compaction the
 // person just pressed for) stay the engine's 4 seconds; what should not be
@@ -121,6 +122,13 @@ const kTok = n => Math.round(n / 1000) + 'k';
 // the band's level for a session of this size, or null
 export const offerLevel = tokens => (tokens >= URGE_AT ? 'urge' : tokens >= SUGGEST_AT ? 'suggest' : null);
 // whether a level may be offered now, given the size at its last offer
+// A compaction pacing did not hear: the session's context fell by half or
+// more, and by 50 000 tokens or more, between two measures. Live, another
+// plugin's hook on session.compact runs first and skips pacing's, so a
+// /compact the person types is not seen; a /clear is the same to the offers.
+export const COMPACT_DROP = 50000;
+export const compactedBetween = (before, after) => typeof before === 'number' && typeof after === 'number'
+  && before - after >= COMPACT_DROP && after <= before / 2;
 export const offerDue = (level, tokens, offered) => !!level && (offered[level] == null || tokens >= offered[level] + OFFER_STEP);
 export const offerText = (level, tokens) => (level === 'urge'
   ? 'This session is ' + kTok(tokens) + ' tokens, and every turn sends all ' + kTok(tokens) + ' again. Compact now to cut that.'
@@ -314,6 +322,25 @@ async function sayUnused($, j, un) {
   try { await $.store.set('unused', un.said); } catch { /* this copy's memory */ }
   $.ui.toast(unusedText(j.unused), { timeoutMs: TOAST_LONG });
 }
+// A large tool result in the main thread stays in the session: every later
+// turn sends it again (from the cache, but it counts), and it brings the
+// compaction nearer. One toast per BULKY_EVERY at most, naming the tool and
+// the size; /pacing-status counts them. Subagents' results are left out:
+// only their answer reaches the session. Tokens are estimated from the text
+// the model reads, 4 characters a token.
+export const BULKY_TOKENS = 10000;
+export const BULKY_EVERY = 15 * 60000;
+export const tokensOfText = text => (typeof text === 'string' ? Math.round(text.length / 4) : 0);
+export const toolLabel = tool => {
+  const name = String(tool || 'tool');
+  const short = name.startsWith('mcp__') ? name.split('__').pop() : name;
+  return short.length > 20 ? short.slice(0, 19) + '…' : short;
+};
+export const bulkyText = (tool, tokens) => ICON.bulky + ' that ' + toolLabel(tool) + ' result was about ' + kText(tokens)
+  + ' tokens; every later turn sends it again. Bulky reads cost less in the reader agent.';
+export const bulkyStatus = b => (b && b.count ? '\nLarge results: ' + b.count + ' this session, about ' + kText(b.tokens)
+  + ' tokens that every later turn sends again; bulky reads cost less in the reader agent.' : '');
+const kText = n => (n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : Math.round(n / 1000) + 'k');
 // A change of level is one toast, and so is the session moved off the
 // per-model meter's model, or let back. A reading the module took at load is
 // no level the user was told of.
@@ -1374,6 +1401,8 @@ export const register = on => {
   let liveFrom = 0;
   // what was said of the allowance going unused (sayUnused)
   const un = { said: null };
+  // the large results this session (see BULKY_TOKENS)
+  const bulky = { count: 0, tokens: 0, saidAt: -Infinity };
   // (the session's dollars priced again at the reading's prices first: turns
   // before any reading were priced at none)
   const hold = j => {
@@ -1489,16 +1518,32 @@ export const register = on => {
         if (moved) { redraw($); keepAgents($, agents); }
       }
     } catch { /* no step known */ }
-    const toSession = !e.agentId && (e.tool === 'mcp__ccd_session__start_session' || e.tool === 'mcp__ccd_session_mgmt__send_message'
-      || (e.tool === 'SendMessage' && /^local_/.test(String(e.to || ''))));
-    if (!toSession) return next(e);
+    if (e.agentId) return next(e);
     const r = await next(e);
+    // a large result in the main thread (an agent's answer is the delegation
+    // itself, not a read to delegate)
     try {
-      st.watchSince = await $.clock.now();
-      st.watchUntil = st.watchSince + WATCH_FOR;
-      st.polledAt = 0;
-      startTick($, st);
-    } catch { /* no watch */ }
+      const n = r && !r.deny && e.tool !== 'Agent' ? tokensOfText(r.text) : 0;
+      if (n >= BULKY_TOKENS) {
+        bulky.count += 1;
+        bulky.tokens += n;
+        const now = await $.clock.now();
+        if (now - bulky.saidAt >= BULKY_EVERY && (await noticesOn($))) {
+          bulky.saidAt = now;
+          $.ui.toast(bulkyText(e.tool, n), { timeoutMs: TOAST_LONG });
+        }
+      }
+    } catch { /* not counted */ }
+    const toSession = e.tool === 'mcp__ccd_session__start_session' || e.tool === 'mcp__ccd_session_mgmt__send_message'
+      || (e.tool === 'SendMessage' && /^local_/.test(String(e.to || '')));
+    if (toSession) {
+      try {
+        st.watchSince = await $.clock.now();
+        st.watchUntil = st.watchSince + WATCH_FOR;
+        st.polledAt = 0;
+        startTick($, st);
+      } catch { /* no watch */ }
+    }
     return r;
   });
 
@@ -1849,7 +1894,7 @@ export const register = on => {
     try { now = await $.clock.now(); } catch { now = Date.now(); }
     const text = lineOf(liveLeft(reading, spend.total - liveFrom), sessionModel, tokens, agentTokens, now, true, runningAgents());
     return { text: 'Pacing: ' + text + (reading.do ? '\nNow: ' + reading.do : '')
-      + (typeof reading.unused === 'number' ? '\nUnused: at this pace about ' + reading.unused + '% of the week goes unused at the reset; it does not carry over.' : ''), isTextDisplayOnly: true };
+      + (typeof reading.unused === 'number' ? '\nUnused: at this pace about ' + reading.unused + '% of the week goes unused at the reset; it does not carry over.' : '') + bulkyStatus(bulky), isTextDisplayOnly: true };
   });
   // The report of `budget.mjs last`: the bars and the tier sheet. Where the
   // last reading is too old to show, the module takes one itself first, if
@@ -2109,7 +2154,19 @@ export const register = on => {
 
   on('session.measure', async ($, e, next) => {
     const result = await next(e);
-    if (e.context && typeof e.context.tokens === 'number') contextTokens = e.context.tokens;
+    if (e.context && typeof e.context.tokens === 'number') {
+      const before = contextTokens;
+      contextTokens = e.context.tokens;
+      // the offers start over, as at a compaction pacing heard
+      if (!e.agentId && compactedBetween(before, contextTokens)) {
+        forget();
+        clearTimers();
+        // a switch that said "compact first" is offered again at the turn's
+        // end, at the new size
+        if (sw && sw.compactFirst) { switchSeen.delete(sw.key); sw = null; }
+        redraw($);
+      }
+    }
     const limits = e.rateLimits || [];
     const week = limits.find(r => r.kind === 'seven_day');
     // no weekly window: an API key, not a subscription, or no response yet

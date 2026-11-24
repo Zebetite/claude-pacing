@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -1027,6 +1027,69 @@ test('never while a turn runs, never before a person has typed, gone after the u
   // the user compacts by hand: the row goes, and the offers start over
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'all of it', toolUses: [] }] } as any)
   expect((await bandText($)).text).toBe(undefined)
+})
+
+test('a large tool result in the main thread: one toast per 15 minutes naming the tool and size, counted in /pacing-status; subagents and agents\' answers left out', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const toasts: string[] = []
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  on('fs.read', () => ({ value: '{}' }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
+  // the tool answers with as many characters as the call asks for
+  on('tool.call', (_: unknown, e: any) => ({ result: {}, text: 'x'.repeat(e.chars || 10) }))
+  await $.session.measure(measure(10))
+  const said = toasts.length
+  // 12 000 tokens, 4 characters a token
+  await $.tool.call({ tool: 'Read', file_path: 'big.log', chars: 48000 } as any)
+  expect(toasts.slice(said)).toEqual(['🧱 that Read result was about 12k tokens; every later turn sends it again. Bulky reads cost less in the reader agent.'])
+  // small, a subagent's, an agent's answer: nothing
+  await $.tool.call({ tool: 'Read', file_path: 'small', chars: 39000 } as any)
+  await $.tool.call({ tool: 'Bash', command: 'x', chars: 80000, agentId: 'ag1' } as any)
+  await $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', chars: 80000 } as any)
+  // a second large one within 15 minutes is counted, not toasted
+  await $.tool.call({ tool: 'mcp__github__get_file_contents', chars: 100000 } as any)
+  expect(toasts.length).toBe(said + 1)
+  await clock.advance(BULKY_EVERY)
+  await $.tool.call({ tool: 'mcp__github__get_file_contents', chars: 100000 } as any)
+  expect(toasts.at(-1)).toBe('🧱 that get_file_contents result was about 25k tokens; every later turn sends it again. Bulky reads cost less in the reader agent.')
+  const status = (await $.command.run({ command: 'pacing-status', args: '' } as any)).text
+  expect(status.split('\n').at(-1)).toBe('Large results: 3 this session, about 62k tokens that every later turn sends again; bulky reads cost less in the reader agent.')
+  expect(BULKY_TOKENS).toBe(10000)
+  expect(tokensOfText('x'.repeat(40000))).toBe(10000)
+  expect(toolLabel('mcp__a__a_very_long_tool_name_indeed')).toBe('a_very_long_tool_na…')
+  expect(bulkyStatus({ count: 0, tokens: 0 })).toBe('')
+  expect(bulkyText('Read', 1250000).length).toBeLessThanOrEqual(120)
+})
+
+// Live, another plugin's session.compact hook ran first and skipped pacing's:
+// a typed /compact went unseen, and the old offer stood at the old size.
+test('a compaction pacing does not hear: the context falling by half between two measures ends the row, and the offers start over', async ($, on) => {
+  engine(on)
+  big(on)
+  offers(on)
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 350000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect((await bandText($)).text).toContain('350k')
+  // no session.compact reaches pacing; the next measure is small
+  await $.session.measure(measure(10, [], 40000))
+  expect((await bandText($)).text).toBe(undefined)
+  // grown again to 350k: offered again, as after a compaction it heard
+  await $.session.measure(measure(10, [], 350000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect((await bandText($)).text).toContain('350k')
+  // a drop that is no compaction: the row stays
+  await $.session.measure(measure(10, [], 320000))
+  expect((await bandText($)).text).toContain('350k')
+  expect(COMPACT_DROP).toBe(50000)
+  expect(compactedBetween(350000, 40000)).toBe(true)
+  expect(compactedBetween(90000, 40000)).toBe(true)
+  expect(compactedBetween(80000, 40000)).toBe(false)
+  expect(compactedBetween(350000, 200000)).toBe(false)
+  expect(compactedBetween(null, 40000)).toBe(false)
 })
 
 test('now: left idle, the row warns 10 minutes before the cache lapses and again once it has; Compact now works between turns', async ($, on) => {
@@ -3081,7 +3144,7 @@ test('an agent the engine no longer runs at the reload is dropped; without its l
 
 test('every toast leads with the icon of its kind where "Pacing: " stood, and keeps its words after it', async () => {
   expect(ICON).toEqual({ started: '▶️', done: '✅', still: '⏳', worse: '⚠️', stop: '🔴', better: '🟢', switched: '🔁', failed: '❌',
-    waiting: '📦', compacted: '🗜️', pause: '💤', room: '💡' })
+    waiting: '📦', compacted: '🗜️', pause: '💤', room: '💡', bulky: '🧱' })
   expect(unusedText(18).startsWith('💡 ')).toBe(true)
   const side = { id: 's1', kind: 'session', label: 'Task s1', startedAt: T0 - 35000 } as any
   const texts: [string, string][] = [

@@ -965,3 +965,31 @@ behind a turn or a compaction waits as long.
   ended). A command that runs at once says nothing of waiting.
 - **When it has run.** The switch toasts as before; a typed compaction
   ends with `🗜️ compacted.` (the sizes are known only to the direct call).
+
+## Large results, a compaction pacing did not hear (0.9.23)
+
+- **Large results flagged.** A tool result in the main thread of
+  `BULKY_TOKENS` (10 000) tokens or more, estimated from the text the
+  model reads at 4 characters a token, stays in the session: every later
+  turn sends it again, and the compaction comes nearer. One toast per
+  `BULKY_EVERY` (15 minutes) names the tool and the size, `🧱 that Read
+  result was about 12k tokens; every later turn sends it again. Bulky
+  reads cost less in the reader agent.`, and `/pacing-status` adds `Large
+  results: 3 this session, about 62k tokens ...`. Subagents' results and
+  an Agent call's answer are left out: the first never reach the session,
+  the second is the delegation itself.
+- **A compaction pacing did not hear.** Live, another plugin's
+  `session.compact` hook runs first and skips pacing's, so a `/compact`
+  the person types went unseen and the compaction row stood at the old
+  size. Now a measure whose context is half or less of the last one, and
+  50 000 tokens or more smaller (`compactedBetween`, `COMPACT_DROP`),
+  starts the offers over as a heard compaction does: the row and the idle
+  timers go, and a switch row that said "compact first" is offered again
+  at the next turn's end at the new size. A `/clear` counts the same.
+- **Releases in one command.** `scripts/release.mjs`: `test` runs the
+  node tests, the kit tests and the strict validation at once and
+  remembers the files they passed on; `release <version> --message <f>
+  --notes <f>` bumps plugin.json, skips the checks when they passed on the
+  same files, refuses CRLF in a file that was LF, commits, rebases on
+  GitHub if it moved, pushes, tags and creates the GitHub release with the
+  earlier changelog; `--dry` stops before the commit.

@@ -301,7 +301,8 @@ next turn storing it all again. Compact now keeps the goal, the
 decisions and why, the open items, the files and commands that matter,
 and what was ruled out; one line then gives the size before and after.
 `/pacing compact off` turns the row off; the toast after a pause then
-shows as before.
+shows as before. A compaction you type yourself, or a `/clear`, ends the
+row too: the plugin sees the session's size fall by half or more.
 
 **An offer to switch.** When the session runs on another model or
 effort than the reading recommends, the same place above the prompt
@@ -333,7 +334,10 @@ a calm switch. `/pacing switch off` turns it off.
 
 Bulky reading (logs, test output, many files) goes to the reader agent
 for the same reason: what the agent reads never enters the session's
-context.
+context. When one tool result in the session itself is 10 000 tokens or
+more, a toast names the tool and the size (`🧱 that Read result was about
+12k tokens; every later turn sends it again. ...`), at most once per 15
+minutes, and `/pacing-status` counts them for the session.
 
 **When a new session is the only way.** The plugin never offers one: a
 session that cannot be compacted, or your own wish to start afresh, is
