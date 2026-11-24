@@ -1522,6 +1522,27 @@ async function takeShared($, sh) {
 // the version plugin.json names now; null when unreadable
 async function versionOnDisk($) { try { return versionOf(await $.fs.read($.plugin.root + '/.claude-plugin/plugin.json')); } catch { return null; } }
 function say($, text) { try { $.ui.toast(text, { timeoutMs: TOAST_LONG }); } catch { /* an engine without toasts */ } }
+// Reloaded in one session, the row stayed in the others (the user's word:
+// it leaves the message open there). /reload-plugins loads the new version
+// in the session it is typed in alone, and a reload tells a module nothing
+// of itself, so each copy notes the version it loaded as under its session
+// (`version:<id>`, in the store, which outlives the copy); a copy that finds
+// an older one there is a reload into a new version, and says so to every
+// session (RELOADED). Then the others drop the row at their next look: the
+// person has seen it and acted once. They run the older code until their
+// own reload or a new session, as before.
+export const RELOADED = 'reloadedTo';
+async function noteLoaded($, version) {
+  try {
+    const id = await $.session.id();
+    if (!id) return;
+    const key = 'version:' + id;
+    const was = await $.store.get(key);
+    if (typeof was === 'string' && was !== version) await $.store.set(RELOADED, version);
+    if (was !== version) await $.store.set(key, version);
+  } catch { /* the row stays in the others, as before */ }
+}
+async function reloadedElsewhere($, version) { try { return (await $.store.get(RELOADED)) === version; } catch { return false; } }
 // one look at the version on disk; `rl` is the copy's memory (see register).
 // Never throws: a look is a convenience, and the next one tries again.
 async function look($, rl) {
@@ -1531,9 +1552,13 @@ async function look($, rl) {
     const disk = await versionOnDisk($);
     if (!disk) return;
     // this copy's first look: what it was loaded as
-    if (rl.loaded === null) { rl.loaded = disk; return; }
+    if (rl.loaded === null) { rl.loaded = disk; await noteLoaded($, disk); return; }
+    // the row up, and the person reloaded into that version in another session
+    if (rl.row && rl.row === disk && await reloadedElsewhere($, disk)) { rl.row = null; redraw($); return; }
     if (disk === rl.loaded || disk === rl.acted || !rl.typed()) return;
     rl.acted = disk;
+    // reloaded in another session already: no row here
+    if (await reloadedElsewhere($, disk)) return;
     // off: one toast for this version, no row
     if (!(await reloadOn($))) { say($, reloadText(disk)); return; }
     // the row for this version, unless Not now was pressed for it

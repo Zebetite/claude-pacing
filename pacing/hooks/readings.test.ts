@@ -5,7 +5,7 @@
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
 import { DIALS, FRAMES, frameSvg, barSvg, barText } from './pane.mjs'
-import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -2737,6 +2737,51 @@ test('a load says nothing of a version: a new session, or a reload the person ty
   await clock.advance(3 * RELOAD_CHECK_EVERY)
   expect(seen.toasts).toEqual([])
   expect(await reloadRow($)).toBe(undefined)
+})
+
+test('reloaded in another session: the row goes at the next look, and does not come up where it was not yet shown', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on)
+  await rowUp($, clock, seen)
+  expect(await reloadRow($)).toBe(ROW_11)
+  // this copy noted what it loaded as
+  expect(seen.store['version:local_s1']).toBe('0.9.10')
+  // another session's copy, reloaded into 0.9.11, says so
+  seen.store[RELOADED] = '0.9.11'
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(await reloadRow($)).toBe(undefined)
+  // the next version: not reloaded anywhere yet, the row as before
+  seen.manifest = manifestOf('0.9.12')
+  await clock.advance(RELOAD_CHECK_EVERY)
+  expect(await reloadRow($)).toBe(ROW_12)
+  seen.store[RELOADED] = '0.9.12'
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(RELOAD_AFTER_TURN)
+  expect(await reloadRow($)).toBe(undefined)
+  expect(seen.toasts).toEqual([])
+})
+
+test('a copy loaded in a session that ran an older one is a reload: it tells the others', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { store: { 'version:local_s1': '0.9.10' } })
+  seen.manifest = manifestOf('0.9.11')
+  await start($)
+  await clock.settle()
+  expect(seen.store[RELOADED]).toBe('0.9.11')
+  expect(seen.store['version:local_s1']).toBe('0.9.11')
+})
+
+test('a new session tells the others nothing of a reload', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on)
+  seen.manifest = manifestOf('0.9.11')
+  await start($)
+  await clock.settle()
+  expect(seen.store[RELOADED]).toBe(undefined)
+  expect(seen.store['version:local_s1']).toBe('0.9.11')
 })
 
 test('Not now hides the row for that version only', async ($, on) => {

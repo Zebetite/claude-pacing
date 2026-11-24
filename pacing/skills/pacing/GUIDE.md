@@ -652,4 +652,6 @@ with **Not now** (that version only). The plugin runs nothing and puts
 nothing in the prompt box: over a remote connection Claude Code does not
 run `/reload-plugins` at all, and a new session loads the new version
 either way. `/pacing reload off` turns the row off: then the same line
-comes once per version as a toast instead.
+comes once per version as a toast instead. Reload in one session and the row goes from your
+other sessions within five minutes; they keep the older version until you
+reload there too.

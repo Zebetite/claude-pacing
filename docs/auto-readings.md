@@ -1157,3 +1157,16 @@ band, and the words under the bar say "10 points over its budget line
 user's word: a colour of its own, not the ring's), and on the bars the
 line's tick is now a rect: a glow filter on a zero-wide line drew
 nothing, so the weekly bar's tick had been missing. Both bars' arrows are larger, edged dark.
+
+## Reloaded in one session, the row goes in the others (0.9.31)
+
+The user's word: a reload in one window left the new-version row open in
+the other sessions. `/reload-plugins` loads the new version in the
+session it is typed in alone, and a reload tells a module nothing of
+itself. So each copy notes the version it loaded as under its session id
+in the store (`version:<id>`); a copy that finds an older version there
+was loaded by a reload, and writes the version to `reloadedTo`
+(`RELOADED`). Every other copy, at its next look (5 minutes, or 2
+seconds after a turn), drops the row for that version, or does not raise
+it. A new session notes its version and tells nothing. The other sessions
+still run the older code until their own reload or a new session.
