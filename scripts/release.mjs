@@ -131,7 +131,10 @@ function crlfTurned() {
   return changed.filter(f => {
     const full = path.join(ROOT, f);
     if (!fs.existsSync(full) || fs.statSync(full).isDirectory()) return false;
-    if (!fs.readFileSync(full).includes('\r\n')) return false;
+    const bytes = fs.readFileSync(full);
+    // a binary file (a picture) has no lines: a NUL byte says so
+    if (bytes.includes(0)) return false;
+    if (!bytes.includes('\r\n')) return false;
     try { return !execFileSync('git', ['show', 'HEAD:' + f.replace(/\\/g, '/')], { cwd: ROOT }).includes('\r\n'); } catch { return true; }
   });
 }

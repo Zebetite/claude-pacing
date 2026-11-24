@@ -1199,3 +1199,13 @@ renders the plugin's README under Innehåll (Contents), so the plugin's
 README has a section with the three pictures, linked from GitHub
 (raw.githubusercontent.com) rather than shipped, so every install stays
 as small as before.
+
+## The pictures shipped in the plugin (0.9.34)
+
+On the library page the README's pictures from raw.githubusercontent.com
+showed as "Visa bild" boxes, and a click only offered to open the link in
+a new tab: claude.ai loads no images from other sites there. The user
+chose to ship them: `pacing/images/pane-*.png` (about 770 KB), linked
+relatively from the plugin's README, and `scripts/pane-images.mjs` copies
+them there. Whether the page draws images from the plugin's own files is
+what this release tries.

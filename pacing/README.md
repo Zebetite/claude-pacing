@@ -24,11 +24,11 @@ Open beside the chat from the session's start (`/pacing-pane` reopens
 it): the week as a dial, the time left today to stay on budget, the
 meters, the agents at work, the context and the models. Sample figures:
 
-![The pacing pane: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, three agents at work](https://raw.githubusercontent.com/Zebetite/claude-pacing/main/docs/images/pane-agents.png)
+![The pacing pane: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, three agents at work](images/pane-agents.png)
 
-![The pacing pane within budget: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, one agent at work](https://raw.githubusercontent.com/Zebetite/claude-pacing/main/docs/images/pane-within.png)
+![The pacing pane within budget: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, one agent at work](images/pane-within.png)
 
-![The pacing pane with the week over its budget line: the week at 79% against a line of 73%, 1h 40m over today's budget, Fable 5.2 at 68% under its line](https://raw.githubusercontent.com/Zebetite/claude-pacing/main/docs/images/pane-week-over.png)
+![The pacing pane with the week over its budget line: the week at 79% against a line of 73%, 1h 40m over today's budget, Fable 5.2 at 68% under its line](images/pane-week-over.png)
 
 ## What is in the plugin
 

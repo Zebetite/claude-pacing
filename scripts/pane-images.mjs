@@ -3,7 +3,8 @@
 // in for the desktop app's elements, and shot with a headless Chrome or
 // Edge. Nothing is read or measured.
 //
-//   node scripts/pane-images.mjs            writes docs/images/pane-*.png
+//   node scripts/pane-images.mjs            writes docs/images/pane-*.png,
+//                                           and copies them to pacing/images
 //
 // The app draws Box, Text, Button and Svg itself; here they are flex boxes,
 // text in the app's dark theme, and the same SVG. Spacing and type sizes
@@ -139,3 +140,8 @@ for (const s of SHOTS) {
   console.log('wrote ' + path.relative(root, png));
 }
 fs.rmSync(tmp, { recursive: true, force: true });
+// the plugin ships them too: the organization library's page shows the
+// plugin's README and not images from other sites
+const shipped = path.join(root, 'pacing', 'images');
+fs.mkdirSync(shipped, { recursive: true });
+for (const s of SHOTS) fs.copyFileSync(path.join(out, s.name + '.png'), path.join(shipped, s.name + '.png'));
