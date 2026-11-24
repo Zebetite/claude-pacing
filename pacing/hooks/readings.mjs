@@ -340,7 +340,75 @@ export const bulkyText = (tool, tokens) => ICON.bulky + ' that ' + toolLabel(too
   + ' tokens; every later turn sends it again. Bulky reads cost less in the reader agent.';
 export const bulkyStatus = b => (b && b.count ? '\nLarge results: ' + b.count + ' this session, about ' + kText(b.tokens)
   + ' tokens that every later turn sends again; bulky reads cost less in the reader agent.' : '');
-const kText = n => (n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : Math.round(n / 1000) + 'k');
+const kText = n => (n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(Math.round(n)));
+
+// ---- what fills the session's context ----
+// The engine breaks the window down by category as /context does
+// ($.session.usage({ breakdown: 'summary' }): estimated locally, no request
+// sent). Its Messages row does not say what in the conversation is large, so
+// the module counts the main thread's tool results itself (tokensOfText),
+// by tool, with the largest few, from the last compaction (or load) on.
+// /pacing-status and the pane show both.
+export const RESULTS_TOP = 5;
+export const newResults = () => ({ total: 0, byTool: {}, top: [] });
+// what a call read or ran, in a few words: a file's name, a command's start
+export const whatOf = e => {
+  const file = e.file_path || e.notebook_path || e.path;
+  const raw = file ? String(file).split(/[\\/]/).pop() : String(e.command || e.pattern || e.url || e.query || e.description || '');
+  const one = raw.split('\n')[0].trim();
+  return one.length > 30 ? one.slice(0, 29) + '…' : one;
+};
+export const noteResult = (r, tool, what, tokens) => {
+  if (!(tokens > 0)) return r;
+  const name = toolLabel(tool);
+  r.total += tokens;
+  r.byTool[name] = (r.byTool[name] || 0) + tokens;
+  r.top = [...r.top, { tool: name, what: what || '', tokens }].sort((a, b) => b.tokens - a.tokens).slice(0, RESULTS_TOP);
+  return r;
+};
+const byToolText = r => {
+  const top = Object.entries(r.byTool).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  return top.length ? ' (' + top.map(([n, t]) => n + ' ' + kText(t)).join(', ') + ')' : '';
+};
+// The context in lines: the total against the window and where it compacts by
+// itself, the conversation split into tool results and the rest, the fixed
+// parts (system prompt, tools, memory, skills) largest first, and the
+// largest results. Categories are told apart by `kind`; the Messages row is
+// the one the engine names so (its name is the only mark it has).
+export const contextLines = (bd, r) => {
+  const lines = [];
+  if (bd && typeof bd.totalTokens === 'number') {
+    const max = bd.rawMaxTokens || bd.maxTokens;
+    lines.push('Context: ' + kText(bd.totalTokens) + (max ? ' of ' + kText(max) + ' (' + Math.round(bd.percentage) + '%)' : '')
+      + (bd.isAutoCompactEnabled && bd.autoCompactThreshold ? '; it compacts by itself at ' + kText(bd.autoCompactThreshold) : ''));
+    const used = (bd.categories || []).filter(c => c.kind === 'used' && c.tokens > 0);
+    const msgs = used.find(c => /^messages$/i.test(String(c.name)));
+    if (msgs) {
+      const tools = r && r.total ? Math.min(r.total, msgs.tokens) : 0;
+      lines.push('  Messages ' + kText(msgs.tokens) + (tools ? ': tool results about ' + kText(tools) + byToolText(r) + ', the rest about ' + kText(msgs.tokens - tools) : ''));
+    }
+    const rest = used.filter(c => c !== msgs).sort((a, b) => b.tokens - a.tokens);
+    if (rest.length) lines.push('  ' + rest.map(c => c.name + ' ' + kText(c.tokens)).join(' · '));
+  } else if (r && r.total) {
+    lines.push('Context: tool results about ' + kText(r.total) + byToolText(r));
+  }
+  if (r && r.top.length) lines.push('Largest results: ' + r.top.map(t => t.tool + (t.what ? ' ' + t.what : '') + ' ' + kText(t.tokens)).join('; '));
+  return lines;
+};
+// the breakdown now, or null where the engine gives none
+async function breakdownNow($) {
+  try {
+    const u = await $.session.usage({ breakdown: 'summary' });
+    return (u && u.context && u.context.breakdown) || null;
+  } catch { return null; }
+}
+
+// ---- the pane ----
+// `/pacing-pane` opens a pane beside the chat with what /pacing-status says
+// (the budget in time, the usage, what to do, the agents running) and what
+// fills the context, redrawn with the band (redraw) and after each turn.
+export const PANE_ID = 'pacing';
+export const PANE_TITLE = 'Pacing';
 // A change of level is one toast, and so is the session moved off the
 // per-model meter's model, or let back. A reading the module took at load is
 // no level the user was told of.
@@ -1403,6 +1471,13 @@ export const register = on => {
   const un = { said: null };
   // the large results this session (see BULKY_TOKENS)
   const bulky = { count: 0, tokens: 0, saidAt: -Infinity };
+  // the context lines for /pacing-status and the pane: a fresh breakdown
+  // where the engine gave one, else the last
+  const ctxText = bd => {
+    if (bd) ctxNow = bd;
+    const l = contextLines(bd || ctxNow, results);
+    return l.length ? '\n' + l.join('\n') : '';
+  };
   // (the session's dollars priced again at the reading's prices first: turns
   // before any reading were priced at none)
   const hold = j => {
@@ -1442,7 +1517,11 @@ export const register = on => {
   let timers = [];
   let nowFor = null;
   const clearTimers = () => { for (const t of timers) { try { t.cancel(); } catch { /* gone */ } } timers = []; };
-  const forget = () => { offer = null; offered = {}; };
+  // the main thread's tool results since the last compaction, and the last
+  // breakdown of the context (see "what fills the session's context")
+  let results = newResults();
+  let ctxNow = null;
+  const forget = () => { offer = null; offered = {}; results = newResults(); ctxNow = null; };
   // the switch the band offers now, and every suggestion offered already
   let sw = null;
   const switchSeen = new Set();
@@ -1523,7 +1602,12 @@ export const register = on => {
     // a large result in the main thread (an agent's answer is the delegation
     // itself, not a read to delegate)
     try {
-      const n = r && !r.deny && e.tool !== 'Agent' ? tokensOfText(r.text) : 0;
+      // the module's own calls (the usage tool, the sessions list) answer
+      // the module, not the model
+      const own = e.tool === USAGE_TOOL || e.tool === SESSIONS_TOOL;
+      const all = r && !r.deny && !own ? tokensOfText(r.text) : 0;
+      if (all) results = noteResult(results, e.tool, whatOf(e), all);
+      const n = e.tool !== 'Agent' ? all : 0;
       if (n >= BULKY_TOKENS) {
         bulky.count += 1;
         bulky.tokens += n;
@@ -1818,6 +1902,7 @@ export const register = on => {
       { name: 'pacing-guide', description: 'Pacing: the whole guide.' },
       { name: 'pacing-doctor', description: 'Pacing: is it working here, and what to do if not.' },
       { name: 'pacing-saved', description: 'Pacing: what agents on cheaper models saved this week.' },
+      { name: 'pacing-pane', description: 'Pacing: a pane with the budget, the usage, the agents and what fills the context.' },
     ]) {
       try { await $.command.register(c); } catch { /* an engine without commands */ }
     }
@@ -1894,11 +1979,46 @@ export const register = on => {
     try { now = await $.clock.now(); } catch { now = Date.now(); }
     const text = lineOf(liveLeft(reading, spend.total - liveFrom), sessionModel, tokens, agentTokens, now, true, runningAgents());
     return { text: 'Pacing: ' + text + (reading.do ? '\nNow: ' + reading.do : '')
-      + (typeof reading.unused === 'number' ? '\nUnused: at this pace about ' + reading.unused + '% of the week goes unused at the reset; it does not carry over.' : '') + bulkyStatus(bulky), isTextDisplayOnly: true };
+      + (typeof reading.unused === 'number' ? '\nUnused: at this pace about ' + reading.unused + '% of the week goes unused at the reset; it does not carry over.' : '') + ctxText(await breakdownNow($)) + bulkyStatus(bulky), isTextDisplayOnly: true };
   });
   // The report of `budget.mjs last`: the bars and the tier sheet. Where the
   // last reading is too old to show, the module takes one itself first, if
   // the app's usage tool answers; else it says why and where to measure.
+  // the pane: what /pacing-status says, a row each, then the context
+  const paneLines = now => {
+    const out = [];
+    if (reading) {
+      out.push(...lineOf(liveLeft(reading, spend.total - liveFrom), sessionModel, tokens, agentTokens, now, true, runningAgents()).split('\n'));
+      if (reading.do) out.push('Now: ' + reading.do);
+      if (typeof reading.unused === 'number') out.push('Unused: at this pace about ' + reading.unused + '% of the week goes unused at the reset; it does not carry over.');
+    } else out.push('No reading yet in this session: /pacing usage takes one.');
+    const ctx = contextLines(ctxNow, results);
+    out.push('', ...(ctx.length ? ctx : ['Context: not measured yet; it shows after the next turn.']));
+    const b = bulkyStatus(bulky);
+    if (b) out.push(b.replace(/^\n/, ''));
+    return out;
+  };
+  on('command.run', { command: 'pacing-pane' }, async ($) => {
+    const bd = await breakdownNow($);
+    if (bd) ctxNow = bd;
+    let r;
+    try { r = await $.ui.open({ id: PANE_ID, title: PANE_TITLE }); } catch (err) { r = { isPlaced: false, reason: (err && err.message) || 'refused' }; }
+    return { text: r && r.isPlaced ? 'Pacing pane opened.' : 'Pacing pane: not shown (' + ((r && r.reason) || 'no surface') + ').', isTextDisplayOnly: true };
+  });
+  on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
+    if (e.plugin && e.plugin !== 'pacing') return next(e);
+    const { Box, Text, Button } = $.ui.resolve(e);
+    let now = Date.now();
+    try { now = await $.clock.now(); } catch { /* the system's clock */ }
+    const lines = paneLines(now);
+    const head = reading ? levelIcon(reading) + ' ' : '';
+    return Box({ flexDirection: 'column', children: [
+      ...lines.map((l, i) => Text(i === 0 ? { bold: true, children: head + l } : l.startsWith('  ') || l.startsWith('Largest') ? { dimColor: true, children: l } : { children: l || ' ' })),
+      Box({ flexDirection: 'row', children: [Button({ key: 'pacing-pane-refresh', label: 'Refresh', variant: 'secondary', onPress: () => {
+        later($, async () => { const bd = await breakdownNow($); if (bd) ctxNow = bd; redraw($); });
+      } })] }),
+    ] });
+  });
   on('command.run', { command: 'pacing-usage' }, async ($) => {
     const show = text => ({ text, isTextDisplayOnly: true });
     try {
@@ -2148,6 +2268,15 @@ export const register = on => {
           timers.push($.clock.after(CACHE_TTL, raise(true)));
         }
       } catch { /* an engine without the band: nothing drawn */ }
+    }
+    // an open pane: a fresh breakdown of the context after the main thread's turn
+    if (!e.agentId) {
+      (async () => {
+        const panes = await $.ui.panes();
+        if (!panes || !panes.some(p => p.id === PANE_ID)) return;
+        const bd = await breakdownNow($);
+        if (bd) { ctxNow = bd; redraw($); }
+      })().catch(() => { /* the pane keeps the last */ });
     }
     return result;
   });

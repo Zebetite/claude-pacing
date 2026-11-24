@@ -49,7 +49,10 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   agents' part shrinks (`⏳ 2 Subagents · Budget: 2h 10m left · usage:
   Weekly 36% Fable 40%`). `/pacing-status` shows the whole status line in words, with
   how this session's own use splits over the ladder's models
-  (subagents included).
+  (subagents included), and what fills the session's context: tool
+  results by tool, the largest of them, and the fixed parts.
+- **A pacing pane** (`/pacing-pane`): the budget, the usage, the agents
+  and the context beside the chat, measured again after every turn.
   It comes from readings the plugin takes by itself after a turn, on a
   Claude Code version with hooks modules; older versions run the rest of
   the plugin as before.

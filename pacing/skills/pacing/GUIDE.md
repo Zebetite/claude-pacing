@@ -339,6 +339,26 @@ more, a toast names the tool and the size (`🧱 that Read result was about
 12k tokens; every later turn sends it again. ...`), at most once per 15
 minutes, and `/pacing-status` counts them for the session.
 
+**What fills the context.** `/pacing-status` ends with the session's
+context: the total against the window and where it compacts by itself,
+the conversation split into tool results (by tool) and the rest, the
+fixed parts (system prompt, tools, memory files, skills), and the five
+largest results, as in
+
+    Context: 183k of 1M (18%); it compacts by itself at 967k
+      Messages 160k: tool results about 55k (Read 38k, Bash 12k), the rest about 105k
+      System tools 15k · Memory files 4k · System prompt 3k
+    Largest results: Read readings.mjs 30k; Bash node --test 12k
+
+The categories are Claude Code's own estimate, as `/context` shows them;
+the tool results are counted from the last compaction or the plugin's last
+load, so after a reload they start again from nothing.
+
+**The pane.** `/pacing-pane` opens a pane beside the chat with the same:
+the budget in time, the usage, what to do now, the agents running, and
+what fills the context. It measures the context again after each of your
+turns, and **Refresh** does it at once.
+
 **When a new session is the only way.** The plugin never offers one: a
 session that cannot be compacted, or your own wish to start afresh, is
 the only reason. `/pacing handover` then has the session write down
@@ -549,7 +569,7 @@ name, colon, skill name); `/pacing` below stands for that. Typing "usage"
 in plain words works too. The rules for delegating work are a second,
 smaller skill, `/pacing:route`, which Claude loads by itself before it
 first hands work to a subagent; a plain report never loads them. Where
-Claude Code has hooks modules, `/pacing-usage` (the report),
+Claude Code has hooks modules, `/pacing-pane` (the pane), `/pacing-usage` (the report),
 `/pacing-help` (the short help) and `/pacing-guide` (this guide) answer
 at once, without using the model. `/pacing-usage` shows the report in a
 code block; with no fresh reading and no usage tool to take one it says

@@ -993,3 +993,28 @@ behind a turn or a compaction waits as long.
   same files, refuses CRLF in a file that was LF, commits, rebases on
   GitHub if it moved, pushes, tags and creates the GitHub release with the
   earlier changelog; `--dry` stops before the commit.
+
+## What fills the context, and a pane (0.9.24)
+
+- **The breakdown.** `$.session.usage({ breakdown: 'summary' })` gives
+  the window by category as /context does, estimated locally (no
+  request). Its Messages row does not say what in the conversation is
+  large, so the module counts the main thread's tool results itself
+  (`noteResult`: by tool, and the `RESULTS_TOP` five largest with
+  `whatOf`: a file's name, a command's start), from the last compaction,
+  heard or seen (`forget`), or the last load. The module's own calls
+  (the usage tool, the sessions list) are left out. `contextLines`
+  joins the two: the total against the window and the compaction point,
+  Messages split into tool results and the rest, the fixed parts largest
+  first (told apart by `kind`; Messages is found by its name, the only
+  mark the engine gives it), the largest results. `/pacing-status` ends
+  with them.
+- **The pane.** `/pacing-pane` opens `PANE_ID` (`pacing`) with
+  `$.ui.open`; a `ui.render` hook on `{ component: 'Pane', requestId:
+  'pacing' }` draws /pacing-status's long form a row each (the first in
+  bold with the level's icon), what to do, what goes unused, then the
+  context lines and the large-results count, and a **Refresh** button
+  (`later`, as every press). It redraws with the band (`redraw`), and
+  the main thread's turn end measures the context again when
+  `$.ui.panes()` has it open. A pane the engine does not place:
+  `Pacing pane: not shown (<reason>).`

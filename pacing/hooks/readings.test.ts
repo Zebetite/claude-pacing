@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -1062,6 +1062,113 @@ test('a large tool result in the main thread: one toast per 15 minutes naming th
   expect(toolLabel('mcp__a__a_very_long_tool_name_indeed')).toBe('a_very_long_tool_na…')
   expect(bulkyStatus({ count: 0, tokens: 0 })).toBe('')
   expect(bulkyText('Read', 1250000).length).toBeLessThanOrEqual(120)
+})
+
+// ---- what fills the context, and the pane ----
+// the engine's breakdown as $.session.usage({ breakdown: 'summary' }) answers it
+const BREAKDOWN = {
+  categories: [
+    { name: 'System prompt', tokens: 3200, color: 'x', isDeferred: false, kind: 'used' },
+    { name: 'System tools', tokens: 15400, color: 'x', isDeferred: false, kind: 'used' },
+    { name: 'Memory files', tokens: 4100, color: 'x', isDeferred: false, kind: 'used' },
+    { name: 'Messages', tokens: 160000, color: 'x', isDeferred: false, kind: 'used' },
+    { name: 'MCP tools', tokens: 9000, color: 'x', isDeferred: true, kind: 'deferred' },
+    { name: 'Free space', tokens: 650000, color: 'x', isDeferred: false, kind: 'free' },
+    { name: 'Autocompact buffer', tokens: 33000, color: 'x', isDeferred: false, kind: 'buffer' },
+  ],
+  totalTokens: 182700, maxTokens: 1000000, rawMaxTokens: 1000000, autocompactSource: 'auto', percentage: 18,
+  gridRows: [], model: 'claude-fable-5-2', memoryFiles: [], mcpTools: [], agents: [],
+  autoCompactThreshold: 967000, isAutoCompactEnabled: true, apiUsage: null,
+}
+
+test('what fills the context: the total, the conversation split into tool results and the rest, the fixed parts, the largest results', () => {
+  let r = newResults()
+  r = noteResult(r, 'Read', whatOf({ file_path: 'X:\\pacing\\pacing\\hooks\\readings.mjs' }), 30000)
+  r = noteResult(r, 'Bash', whatOf({ command: 'node --test\nmore' }), 12000)
+  r = noteResult(r, 'Read', whatOf({ file_path: '/a/b/GUIDE.md' }), 8000)
+  r = noteResult(r, 'mcp__github__get_file_contents', whatOf({ path: 'README.md' }), 5000)
+  expect(contextLines(BREAKDOWN, r)).toEqual([
+    'Context: 183k of 1M (18%); it compacts by itself at 967k',
+    '  Messages 160k: tool results about 55k (Read 38k, Bash 12k, get_file_contents 5k), the rest about 105k',
+    '  System tools 15k · Memory files 4k · System prompt 3k',
+    'Largest results: Read readings.mjs 30k; Bash node --test 12k; Read GUIDE.md 8k; get_file_contents README.md 5k',
+  ])
+  // no breakdown from the engine: the results alone; none at all: nothing
+  expect(contextLines(null, r)[0]).toBe('Context: tool results about 55k (Read 38k, Bash 12k, get_file_contents 5k)')
+  expect(contextLines(null, newResults())).toEqual([])
+  // the five largest only; a long command cut
+  for (let i = 1; i <= 7; i++) r = noteResult(r, 'Grep', 'p' + i, 1000 * i)
+  expect(r.top.map(t => t.tokens)).toEqual([30000, 12000, 8000, 7000, 6000])
+  expect(whatOf({ command: 'x'.repeat(40) })).toBe('x'.repeat(29) + '…')
+  expect(RESULTS_TOP).toBe(5)
+})
+
+test('/pacing-status adds the context; the results start over at a compaction', async ($, on) => {
+  engine(on)
+  big(on)
+  offers(on)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: 182700, window: 1000000, percent: 18, breakdown: BREAKDOWN }, rateLimits: [] } }))
+  on('tool.call', (_: unknown, e: any) => ({ result: {}, text: 'x'.repeat(e.chars || 10) }))
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 182700))
+  await $.tool.call({ tool: 'Read', file_path: '/a/big.log', chars: 8000 } as any)
+  const text = (await $.command.run({ command: 'pacing-status', args: '' } as any)).text
+  expect(text).toContain('\nContext: 183k of 1M (18%); it compacts by itself at 967k\n  Messages 160k: tool results about 2k (Read 2k), the rest about 158k\n')
+  expect(text).toContain('Largest results: Read big.log 2k')
+  // compacted: the results go
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 's', toolUses: [] }] } as any)
+  expect((await $.command.run({ command: 'pacing-status', args: '' } as any)).text).not.toContain('Largest results')
+})
+
+const PANE = {
+  plugin: 'pacing', component: 'Pane', requestId: 'pacing', surface: 'desktop',
+  props: { title: 'Pacing', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
+} as const
+
+test('the pane: /pacing-pane opens it; it shows the budget, what to do and the context, with Refresh', async ($, on) => {
+  engine(on)
+  big(on)
+  offers(on)
+  const opened: any[] = []
+  let usage = 0
+  on('session.usage', () => (usage++, { value: { startedAt: 0, context: { tokens: 182700, window: 1000000, percent: 18, breakdown: BREAKDOWN }, rateLimits: [] } }))
+  on('ui.open', (_: unknown, e: any) => (opened.push(e), { value: { isPlaced: true } }))
+  on('ui.panes', () => ({ value: opened.map(o => ({ id: o.id, title: o.title, isPlaced: true })) }))
+  on('tool.call', (_: unknown, e: any) => ({ result: {}, text: 'x'.repeat(e.chars || 10) }))
+  const clock = mock.clock(on, { now: T0 })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 182700))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  // before it is opened, a turn's end asks for no breakdown
+  expect(usage).toBe(0)
+  const r = await $.command.run({ command: 'pacing-pane', args: '' } as any)
+  expect(r.text).toBe('Pacing pane opened.')
+  expect(opened).toEqual([{ id: PANE_ID, title: PANE_TITLE }])
+  const ui = await $.ui.mount(PANE)
+  const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
+  expect(texts[0]).toMatch(/^🟢 Budget: /)
+  expect(texts).toContain('Context: 183k of 1M (18%); it compacts by itself at 967k')
+  expect(texts).toContain('  Messages 160k')
+  await ui.press({ key: 'pacing-pane-refresh' })
+  await clock.advance(1)
+  await ui.unmount()
+  expect(usage).toBe(2)
+  // open: each turn's end measures the context again
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(1)
+  expect(usage).toBe(3)
+})
+
+test('a pane the engine does not place: /pacing-pane says why', async ($, on) => {
+  engine(on)
+  offers(on)
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000 } } }))
+  on('ui.open', () => ({ value: { isPlaced: false, reason: 'no surface attached' } }))
+  expect((await $.command.run({ command: 'pacing-pane', args: '' } as any)).text).toBe('Pacing pane: not shown (no surface attached).')
+  // the pane before any reading or turn
+  const ui = await $.ui.mount(PANE)
+  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', ' ', 'Context: not measured yet; it shows after the next turn.'])
+  await ui.unmount()
 })
 
 // Live, another plugin's session.compact hook ran first and skipped pacing's:
@@ -2890,7 +2997,7 @@ test('the module registers its commands, and answers /pacing-usage with the repo
   on('command.register', (_: unknown, e: any) => (names.push(e.name), e.immediate && immediate.push(e.name), { value: { command: e.name } }))
   on('process.run', (_: unknown, e: any) => (runs.push([...e.argv]), stdout(REPORT.join('\n') + '\n')))
   await start($)
-  expect(names).toEqual(['pacing-status', 'pacing-usage', 'pacing-help', 'pacing-guide', 'pacing-doctor', 'pacing-saved'])
+  expect(names).toEqual(['pacing-status', 'pacing-usage', 'pacing-help', 'pacing-guide', 'pacing-doctor', 'pacing-saved', 'pacing-pane'])
   // the three reports wait for a turn's end: answered mid-turn, their text would stay in the requests
   expect(immediate).toEqual(['pacing-status'])
 
