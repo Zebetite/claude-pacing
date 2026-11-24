@@ -531,6 +531,10 @@ describe('the per-model meter, paced on the same line', () => {
       assert.match(rows[1], /ahead, Fable 5\.2 held$/);
       // the next session starts on the fallback
       assert.equal(JSON.parse(s.read('state.json')).next.label, 'Opus 5.5');
+      // the hooks module hears the week's own level beside the one the
+      // per-model meter set (the pane's top area shows the week alone)
+      const j = JSON.parse(s.budget(['--all', '10', '--reset', RESET, '--premium', '22', '--now', '2026-11-13T12:10:00Z', '--source', 'hook', '--dry']).out.trim());
+      assert.deepEqual([j.weekLevel, j.premiumHeld], ['ahead', true]);
     } finally { s.cleanup(); }
   });
 });

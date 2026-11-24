@@ -419,6 +419,8 @@ async function breakdownNow($) {
 // (the budget in time, the usage, what to do, the agents running) and what
 // fills the context, redrawn with the band (redraw) and after each turn.
 export const PANE_ID = 'pacing';
+// at the pane's first draw, a reading younger than this is not taken again
+export const PANE_FRESH = 60 * 1000;
 export const PANE_TITLE = 'Pacing';
 // The pane opens by itself at a session's start, so it is there once the
 // plugin is installed. A person who closes it (ui.close, origin `person`)
@@ -431,22 +433,27 @@ export const closedByPerson = e => !!e && e.id === PANE_ID && !!e.origin && e.or
 // today in plain words with the level, the meters with the budget line, the
 // session's models, the agents running, and how full the context is.
 // The budget is said as time alone, never in tokens or dollars: "9h 30m" and
-// "left to use today and stay on budget"; past the line, "40m" and "over
+// "left to use today to stay on budget"; past the line, "40m" and "over
 // today's budget". Without a pace there is no time: the points of the week.
 export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky = null, now = Date.now() } = {}) => {
   const m = { level: 'ok', levelText: '', budget: null, meters: [], notes: [], mix, running, context: null, contextNote: '', empty: '' };
   if (j) {
-    m.level = j.level === 'stop' || j.premiumOut ? 'stop' : j.level === 'throttle' ? 'throttle' : j.level === 'over' || j.premiumHeld ? 'over' : 'ok';
-    const by = j.levelBy === 'premium' && j.premiumLabel && m.level !== 'ok' ? ' (' + j.premiumLabel.split(' ')[0] + '\'s meter)' : '';
-    m.levelText = j.premiumOut && j.premiumLabel ? j.premiumLabel + ' is used up'
-      : { ok: 'Within budget', over: 'Over the budget line', throttle: 'Far over the budget line', stop: 'The week is nearly used' }[m.level] + by;
+    // The top area is the week alone (the user's word: do not mix the weekly
+    // meter and Fable's there): its level before the per-model meter's
+    // (weekLevel; from an older budget.mjs, the level where the week set it,
+    // else the week's figure against the line). The per-model meter says
+    // its own state under its bar.
+    const wl = j.weekLevel || (j.levelBy !== 'premium' ? j.level
+      : typeof j.all === 'number' && typeof j.line === 'number' ? (j.all >= 95 ? 'stop' : j.all - j.line > 5 ? 'throttle' : j.all > j.line ? 'over' : 'ahead') : 'ahead');
+    m.level = wl === 'stop' ? 'stop' : wl === 'throttle' ? 'throttle' : wl === 'over' ? 'over' : 'ok';
+    m.levelText = { ok: 'Within budget', over: 'Over the budget line', throttle: 'Far over the budget line', stop: 'The week is nearly used' }[m.level];
     const h = hoursLeft(j);
     const points = j.left && typeof j.left.points === 'number' ? j.left.points : typeof j.line === 'number' && typeof j.all === 'number' ? j.line - j.all : null;
     if (h !== null) {
       const over = h < 0 && timeText(h) !== '0m';
-      m.budget = { big: (j.rateFrom === 'estimate' ? '~' : '') + timeText(h), sub: over ? 'over today\'s budget' : 'left to use today and stay on budget' };
+      m.budget = { big: (j.rateFrom === 'estimate' ? '~' : '') + timeText(h), sub: over ? 'over today\'s budget' : 'left to use today to stay on budget' };
     } else if (points !== null) {
-      m.budget = { big: Math.abs(Math.round(points)) + '%', sub: points < 0 ? 'of the week over today\'s budget' : 'of the week left to use today and stay on budget' };
+      m.budget = { big: Math.abs(Math.round(points)) + '%', sub: points < 0 ? 'of the week over today\'s budget' : 'of the week left to use today to stay on budget' };
     } else m.budget = { big: '–', sub: 'No budget figure yet' };
     if (typeof j.all === 'number') {
       m.meters.push({ label: 'Weekly', pct: j.all, line: typeof j.line === 'number' ? j.line : null,
@@ -454,8 +461,18 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky =
     }
     if (j.premium != null && j.premiumLabel) {
       const age = j.premiumAt ? now - Date.parse(j.premiumAt) : 0;
-      m.meters.push({ label: j.premiumLabel, pct: j.premium, line: null, note: age > CARRIED_CURRENT ? 'read ' + ageText(age) + ' ago'
-        + (j.premiumEstimate != null && Math.round(j.premiumEstimate) > Math.round(j.premium) ? ', estimated ' + Math.round(j.premiumEstimate) + '% now' : '') : '' });
+      // its budget line drawn loud (the user's word: very visible, and more
+      // so when over), and its state in words under the bar
+      const line = typeof j.line === 'number' ? j.line : null;
+      const by = line !== null ? Math.round(j.premium - line) : null;
+      const state = j.premiumOut ? 'used up until the reset'
+        : line === null ? ''
+        : by > 0 ? by + ' points over its budget line ' + Math.round(line) + '%' + (j.premiumHeld ? ': held, kept for hard tasks' : '')
+        : 'budget line ' + Math.round(line) + '%' + (j.premiumHeld ? ', held for today' : '');
+      const read = age > CARRIED_CURRENT ? 'read ' + ageText(age) + ' ago'
+        + (j.premiumEstimate != null && Math.round(j.premiumEstimate) > Math.round(j.premium) ? ', estimated ' + Math.round(j.premiumEstimate) + '% now' : '') : '';
+      m.meters.push({ label: j.premiumLabel, pct: j.premium, line, loud: true, over: by !== null && by > 0,
+        note: [state, read].filter(Boolean).join(' · ') });
     }
     if (typeof j.unused === 'number') m.notes.push('At this pace about ' + j.unused + '% of the week goes unused at the reset; it does not carry over.');
   } else m.empty = 'No reading yet in this session: /pacing usage takes one.';
@@ -1592,6 +1609,8 @@ export const register = on => {
   // the offer to compact: the one in the band ({ level, tokens }) or null, the
   // size at each level's last offer, and whether a person has typed here
   let offer = null;
+  // the pane drawn since it last opened: its first draw takes fresh figures
+  let paneDrawn = false;
   let offered = {};
   let attended = false;
   // the pause's timers, and the pause (its last turn's end) a drawn now row spoke for
@@ -2094,6 +2113,7 @@ export const register = on => {
   // a person's close keeps it closed in later sessions; a plugin's own, or an
   // unload, does not
   on('ui.close', async ($, e, next) => {
+    if (e && e.id === PANE_ID) paneDrawn = false;
     try { if (closedByPerson(e)) await $.store.set(PANE_CLOSED, true); } catch { /* it opens again next session */ }
     return next(e);
   });
@@ -2105,35 +2125,40 @@ export const register = on => {
     try { r = await $.ui.open({ id: PANE_ID, title: PANE_TITLE }); } catch (err) { r = { isPlaced: false, reason: (err && err.message) || 'refused' }; }
     return { text: r && r.isPlaced ? 'Pacing pane opened.' : 'Pacing pane: not shown (' + ((r && r.reason) || 'no surface') + ').', isTextDisplayOnly: true };
   });
+  // Refresh, and the pane's first draw after it opens (the user's word: an
+  // opening pane shows fresh figures, not the last reading's): the context
+  // at once; then every meter anew (the per-model one too, where the app's
+  // usage tool answers), not waiting for a turn's end. At the first draw a
+  // reading under PANE_FRESH old is fresh enough and is not taken again.
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
     if (e.plugin && e.plugin !== 'pacing') return next(e);
     st.paneGlance = !!(e.props && e.props.placement === 'widget');
     let now = Date.now();
     try { now = await $.clock.now(); } catch { /* the system's clock */ }
-    return paneView($.ui.resolve(e), paneNow(now), { surface: e.surface, placement: e.props && e.props.placement, onRefresh: () => {
-      // the context at once; then every meter anew (the per-model one too,
-      // where the app's usage tool answers), not waiting for a turn's end
-      later($, async () => {
-        const bd = await breakdownNow($);
-        if (bd) ctxNow = bd;
-        redraw($);
-        if (running) return;
-        running = true;
-        try {
-          let at;
-          try { at = await $.clock.now(); } catch { at = Date.now(); }
-          const { week, five } = await limitsNow($);
-          const j = await runReading($, week, five, sessionModel, spend);
-          if (j) {
-            last = { pct: week && week.resetsAt ? week.percentUsed : j.all, at };
-            sayLevel($, reading, j);
-            hold(j);
-            $.ui.status(lineNow(at));
-            redraw($);
-          }
-        } catch { /* the last reading stands */ } finally { running = false; }
-      });
-    } });
+    const refreshPane = first => later($, async () => {
+      const bd = await breakdownNow($);
+      if (bd) ctxNow = bd;
+      redraw($);
+      if (running) return;
+      let at;
+      try { at = await $.clock.now(); } catch { at = Date.now(); }
+      if (first && last && at - last.at < PANE_FRESH) return;
+      running = true;
+      try {
+        const { week, five } = await limitsNow($);
+        const j = await runReading($, week, five, sessionModel, spend);
+        if (j) {
+          last = { pct: week && week.resetsAt ? week.percentUsed : j.all, at };
+          sayLevel($, reading, j);
+          hold(j);
+          $.ui.status(lineNow(at));
+          redraw($);
+        }
+      } catch { /* the last reading stands */ } finally { running = false; }
+    });
+    // the first draw since it opened: fresh figures, once
+    if (!paneDrawn) { paneDrawn = true; refreshPane(true); }
+    return paneView($.ui.resolve(e), paneNow(now), { surface: e.surface, placement: e.props && e.props.placement, onRefresh: () => refreshPane(false) });
   });
   on('command.run', { command: 'pacing-usage' }, async ($) => {
     const show = text => ({ text, isTextDisplayOnly: true });

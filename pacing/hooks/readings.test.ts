@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { DIALS, FRAMES, frameSvg } from './pane.mjs'
+import { DIALS, FRAMES, frameSvg, barSvg, barText } from './pane.mjs'
 import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
@@ -1184,7 +1184,7 @@ test('the pane: /pacing-pane opens it; it shows the budget, what to do and the c
   const ui = await $.ui.mount(PANE)
   const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
   // the time or share left today in plain words, then the level
-  expect(texts.slice(0, 3)).toEqual(['10%', 'of the week left to use today and stay on budget', '● Within budget'])
+  expect(texts.slice(0, 3)).toEqual(['10%', 'of the week left to use today to stay on budget', '● Within budget'])
   // never in tokens or dollars, and no Now, parts of the context or largest results
   expect(texts.some((s: string) => /tokens|\$|NOW|LARGEST|Messages|compacts/.test(s))).toBe(false)
   // the meters: a figure each, the weekly one with its budget line
@@ -1198,12 +1198,43 @@ test('the pane: /pacing-pane opens it; it shows the budget, what to do and the c
   await ui.press({ key: 'pacing-pane-refresh' })
   await clock.advance(1)
   await ui.unmount()
-  // Refresh asks for the context and then takes a reading (the engine's windows are a second ask)
-  expect(usage).toBe(3)
+  // the command asked for the context, the first draw again (its reading
+  // was under a minute old: not taken again), and Refresh asks for the
+  // context and then takes a reading (the engine's windows are a second ask)
+  expect(usage).toBe(4)
   // open: each turn's end measures the context again
   await $.turn.complete(turn('claude-fable-5-2', 1))
   await clock.advance(1)
-  expect(usage).toBe(4)
+  expect(usage).toBe(5)
+})
+
+test('the pane\'s first draw takes fresh figures: the context, and a reading where the last is a minute old or more; later draws do not', async ($, on) => {
+  engine(on)
+  offers(on)
+  const opened: any[] = []
+  let usage = 0
+  const runs: string[] = []
+  on('session.usage', () => (usage++, { value: { startedAt: 0, context: { tokens: 182700, window: 1000000, percent: 18, breakdown: BREAKDOWN }, rateLimits: [{ kind: 'seven_day', percentUsed: 11, resetsAt: RESET }] } }))
+  on('ui.open', (_: unknown, e: any) => (opened.push(e), { value: { isPlaced: true } }))
+  on('ui.panes', () => ({ value: opened.map(o => ({ id: o.id, title: o.title, isPlaced: true })) }))
+  on('process.run', (_: unknown, e: any) => (runs.push(JSON.stringify(e)), { value: answer('ahead', 10) }))
+  const clock = mock.clock(on, { now: T0 })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 182700))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const before = runs.filter(r => r.includes('budget.mjs')).length
+  await clock.advance(5 * 60000)
+  await $.command.run({ command: 'pacing-pane', args: '' } as any)
+  const ui = await $.ui.mount(PANE)
+  await clock.advance(1)
+  // the command's ask, the first draw's, and the reading's windows
+  expect(usage).toBe(3)
+  expect(runs.filter(r => r.includes('budget.mjs')).length).toBe(before + 1)
+  await ui.unmount()
+  const again = await $.ui.mount(PANE)
+  await clock.advance(1)
+  await again.unmount()
+  expect(usage).toBe(3)
 })
 
 test('a pane the engine does not place: /pacing-pane says why', async ($, on) => {
@@ -1236,7 +1267,7 @@ test('the pane on a surface without Svg, and minimized: the same figures as rows
   expect(texts).toContain('183k of 1M')
   await term.unmount()
   const glance = await $.ui.mount({ ...PANE, props: { ...PANE.props, placement: 'widget' } } as any)
-  expect((await glance.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['10% of the week left to use today and stay on budget', 'Weekly 10%'])
+  expect((await glance.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['10% of the week left to use today to stay on budget', 'Weekly 10%'])
   expect((await glance.findAll({ type: 'Button' })).length).toBe(0)
   await glance.unmount()
 })
@@ -3609,14 +3640,32 @@ test('the toasts with it: the 5-minute toast per agent, the start toast with the
 
 test('the pane says the budget as time left today, never in tokens or dollars; past the line, as time over', () => {
   const base = { all: 50, line: 73.3, level: 'ok', tokenUsd: 0.000008, paceUsd: 14.05, left: { points: 23.3, tokens: 16600000 } }
-  expect(paneModel({ j: base }).budget).toEqual({ big: '9h 30m', sub: 'left to use today and stay on budget' })
+  expect(paneModel({ j: base }).budget).toEqual({ big: '9h 30m', sub: 'left to use today to stay on budget' })
   expect(paneModel({ j: { ...base, rateFrom: 'estimate' } }).budget!.big).toBe('~9h 30m')
   expect(paneModel({ j: { ...base, level: 'over', left: { points: -5, tokens: -1200000 } } }).budget).toEqual({ big: '40m', sub: 'over today\'s budget' })
   // no pace: the points of the week
-  expect(paneModel({ j: { all: 50, line: 60, level: 'ok' } }).budget).toEqual({ big: '10%', sub: 'of the week left to use today and stay on budget' })
+  expect(paneModel({ j: { all: 50, line: 60, level: 'ok' } }).budget).toEqual({ big: '10%', sub: 'of the week left to use today to stay on budget' })
   expect(paneModel({ j: { all: 70, line: 60, level: 'over' } }).budget).toEqual({ big: '10%', sub: 'of the week over today\'s budget' })
-  // the level names the meter that set it
-  expect(paneModel({ j: { ...base, level: 'over', levelBy: 'premium', premium: 74, premiumLabel: 'Fable 5.2' } }).levelText).toBe('Over the budget line (Fable\'s meter)')
+  // the top area is the week alone: a level the per-model meter set does not
+  // show there (weekLevel; without it, the week's figure against its line)
+  expect(paneModel({ j: { ...base, all: 55, line: 73.3, level: 'over', weekLevel: 'ahead', levelBy: 'premium', premium: 80, premiumLabel: 'Fable 5.2' } }).levelText).toBe('Within budget')
+  expect(paneModel({ j: { ...base, all: 55, line: 73.3, level: 'over', levelBy: 'premium', premium: 80, premiumLabel: 'Fable 5.2' } }).level).toBe('ok')
+  expect(paneModel({ j: { ...base, all: 76, line: 73.3, level: 'over', weekLevel: 'over' } }).levelText).toBe('Over the budget line')
+  // the model held by its own meter: the week's words stay; its meter has its
+  // line, drawn loud, and says by how much it is over
+  const held = paneModel({ j: { ...base, level: 'ahead', weekLevel: 'ahead', all: 55, line: 73.3, premium: 83, premiumHeld: true, premiumLabel: 'Fable 5.2' } })
+  expect(held.levelText).toBe('Within budget')
+  expect(held.level).toBe('ok')
+  expect(held.meters[1]).toEqual({ label: 'Fable 5.2', pct: 83, line: 73.3, loud: true, over: true, note: '10 points over its budget line 73%: held, kept for hard tasks' })
+  const under = paneModel({ j: { ...base, level: 'ahead', all: 55, line: 73.3, premium: 60, premiumLabel: 'Fable 5.2' } })
+  expect(under.meters[1]).toEqual({ label: 'Fable 5.2', pct: 60, line: 73.3, loud: true, over: false, note: 'budget line 73%' })
+  // drawn: a tag above the line, BUDGET under it, OVER and a pulse past it
+  expect(barSvg([{ pct: 60, color: '#22d3ee' }], 73.3, 480, 34, true)).toContain('>BUDGET 73%<')
+  const loud = barSvg([{ pct: 83, color: '#fbbf24' }], 73.3, 480, 34, true)
+  expect(loud).toContain('>OVER +10<')
+  expect(loud).toContain('<animate attributeName="opacity"')
+  // a terminal: the line as ┃ in its place
+  expect(barText([{ pct: 50, color: '#fff' }], 10, 80)).toBe('█████░░┃░░')
   // the context: one figure
   expect(paneModel({ bd: { totalTokens: 171000, maxTokens: 1000000, percentage: 17.1, categories: [] } }).context).toEqual({ used: '171k', of: '1M', pct: 17.1 })
 })
@@ -3628,7 +3677,7 @@ test('every dial draws the figure, the label and a mark at the budget line', () 
     expect(svg.endsWith('</svg>')).toBe(true)
     expect(svg).toContain('>50%</text>')
     expect(svg).toMatch(/>WEEK( USED)?<\/text>/)
-    expect(svg).toMatch(/#e5e7eb|#fbbf24/)
+    expect(svg).toMatch(/#e5e7eb|#fbbf24|#f8fafc/)
     expect(svg).not.toContain('NaN')
     expect(dial(0, '#22d3ee'), name).not.toContain('NaN')
     expect(dial(140, '#22d3ee', 100), name).not.toContain('NaN')

@@ -1126,3 +1126,34 @@ when the session has grown by 250 000 tokens since. A compaction starts
 all of it over, as before. Not changed: the sizes the levels start at,
 the words, `/pacing compact off`, and what the session itself says of
 its context in a reading.
+
+## The pane opens with fresh figures, and a hold is not called "over" (0.9.30)
+
+The user's word: when the pane opens it could refresh its data. Its first
+draw since it opened (`paneDrawn`, reset when it closes) does what
+Refresh does: the context at once, then a reading of every meter. A
+reading under `PANE_FRESH` (a minute) old stands, so a session's start
+does not take two. Later draws take nothing.
+
+The user asked why the pane said "Over the budget line" with the week at
+55 % of a 73 % line: Fable's own meter was at 83 % and Fable was held,
+and the pane drew a hold as "over" without naming the meter. With the
+week within its line and the model held by its own meter, the words are
+now "Week within budget; Fable 5.2 held, its meter 10 points over the
+line". The budget's words are "left to use today to stay on budget"
+(were "and stay on budget"), the user's wording.
+
+The user's word, next: do not mix the weekly meter and Fable's in the top
+area. The top area (the dial, the time left, the level's words and
+colour) is now the week alone: `budget.mjs` hands the module `weekLevel`,
+the weekly meter's level before the per-model meter's, and the "held"
+words above are gone from it. The per-model meter shows its state under
+its own bar instead: its budget line is drawn loud (a thick amber line
+with a `BUDGET 73%` tag and an arrow under it), and past the line the line and tag turn red and
+pulse, the tag says `OVER +10`, the cells over the line turn red on a red
+band, and the words under the bar say "10 points over its budget line
+73%: held, kept for hard tasks" in bold red. A terminal draws the line as
+┃. On the dial the week's budget line is white with a dark edge (the
+user's word: a colour of its own, not the ring's), and on the bars the
+line's tick is now a rect: a glow filter on a zero-wide line drew
+nothing, so the weekly bar's tick had been missing. Both bars' arrows are larger, edged dark.

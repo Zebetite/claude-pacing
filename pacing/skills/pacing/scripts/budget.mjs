@@ -1110,6 +1110,9 @@ if (auto) {
     tierOf, agentTierOf, tierNames, prices,
     premium: prem === null ? null : r1(prem), premiumOut: premOut, premiumLabel: premLabel,
     premiumAt: premFrom ? premFrom.at : null, premiumLevel: premLevel, premiumHeld: premHeld, levelBy,
+    // the weekly meter's own level, before the per-model meter's (the pane's
+    // top area shows the week alone)
+    weekLevel: levelBefore,
     premiumOfBudget: premLevel && budget > 0 ? Math.round(100 * prem / budget) : null,
     premiumEstimate: premEstimate, needFull, full: fullAuto, unused, reset: opt.reset,
     // what the session should run on, and at "over" the effort one step

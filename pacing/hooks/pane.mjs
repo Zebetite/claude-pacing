@@ -47,8 +47,16 @@ const GLOW = '<filter id="glow" x="-30%" y="-80%" width="160%" height="260%"><fe
 // optional marker (a share of 100) is a bright tick with a small arrow head.
 // A thin frame with corner marks runs under it.
 export const BAR_CELLS = 36;
-export const barSvg = (segments, marker = null, w = 480, h = 34) => {
-  const n = BAR_CELLS, gap = 3, slant = 5, top = 8, ch = 14;
+// `loud` (a per-model meter's budget line, the user's word: very visible,
+// more so when over): a thick line in amber with a tag above it naming the
+// line; past it, the cells over the line turn red on a red band, and the
+// line and its tag in red pulse, the tag saying by how much.
+export const LINE_TAG = 18;
+export const barSvg = (segments, marker = null, w = 480, h = 34, loud = false) => {
+  if (loud && marker !== null) return loudBarSvg(segments, marker, w, h + LINE_TAG + 10);
+  // with a marker, room above the cells for its arrow
+  if (marker !== null) h += 5;
+  const n = BAR_CELLS, gap = 3, slant = 5, top = marker !== null ? 13 : 8, ch = 14;
   const cw = (w - slant - gap * (n - 1)) / n;
   const total = clamp(segments.reduce((a, s) => a + Math.max(0, s.pct), 0), 0, 100);
   // at least one cell for anything above nothing
@@ -69,14 +77,58 @@ export const barSvg = (segments, marker = null, w = 480, h = 34) => {
   let tick = '';
   if (marker !== null) {
     const x = num(clamp(marker, 0, 100) / 100 * (w - slant) + slant / 2);
-    tick = '<path d="M' + x + ' 3v' + (h - 9) + '" stroke="#e5e7eb" stroke-width="2.5" stroke-linecap="round" filter="url(#glow)"/>'
-      + '<path d="M' + x + ' 6l-4 -5h8z" fill="#e5e7eb"/>';
+    // a rect, not a line: a filter on a zero-wide box draws nothing
+    // the arrow above it, large and edged dark (the user's word: more visible)
+    tick = '<rect x="' + num(x - 1.75) + '" y="6" width="3.5" height="' + (h - 11) + '" rx="1.5" fill="#f8fafc" filter="url(#glow)"/>'
+      + '<path d="M' + x + ' 12l-7 -11h14z" fill="#f8fafc" stroke="#0b1220" stroke-width="1" stroke-linejoin="round"/>';
   }
   const by = h - 4;
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">'
     + '<defs>' + GLOW + '</defs>'
     + '<path d="M0 ' + (by - 4) + 'v4h' + w + 'v-4" fill="none" stroke="' + HUD + '" stroke-opacity="0.55" stroke-width="1"/>'
     + off + '<g filter="url(#glow)">' + on + '</g>' + tick + '</svg>';
+};
+const loudBarSvg = (segments, marker, w, h) => {
+  const n = BAR_CELLS, gap = 3, slant = 5, ch = 14, top = LINE_TAG + 14;
+  const cw = (w - slant - gap * (n - 1)) / n;
+  const total = clamp(segments.reduce((a, s) => a + Math.max(0, s.pct), 0), 0, 100);
+  const lit = total > 0 ? Math.max(1, Math.round(total / 100 * n)) : 0;
+  const m = clamp(marker, 0, 100);
+  const over = total > m;
+  const lineCol = over ? LEVEL_COLORS.stop : AMBER;
+  const x = clamp(m / 100 * (w - slant) + slant / 2, 2, w - 2);
+  const base = segments.length ? segments[0].color : HUD;
+  const cell = (i, fill, extra) => {
+    const cx = i * (cw + gap);
+    return '<path d="M' + num(cx + slant) + ' ' + top + 'h' + num(cw) + 'l' + (-slant) + ' ' + ch + 'h' + num(-cw) + 'z" fill="' + fill + '"' + extra + '/>';
+  };
+  let on = '', hot = '', off = '';
+  for (let i = 0; i < n; i++) {
+    const mid = i * (cw + gap) + slant / 2 + cw / 2;
+    if (i >= lit) off += cell(i, '#808080', ' fill-opacity="0.2"');
+    else if (mid > x) hot += cell(i, LEVEL_COLORS.stop, '');
+    else on += cell(i, sweepAt(base, i / (n - 1)), '');
+  }
+  // the stretch over the line, as a band behind the cells
+  const xEnd = lit / n * (w - slant) + slant / 2;
+  const band = over && xEnd > x
+    ? '<rect x="' + num(x) + '" y="' + (top - 3) + '" width="' + num(xEnd - x) + '" height="' + (ch + 6) + '" fill="' + LEVEL_COLORS.stop + '" fill-opacity="0.22"/>' : '';
+  const pulse = over ? '<animate attributeName="opacity" values="1;0.45;1" dur="1.4s" repeatCount="indefinite"/>' : '';
+  const word = over ? 'OVER +' + Math.round(total - m) : 'BUDGET ' + Math.round(m) + '%';
+  const tw = word.length * 8 + 12, lw = over ? 6 : 5;
+  const tx = clamp(x - tw / 2, 0, w - tw);
+  const tag = '<g>' + pulse
+    + '<rect x="' + num(tx) + '" y="0" width="' + num(tw) + '" height="' + LINE_TAG + '" rx="2" fill="' + lineCol + '"/>'
+    + '<text x="' + num(tx + tw / 2) + '" y="' + (LINE_TAG - 5) + '" text-anchor="middle" ' + FONT + ' font-size="12.5" font-weight="700" letter-spacing="0.5" fill="#0b1220">' + word + '</text>'
+    + '<rect x="' + num(x - lw / 2) + '" y="' + (LINE_TAG + 6) + '" width="' + lw + '" height="' + (h - 9 - LINE_TAG) + '" rx="1.5" fill="' + lineCol + '" filter="url(#glow)"/>'
+    // an arrow under the tag, as the weekly bar has, larger
+    + '<path d="M' + num(x) + ' ' + (LINE_TAG + 13) + 'l-8 -12h16z" fill="' + lineCol + '" stroke="#0b1220" stroke-width="1" stroke-linejoin="round"/>'
+    + '</g>';
+  const by = h - 4;
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">'
+    + '<defs>' + GLOW + '</defs>'
+    + '<path d="M0 ' + (by - 4) + 'v4h' + w + 'v-4" fill="none" stroke="' + HUD + '" stroke-opacity="0.55" stroke-width="1"/>'
+    + band + off + '<g filter="url(#glow)">' + on + hot + '</g>' + tag + '</svg>';
 };
 
 // The week's dial: `pct` of the main arc lit in `color` with a glow, a tick
@@ -140,9 +192,12 @@ export const robotSvg = (color = HUD, i = 0, size = 48) => {
 };
 
 // the same bar in block characters, for a surface without Svg
-export const barText = (segments, cells = 24) => {
+// (`marker`: a budget line drawn as ┃ in its place)
+export const barText = (segments, cells = 24, marker = null) => {
   const full = clamp(Math.round(segments.reduce((n, s) => n + s.pct, 0) / 100 * cells), 0, cells);
-  return '█'.repeat(full) + '░'.repeat(cells - full);
+  const s = ('█'.repeat(full) + '░'.repeat(cells - full)).split('');
+  if (marker !== null) s[clamp(Math.round(clamp(marker, 0, 100) / 100 * cells) - 1, 0, cells - 1)] = '┃';
+  return s.join('');
 };
 
 // ---- other dials for the week ----
@@ -192,6 +247,8 @@ export const gaugeSvg = (pct, color, marker = null, size = 132, label = 'WEEK') 
 // pointer outside the data ring, and a small word says which side of it the
 // week is on.
 export const AMBER = '#fbbf24';
+// the week's budget line on the dial: white, a colour no ring or bar takes
+export const BUDGET_LINE = '#f8fafc';
 // behind a readout: a faint grid, and a mark in each corner
 const backdrop = s => {
   let g = '';
@@ -227,7 +284,10 @@ export const reactorSvg = (pct, color, marker = null, size = 160, label = 'WEEK 
   if (marker !== null) {
     const a = clamp(marker, 0, 100) * 3.6;
     const [tx, ty] = polar(c, c, a, 62), [lx, ly] = polar(c, c, a - 4, 71), [rx, ry] = polar(c, c, a + 4, 71);
-    pointer = line(a, 49, 63, stroke(AMBER, 1.5)) + '<path d="M' + num(tx) + ' ' + num(ty) + 'L' + num(lx) + ' ' + num(ly) + 'L' + num(rx) + ' ' + num(ry) + 'z" fill="' + AMBER + '"/>';
+    // in a colour of its own (the user's word: not the ring's), with a dark
+    // edge so it stands on a lit ring of any level's colour
+    pointer = line(a, 47, 64, stroke('#0b1220', 4.5)) + line(a, 47, 64, stroke(BUDGET_LINE, 2.5))
+      + '<path d="M' + num(tx) + ' ' + num(ty) + 'L' + num(lx) + ' ' + num(ly) + 'L' + num(rx) + ' ' + num(ry) + 'z" fill="' + BUDGET_LINE + '" stroke="#0b1220" stroke-width="1"/>';
     const over = pct > marker;
     word = '<text x="' + c + '" y="' + (c - 15) + '" text-anchor="middle" ' + FONT + ' font-size="6.5" letter-spacing="1.5" fill="' + (over ? AMBER : HUD) + '">' + (over ? 'OVER LINE' : 'NOMINAL') + '</text>';
   }
@@ -384,9 +444,9 @@ export const paneView = (t, m, o = {}) => {
   const row = (children, extra = {}) => Box({ flexDirection: 'row', ...extra, children: children.filter(Boolean) });
   const cap = (text, extra = {}) => Text({ size: 'caption', dimColor: true, ...extra, children: text });
   const head = (text, accent = HUD) => Text({ size: 'caption', mono: true, weight: 'semibold', color: accent, children: '▸ ' + text.toUpperCase() });
-  const bar = (segments, marker, alt) => (hasSvg
-    ? t.Svg({ source: barSvg(segments, marker), alt })
-    : Text({ color: segments[0] ? segments[0].color : undefined, children: barText(segments) }));
+  const bar = (segments, marker, alt, loud = false) => (hasSvg
+    ? t.Svg({ source: barSvg(segments, marker, 480, 34, loud), alt })
+    : Text({ color: segments[0] ? segments[0].color : undefined, children: barText(segments, 24, loud ? marker : null) }));
   // a section: its drawn upper edge in its accent, then its rows (no box)
   const tint = hex => { const v = parseInt(hex.slice(1), 16); return 'rgba(' + ((v >> 16) & 255) + ',' + ((v >> 8) & 255) + ',' + (v & 255) + ',' + TINT + ')'; };
   const panel = (kind, children, extra = {}) => {
@@ -434,8 +494,11 @@ export const paneView = (t, m, o = {}) => {
   if (m.meters && m.meters.length) {
     sections.push(panel('week', [head('This week', ACCENTS.week), ...m.meters.map(x => col([
       between(Text({ weight: 'medium', children: x.label }), Text({ tabular: true, mono: true, weight: 'semibold', color: sweepAt(meterColor(x), x.pct / 100), children: Math.round(x.pct) + '%' })),
-      bar([{ pct: x.pct, color: meterColor(x) }], x.line ?? null, x.label + ' ' + Math.round(x.pct) + '% used'),
-      x.note ? cap(x.note) : null,
+      bar([{ pct: x.pct, color: meterColor(x) }], x.line ?? null, x.label + ' ' + Math.round(x.pct) + '% used'
+        + (x.loud && x.line != null ? ', budget line ' + Math.round(x.line) + '%' : ''), !!x.loud),
+      // a loud line's words: in its colour, bold when over
+      x.note ? (x.loud && x.over ? Text({ size: 'caption', weight: 'semibold', color: 'error', children: '▲ ' + x.note })
+        : x.loud ? Text({ size: 'caption', color: 'warning', children: x.note }) : cap(x.note)) : null,
     ]))], { rowGap: 1 }));
   }
 

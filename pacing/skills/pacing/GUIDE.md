@@ -367,7 +367,7 @@ sessions too, until you type `/pacing-pane`. From the top:
 - **The reactor**: how much of the week is used, with an amber pointer at
   the budget line and a word, NOMINAL or OVER LINE, for which side of it
   you are on. Beside it, the time you have left to use today and stay on
-  budget ("9h 30m left to use today and stay on budget"; past the line,
+  budget ("9h 30m left to use today to stay on budget"; past the line,
   "40m over today's budget"), never in tokens or dollars.
 - **This week**: the weekly meter with its budget line, and the per-model
   meter.
