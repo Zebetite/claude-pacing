@@ -1,6 +1,6 @@
 // Automatic readings: after a turn, the engine hands this module the session's
 // rate-limit windows (session.measure). When the weekly all-models window
-// moved a whole point, or 30 min passed, it runs budget.mjs --source hook,
+// moved a whole point, or 10 min passed, it runs budget.mjs --source hook,
 // which logs the reading, keeps state.json fresh for the next session's start
 // line, and answers in one JSON line. The status line shows the result, each
 // tier marked by a coloured circle, and a change of level one toast:
@@ -30,7 +30,10 @@
 // takes its place and offers to compact first (see "an offer to compact"):
 // the prompt waits for the answer and then goes on exactly as typed.
 
-const MIN_GAP = 30 * 60 * 1000;
+// a reading at least this often while turns run: each takes off what every
+// local session spent since the meter last moved (budget.mjs), so "Budget
+// tokens" in every session follows the spending within minutes
+const MIN_GAP = 10 * 60 * 1000;
 
 // ---- a toast by its kind ----
 // A toast takes a text and how long it stays, nothing else: no colour, no
@@ -51,6 +54,7 @@ export const ICON = {
   waiting: '📦', // a new version waiting for /reload-plugins
   compacted: '🗜️', // compacted, or a compaction on offer
   pause: '💤', // the cache lapsed, or is about to, in a pause
+  room: '💡', // allowance that goes unused at the reset
 };
 // Routine toasts (started, still running, a switch or a compaction the
 // person just pressed for) stay the engine's 4 seconds; what should not be
@@ -290,6 +294,26 @@ async function runReading($, week, five, session, spend = null) {
   } catch { /* the plain one */ }
   return j || plain();
 }
+// What goes unused at the reset (budget.mjs's `unused`, points of the week
+// the trend leaves at "ahead"): one toast per week and step of UNUSED_STEP
+// points, in whichever session reads it first ($.store is every session's;
+// `un` is this copy's memory where there is no store). The allowance does
+// not carry over, and the level alone ("ahead") does not say how much room
+// there is. /pacing-status says it too.
+export const UNUSED_STEP = 10;
+export const unusedText = n => ICON.room + ' at this pace about ' + n + '% of the week goes unused at the reset, and it does not carry over: there is room for harder work and more effort.';
+async function sayUnused($, j, un) {
+  if (!j || j.fromLoad || typeof j.unused !== 'number' || j.unused < UNUSED_STEP) return;
+  const step = Math.floor(j.unused / UNUSED_STEP) * UNUSED_STEP;
+  const week = Date.parse(j.reset) || 0;
+  const said = k => !!k && typeof k === 'object' && Math.abs((k.week || 0) - week) <= 3600000 && k.step >= step;
+  let kept = un.said;
+  try { kept = (await $.store.get('unused')) || kept; } catch { /* this copy's memory */ }
+  if (said(kept)) { un.said = kept; return; }
+  un.said = { week, step };
+  try { await $.store.set('unused', un.said); } catch { /* this copy's memory */ }
+  $.ui.toast(unusedText(j.unused), { timeoutMs: TOAST_LONG });
+}
 // A change of level is one toast, and so is the session moved off the
 // per-model meter's model, or let back. A reading the module took at load is
 // no level the user was told of.
@@ -427,12 +451,38 @@ export const tokensText = n => {
   const k = Math.round(a / 1000);
   return (n < 0 ? '-' : '') + (k < 1000 ? k + 'K' : (a / 1e6).toFixed(1) + 'M');
 };
+// With a pace as well (paceUsd, the dollars an hour of work costs, from the
+// last hour's spending: budget.mjs), the figure is time, which says more
+// than a token count priced at tier 1's rate: "Budget: 2h 10m left", past
+// the line "Budget: 40m over", "~" before an estimate. Rounded to 5 minutes
+// under an hour and to 10 from there, whole hours from 10, "24h+" past a day.
+export const timeText = hours => {
+  const m = Math.abs(hours) * 60;
+  if (m > 24 * 60) return '24h+';
+  if (m < 60) { const r = Math.round(m / 5) * 5; return r < 60 ? r + 'm' : '1h'; }
+  if (m >= 600) return Math.round(m / 60) + 'h';
+  const r = Math.round(m / 10) * 10;
+  return Math.floor(r / 60) + 'h' + (r % 60 ? ' ' + (r % 60) + 'm' : '');
+};
+// the hours the tokens left last at the pace, or null without a pace
+const hoursLeft = j => (j && j.left && typeof j.left.tokens === 'number' && j.tokenUsd > 0 && j.paceUsd > 0 ? j.left.tokens * j.tokenUsd / j.paceUsd : null);
 export const budgetText = j => {
   const left = j && j.left && typeof j.left === 'object' ? j.left : {};
-  if (typeof left.tokens === 'number') return 'Budget tokens: ' + (j.rateFrom === 'estimate' ? '~' : '') + tokensText(left.tokens);
+  const mark = j && j.rateFrom === 'estimate' ? '~' : '';
+  const h = hoursLeft(j);
+  if (h !== null) return 'Budget: ' + mark + timeText(h) + (h < 0 && timeText(h) !== '0m' ? ' over' : ' left');
+  if (typeof left.tokens === 'number') return 'Budget tokens: ' + mark + tokensText(left.tokens);
   const points = typeof left.points === 'number' ? left.points : j && typeof j.line === 'number' && typeof j.all === 'number' ? j.line - j.all : null;
   return 'Budget: ' + (points !== null ? Math.round(points) + '%' : '-');
 };
+// for /pacing-status: with the time, the tokens it stands for and the pace
+export const budgetWords = j => budgetText(j) + (hoursLeft(j) !== null
+  ? ' (' + tokensText(j.left.tokens) + ' tokens, at $' + j.paceUsd.toFixed(2) + ' an hour)' : '');
+// what a cost in dollars is of the budget, in the status line's unit: "20m"
+// with a pace, else "250K tokens", else nothing
+export const costText = (j, usd) => (!(usd > 0) || !j ? ''
+  : j.paceUsd > 0 ? timeText(usd / j.paceUsd)
+    : j.tokenUsd > 0 ? tokensText(usd / j.tokenUsd) + ' tokens' : '');
 
 // ---- subagents at work ----
 // The session's own subagents, from the engine's events: agent.spawn starts
@@ -1052,13 +1102,28 @@ export const usageText = out => {
 // recommendation changes. Never switches without the press.
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 const sameModel = (cur, id) => typeof cur === 'string' && typeof id === 'string' && cur.startsWith(id);
-export const switchOffer = (j, curModel, curEffort) => {
+// A switch in a large session is dear: each model has its own cache, so the
+// next turn stores the whole session again at the new model's cache-write
+// price (400K tokens to Opus 5.5: $2, a third of a point of the week), where
+// staying reads it at a small fraction of that. So from SWITCH_LARGE tokens
+// (`ctx`, the session's size at the last measure) an offer that changes the
+// model says so, with what it costs in the status line's unit, and the row
+// gains "Compact, then switch": the compaction first, so the switch stores
+// the summary. Not where the model is out (compacting runs on it).
+export const SWITCH_LARGE = 200000;
+export const switchOffer = (j, curModel, curEffort, ctx = null) => {
   if (!j || typeof curModel !== 'string' || !curModel) return null;
   const rec = j.recommend, prem = j.premiumModelId, name = j.premiumLabel || 'The per-model model';
   const onPrem = sameModel(curModel, prem);
   // from: the model the offer saw the session on, which the press goes by
-  const make = (kind, t, text) => ({ kind, from: curModel, model: t.model, label: t.label, effort: t.effort, text, urgent: kind === 'out' || kind === 'held',
-    icon: kind === 'out' ? ICON.stop : kind === 'held' ? ICON.worse : ICON.switched, key: kind + ':' + t.model + ':' + t.effort });
+  const make = (kind, t, text) => {
+    const large = kind !== 'out' && !sameModel(curModel, t.model) && typeof ctx === 'number' && ctx >= SWITCH_LARGE;
+    const price = j.prices && Array.isArray(j.prices[t.model]) ? j.prices[t.model][3] : 0;
+    const cost = large ? costText(j, ctx * price / 1e6) : '';
+    return { kind, from: curModel, model: t.model, label: t.label, effort: t.effort, urgent: kind === 'out' || kind === 'held', compactFirst: large,
+      text: text + (large ? ' A switch stores this session\'s ' + kTok(ctx) + ' tokens again' + (cost ? ' (about ' + cost + ' of the budget)' : '') + ': compact first.' : ''),
+      icon: kind === 'out' ? ICON.stop : kind === 'held' ? ICON.worse : ICON.switched, key: kind + ':' + t.model + ':' + t.effort };
+  };
   if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumOut)
     return make('out', rec, name + ' is out until the reset. Switch this session to ' + rec.label + ' ' + rec.effort + '.');
   if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumHeld)
@@ -1153,7 +1218,7 @@ export const fullText = (j, mix, self = null, now = Date.now(), model = null) =>
   // what is left under the weekly meter's line; the per-model meter shows as
   // its usage among the meters only (see statusText)
   // (the "Now:" line /pacing-status adds says what to do about it)
-  const share = budgetText(j);
+  const share = budgetWords(j);
   if (self !== null) parts.push(square(self) + 'side session on ' + (self === 'Other' && model ? modelLabel(model) : tierName(j, self)) + (share ? ' - ' + share : ''));
   else if (share) parts.push(share);
   if (mix.length) parts.push(mix.map(x => square(x.tier) + tierName(j, x.tier) + ' ' + x.share + '%').join(' '));
@@ -1218,7 +1283,15 @@ async function reloadOn($) {
 // is newer than the reading it holds, and redraws its status line. The
 // level and its toasts stay the session's own readings'.
 export const SHARED_EVERY = 60 * 1000;
-const SHARED_KEYS = ['t', 'all', 'line', 'ofBudget', 'usdPerPoint', 'rateFrom', 'left', 'premium', 'premiumAt', 'premiumOut'];
+const SHARED_KEYS = ['t', 'all', 'line', 'ofBudget', 'usdPerPoint', 'rateFrom', 'left', 'tokenUsd', 'paceUsd', 'premium', 'premiumAt', 'premiumOut'];
+// Between readings: budget.mjs takes off what every local session spent
+// since the meter last moved, at each reading; until the next one, the
+// status line takes off what this session spent since its reading came in
+// (`usd`), at the reading's full-price token (`tokenUsd`).
+export const liveLeft = (j, usd) => {
+  if (!j || !j.left || typeof j.left.tokens !== 'number' || !(j.tokenUsd > 0) || !(usd > 0)) return j;
+  return { ...j, left: { ...j.left, tokens: j.left.tokens - Math.round(usd / j.tokenUsd) } };
+};
 export const sharedOf = text => {
   let j;
   try { j = JSON.parse(text); } catch { return null; }
@@ -1282,10 +1355,22 @@ export const register = on => {
   const spend = { total: 0, sent: 0 };
   let last = null;
   let reading = null;
+  // what this session had spent when the reading came in: what it spent
+  // since comes off the reading's "Budget tokens" (liveLeft)
+  let liveFrom = 0;
+  // what was said of the allowance going unused (sayUnused)
+  const un = { said: null };
+  // (the session's dollars priced again at the reading's prices first: turns
+  // before any reading were priced at none)
+  const hold = j => {
+    reading = j;
+    try { spend.total = spentUsd(tokens, agentTokens, reading.prices, sessionModel); } catch { /* as it stood */ }
+    liveFrom = spend.total;
+  };
   // the newest shared reading (see "the newest shared reading"): its timer,
   // and what takeShared reads and writes
   let sharedTimer = null;
-  const sh = { held: () => reading, take: j => { reading = { ...reading, ...j }; }, lineNow: now => lineNow(now) };
+  const sh = { held: () => reading, take: j => { hold({ ...reading, ...j }); }, lineNow: now => lineNow(now) };
   let running = false;
   // for the warning after a pause: when the main thread's last turn ended (a
   // subagent's turn keeps only its own cache warm), the session's size at the
@@ -1335,7 +1420,7 @@ export const register = on => {
   // the status line as it stands, with the agents when any run
   const lineNow = now => {
     const list = runningAgents();
-    if (reading) return lineOf(reading, sessionModel, tokens, agentTokens, now, false, list, st.max);
+    if (reading) return lineOf(liveLeft(reading, spend.total - liveFrom), sessionModel, tokens, agentTokens, now, false, list, st.max);
     return list.length ? agentPart(list, now, st.max) : undefined;
   };
   const st = { agents, timer: null, settledAt: 0, polledAt: 0, watchUntil: 0, progressAt: 0, host: null, children: 0, quiet: false, watchSince: 0, max: LINE_MAX, surfaces: null,
@@ -1453,51 +1538,82 @@ export const register = on => {
     const stack = row => (agentRow ? Box({ flexDirection: 'column', children: [row, agentRow] }) : row);
     if (sw && (sw.urgent || !offer)) {
       const target = sw;
-      const switchRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
-        Text(target.urgent ? { color: 'warning', children: target.icon + ' ' + target.text } : { dimColor: true, children: target.icon + ' ' + target.text }),
-        Button({ key: 'pacing-switch', label: 'Switch', variant: target.urgent ? 'primary' : 'secondary', onPress: async () => {
-          sw = null;
-          redraw($);
-          let ran = true, was = null, modelRan = null;
+      // the switch itself: /model, then /effort, and the toast
+      const runSwitch = async () => {
+        let ran = true, was = null, modelRan = null;
+        try {
+          // /model runs on every press, then /effort. What the module takes
+          // for the session's model can be wrong: live, a read named the
+          // target while the turns ran on another, and later the offer's own
+          // model did, and each time a press ran /effort alone. /model to
+          // the model the session runs on already does no harm.
+          was = target.from || ss.model || (await $.session.model());
+          modelRan = await $.command.run({ command: 'model', args: target.model });
+          if (commandFailed(modelRan)) throw new Error('refused');
+          ss.model = target.model;
+          if (target.effort) {
+            if (commandFailed(await $.command.run({ command: 'effort', args: target.effort }))) throw new Error('refused');
+            ss.effort = target.effort;
+          }
+          await keepSwitch($, ss);
+        } catch { ran = false; }
+        if (!ran) {
+          // the command as text in the box, for the user to send
+          try { await $.prompt.fill({ text: '/model ' + target.model, mode: 'replace' }); } catch { /* the menu alone */ }
+          $.ui.toast(ICON.switched + ' press Enter to switch to ' + target.label + (target.effort ? '; then set effort ' + target.effort + ' in the model menu' : '') + '.', { timeoutMs: TOAST_LONG });
+          return;
+        }
+        // the read-back: one that disagrees is read again after a moment;
+        // a /model that answered without an error is trusted over it
+        const effort = await effortNow($, ss);
+        const tell = nowModel => {
+          const model = sameModel(nowModel, target.model) || (modelRan && !commandFailed(modelRan)) ? target.model : nowModel;
+          $.ui.toast(switchedText(target, model, effort, was), sameModel(model, target.model) ? undefined : { timeoutMs: TOAST_LONG });
+        };
+        let nowModel = null;
+        try { nowModel = await $.session.model(); } catch { /* no read-back */ }
+        if (sameModel(nowModel, target.model)) { tell(target.model); return; }
+        try {
+          $.clock.after(READ_BACK_LAG, async () => {
+            let again = nowModel;
+            try { again = await $.session.model(); } catch { /* the first read stands */ }
+            try { tell(again); } catch { /* no toast */ }
+          });
+        } catch { tell(nowModel); }
+      };
+      // "Compact, then switch", in a large session (switchOffer): the
+      // compaction as the Compact now button runs it, then the switch; a
+      // compaction that did not start leaves the session as it is
+      const compactThenSwitch = async () => {
+        try {
+          const r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS });
+          if (r && r.skip) throw new Error(r.skip);
+          contextTokens = (r && r.tokensAfter) || null;
+        } catch (err) {
           try {
-            // /model runs on every press, then /effort. What the module takes
-            // for the session's model can be wrong: live, a read named the
-            // target while the turns ran on another, and later the offer's own
-            // model did, and each time a press ran /effort alone. /model to
-            // the model the session runs on already does no harm.
-            was = target.from || ss.model || (await $.session.model());
-            modelRan = await $.command.run({ command: 'model', args: target.model });
-            if (commandFailed(modelRan)) throw new Error('refused');
-            ss.model = target.model;
-            if (target.effort) {
-              if (commandFailed(await $.command.run({ command: 'effort', args: target.effort }))) throw new Error('refused');
-              ss.effort = target.effort;
-            }
-            await keepSwitch($, ss);
-          } catch { ran = false; }
-          if (!ran) {
-            // the command as text in the box, for the user to send
-            try { await $.prompt.fill({ text: '/model ' + target.model, mode: 'replace' }); } catch { /* the menu alone */ }
-            $.ui.toast(ICON.switched + ' press Enter to switch to ' + target.label + (target.effort ? '; then set effort ' + target.effort + ' in the model menu' : '') + '.', { timeoutMs: TOAST_LONG });
+            const ran = await $.command.run({ command: 'compact', args: COMPACT_INSTRUCTIONS });
+            if (commandFailed(ran)) throw new Error((ran && ran.text) || 'the /compact command failed');
+          } catch (err2) {
+            let filled = false;
+            try { const f = await $.prompt.fill({ text: '/compact', mode: 'replace' }); filled = !f || f.isFilled !== false; } catch { /* the toast alone */ }
+            $.ui.toast(compactFailedText((err2 && err2.message) || (err && err.message), filled), { timeoutMs: TOAST_LONG });
             return;
           }
-          // the read-back: one that disagrees is read again after a moment;
-          // a /model that answered without an error is trusted over it
-          const effort = await effortNow($, ss);
-          const tell = nowModel => {
-            const model = sameModel(nowModel, target.model) || (modelRan && !commandFailed(modelRan)) ? target.model : nowModel;
-            $.ui.toast(switchedText(target, model, effort, was), sameModel(model, target.model) ? undefined : { timeoutMs: TOAST_LONG });
-          };
-          let nowModel = null;
-          try { nowModel = await $.session.model(); } catch { /* no read-back */ }
-          if (sameModel(nowModel, target.model)) { tell(target.model); return; }
-          try {
-            $.clock.after(READ_BACK_LAG, async () => {
-              let again = nowModel;
-              try { again = await $.session.model(); } catch { /* the first read stands */ }
-              try { tell(again); } catch { /* no toast */ }
-            });
-          } catch { tell(nowModel); }
+        }
+        forget();
+        await runSwitch();
+      };
+      const switchRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
+        Text(target.urgent ? { color: 'warning', children: target.icon + ' ' + target.text } : { dimColor: true, children: target.icon + ' ' + target.text }),
+        ...(target.compactFirst ? [Button({ key: 'pacing-compact-switch', label: 'Compact, then switch', variant: target.urgent ? 'primary' : 'secondary', onPress: async () => {
+          sw = null;
+          redraw($);
+          await compactThenSwitch();
+        } })] : []),
+        Button({ key: 'pacing-switch', label: 'Switch', variant: target.urgent && !target.compactFirst ? 'primary' : 'secondary', onPress: async () => {
+          sw = null;
+          redraw($);
+          await runSwitch();
         } }),
         Button({ key: 'pacing-switch-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { sw = null; redraw($); } }),
       ] });
@@ -1655,7 +1771,7 @@ export const register = on => {
           }
         }
         if (j) {
-          reading = { ...j, fromLoad: true };
+          hold({ ...j, fromLoad: true });
           // a logged reading counts as the last one; a dry one leaves the next due
           if (logged) last = { pct: known ? week.percentUsed : j.all, at: now };
           $.ui.status(lineNow(now));
@@ -1698,8 +1814,9 @@ export const register = on => {
     // ages and run times as of now, by the engine's clock where it has one
     let now;
     try { now = await $.clock.now(); } catch { now = Date.now(); }
-    const text = lineOf(reading, sessionModel, tokens, agentTokens, now, true, runningAgents());
-    return { text: 'Pacing: ' + text + (reading.do ? '\nNow: ' + reading.do : ''), isTextDisplayOnly: true };
+    const text = lineOf(liveLeft(reading, spend.total - liveFrom), sessionModel, tokens, agentTokens, now, true, runningAgents());
+    return { text: 'Pacing: ' + text + (reading.do ? '\nNow: ' + reading.do : '')
+      + (typeof reading.unused === 'number' ? '\nUnused: at this pace about ' + reading.unused + '% of the week goes unused at the reset; it does not carry over.' : ''), isTextDisplayOnly: true };
   });
   // The report of `budget.mjs last`: the bars and the tier sheet. Where the
   // last reading is too old to show, the module takes one itself first, if
@@ -1718,7 +1835,8 @@ export const register = on => {
           if (j) {
             last = { pct: week && week.resetsAt ? week.percentUsed : j.all, at: now };
             sayLevel($, reading, j);
-            reading = j;
+            sayUnused($, j, un).catch(() => { /* a convenience */ });
+            hold(j);
             $.ui.status(lineNow(now));
             out = await scriptOut($, 'budget.mjs', ['last']);
           }
@@ -1877,7 +1995,8 @@ export const register = on => {
             if (j) {
               last = { pct: week && week.resetsAt ? week.percentUsed : j.all, at: now };
               sayLevel($, reading, j);
-              reading = j;
+              sayUnused($, j, un).catch(() => { /* a convenience */ });
+              hold(j);
               $.ui.status(lineNow(now));
               redraw($);
             }
@@ -1922,7 +2041,7 @@ export const register = on => {
       try {
         let model = modelNow();
         if (!model) { try { model = await $.session.model(); } catch { /* not known */ } }
-        const o = (await switchOn($)) ? switchOffer(reading, model, await effortNow($, ss)) : null;
+        const o = (await switchOn($)) ? switchOffer(reading, model, await effortNow($, ss), contextTokens) : null;
         if (!o || (sw && sw.key !== o.key)) { if (sw) { sw = null; redraw($); } }
         if (o && !switchSeen.has(o.key)) { switchSeen.add(o.key); sw = o; redraw($); }
       } catch { /* an engine without the band: the start line says it */ }
@@ -1974,7 +2093,8 @@ export const register = on => {
         const j = await runReading($, week, limits.find(r => r.kind === 'five_hour'), sessionModel, spend);
         if (j) {
           sayLevel($, reading, j);
-          reading = j;
+          sayUnused($, j, un).catch(() => { /* a convenience */ });
+          hold(j);
         }
       }
       // the tier shares move every turn: the line is redrawn even when no
@@ -1992,7 +2112,7 @@ export const register = on => {
           } catch { /* not known yet */ }
         }
         await learnSurfaces($, st);
-        $.ui.status(lineOf(reading, model, tokens, agentTokens, now, false, runningAgents(), st.max));
+        $.ui.status(lineOf(liveLeft(reading, spend.total - liveFrom), model, tokens, agentTokens, now, false, runningAgents(), st.max));
       }
     } catch {
       // a reading is a convenience: a missing node, a timeout or a bad line

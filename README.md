@@ -35,16 +35,18 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 - **A status line after every turn** (new in 0.8):
 
   ```
-  Budget tokens: 850K · usage: Weekly 36% Fable 40%
+  Budget: 2h 10m left · usage: Weekly 36% Fable 40%
   ```
 
-  What is left under today's budget line, in full-price tokens of tier
-  1's model, the same in every session (learned from what the spending cost, so cache reads
+  What is left under today's budget line, as the time it lasts at the
+  last hour's pace (`Budget: 40m over` past the line; until a pace is
+  known, `Budget tokens: 850K`, in full-price tokens of tier 1's model),
+  the same in every session (learned from what the spending cost, so cache reads
   count at their lower price; until then estimated from this week's
-  transcripts and marked `~`, as in `Budget tokens: ~36M`), then the usage of the weekly meters; while subagents run, how many first (`⏳ 2 Subagents
+  transcripts and marked `~`, as in `Budget: ~2h 10m left`), then the usage of the weekly meters; while subagents run, how many first (`⏳ 2 Subagents
   running`). The budget and the usage always show whole; where room is
   short (70 characters in the desktop app, 75 in a terminal) only the
-  agents' part shrinks (`⏳ 2 Subagents · Budget tokens: 850K · usage:
+  agents' part shrinks (`⏳ 2 Subagents · Budget: 2h 10m left · usage:
   Weekly 36% Fable 40%`). `/pacing-status` shows the whole status line in words, with
   how this session's own use splits over the ladder's models
   (subagents included).
@@ -62,6 +64,13 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   toast that the cache has lapsed.
 - **A start line in every new session** with the last reading and the
   recommended model, which can also become the default for new sessions.
+- **A switch that knows what it costs.** A row above the prompt offers
+  the recommended model with Switch. In a session of 200 000 tokens or
+  more it says what storing the session again on the new model costs,
+  and offers **Compact, then switch**.
+- **Room left over.** When the trend leaves 10 points or more of the week
+  unused at the reset, one toast and `/pacing-status` say so: the
+  allowance does not carry over.
 - **Weekly summaries** (`/pacing week`), and at "over" a suggestion to
   lower the session's effort one step before work moves down a tier.
 

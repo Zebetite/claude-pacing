@@ -882,3 +882,61 @@ level in the status line.
   the session already runs on does no harm, and `/effort` runs after it
   in case `/model` reset the effort. A failed run still fills the box with
   `/model <target>`.
+
+## Budget tokens follows the spending (0.9.21)
+
+- **Seen live:** "Budget tokens rarely change." The weekly meter moves in
+  whole points, about $6.50 of use each (some 800K tokens at Fable 5.2's
+  price), and the figure was points left × the rate: it stood still
+  between two points, and readings came only on a point or every 30 min.
+- **budget.mjs** takes off what every local session spent since the meter
+  last moved, from their transcripts (`weekSpend` from the first logged
+  reading at today's figure after one below it; a move is always logged),
+  never more than one point's dollars, and not on a dry reading. It is in
+  `left.sinceUsd` where above nothing; the reading and line.json carry
+  `tokenUsd`, the dollars of one full-price token.
+- **The status line**, between readings, takes off what this session spent
+  since its reading came in (own or shared), at `tokenUsd` (`liveLeft`):
+  the figure falls with each turn. The next reading starts over from
+  budget.mjs's figure, which counts those turns too.
+- **Readings every 10 minutes** while turns run (`MIN_GAP`, was 30), so the
+  other sessions follow within minutes through line.json. The log still
+  grows only on a move, a change of level or flag, or 30 minutes.
+
+## Budget in time, room left over, a switch that knows its cost (0.9.21)
+
+- **Budget in time.** A token count priced at tier 1's rate says little;
+  the status line now shows the time what is left lasts: `Budget: 2h 10m
+  left`, past the line `Budget: 40m over`, `~` before an estimated rate.
+  budget.mjs learns the pace in the pass that counts the spending since
+  the meter moved (`weekSpend`'s `marks`): the last hour's dollars over
+  the time since the first response in it, where that is $0.50 over 15
+  minutes or more, half and half with the pace held when that is under 6
+  hours old. It is kept in rate.json's `pace` ({ usd, at }), into a new
+  week too, and sent as `paceUsd` (in line.json as well). The module turns
+  `left.tokens` into hours (`tokens × tokenUsd ÷ paceUsd`), after the
+  session's own turns came off (`liveLeft`); `timeText` rounds to 5
+  minutes under an hour, 10 from there, whole hours from 10, `24h+` past
+  a day. No pace: `Budget tokens: 850K` as before. `/pacing-status`:
+  `Budget: 2h 10m left (850K tokens, at $3.40 an hour)`.
+- **Room left over.** At "ahead", where the trend (20 h or more of it)
+  projects 10 points or more under 100 % at the reset, budget.mjs says
+  `unused: at this pace about 18 % of the week goes unused at the reset,
+  and it does not carry over: ...` (in `last --brief` too, for the route
+  skill) and sends `unused` and `reset`. The module shows one toast per
+  week and step of 10 points, `💡 at this pace about 18% of the week goes
+  unused at the reset, ...`, across sessions by `$.store`'s `unused`, and
+  a line in `/pacing-status`.
+- **A switch that knows its cost.** Each model has its own cache: after a
+  switch the next turn stores the whole session again at the new model's
+  cache-write price (400K tokens to Opus 5.5: $2, a third of a point),
+  and with cache reads at the same price on Fable 5.2 and Opus 5.5 that
+  is paid back by output alone. From `SWITCH_LARGE` (200 000 tokens at the
+  last measure) an offer that changes the model adds `A switch stores
+  this session's 400k tokens again (about 20m of the budget): compact
+  first.` (`costText`: time with a pace, else tokens, else nothing) and
+  the row gains **Compact, then switch** (`pacing-compact-switch`): the
+  compaction as Compact now runs it ($.session.compact, else `/compact`
+  as if typed), then `/model` and `/effort`; a compaction that does not
+  start fills `/compact` and leaves the model alone. Not where the model
+  is out, nor for an effort alone.

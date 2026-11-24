@@ -61,10 +61,14 @@ const eachLine = (file, fn) => {
   } catch { /* what was read counts */ } finally { fs.closeSync(fd); }
 };
 
-// { usd, messages, files } spent from `since` to `until` (ms)
-export const weekSpend = ({ since, until = Date.now(), dir = projectsDir() } = {}) => {
+// { usd, messages, files, after } spent from `since` to `until` (ms). `marks`
+// (ms, each at or after `since`): for each, in `after`, the dollars spent
+// from it on and when the first of them was ({ usd, first }, first null
+// where none): one pass serves several windows.
+export const weekSpend = ({ since, until = Date.now(), dir = projectsDir(), marks = [] } = {}) => {
   const seen = new Set();
   let usd = 0, messages = 0;
+  const after = marks.map(() => ({ usd: 0, first: null }));
   const list = files(dir, since);
   for (const f of list) {
     eachLine(f, l => {
@@ -80,9 +84,15 @@ export const weekSpend = ({ since, until = Date.now(), dir = projectsDir() } = {
       const p = priceOf(m.model);
       if (!p) return;
       const u = m.usage;
-      usd += (n(u.input_tokens) * p[0] + n(u.output_tokens) * p[1] + n(u.cache_read_input_tokens) * p[2] + n(u.cache_creation_input_tokens) * p[3]) / 1e6;
+      const cost = (n(u.input_tokens) * p[0] + n(u.output_tokens) * p[1] + n(u.cache_read_input_tokens) * p[2] + n(u.cache_creation_input_tokens) * p[3]) / 1e6;
+      usd += cost;
       messages++;
+      marks.forEach((at, i) => {
+        if (t < at) return;
+        after[i].usd += cost;
+        if (after[i].first === null || t < after[i].first) after[i].first = t;
+      });
     });
   }
-  return { usd, messages, files: list.length };
+  return { usd, messages, files: list.length, after };
 };

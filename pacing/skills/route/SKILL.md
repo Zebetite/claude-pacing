@@ -10,7 +10,7 @@ The `pacing` skill reports and holds the settings. `config.mjs` below is
 
 **The routing lines.** `node "${CLAUDE_SKILL_DIR}/../pacing/scripts/budget.mjs" last --brief`
 prints what the last reading decides: the level, `route:`, `do:`,
-`effort:`, `upward:` and the context line when it advises. On a
+`effort:`, `upward:`, `unused:` and the context line when it advises. On a
 `measure:` line the `pacing` skill takes a reading.
 
 ## Classes of work
@@ -96,6 +96,10 @@ This session's model is the user's to set; the lever is delegation.
   `set_session_effort`; the app asks; other sessions only), never unasked.
 - **`upward:` line**: one contained hard task with a clear deliverable may
   go to the subagent it names; an open debugging hunt may not.
+- **`unused:` line**: allowance is left over at the reset, and it does not
+  carry over: in doubt between two tiers take the higher, and keep medium
+  work here. Say it once if the user asks about models or effort; never
+  raise the session's effort unasked.
 - **5-hour window**: at 85 % or more, hold heavy work until the printed
   time; if its `5-hour window` line says it fills before the reset, delegate bulky
   work or pause heavy runs.

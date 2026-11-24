@@ -584,6 +584,14 @@ if (trend) {
     + (trend.reach ? ', reaches 100 % ' + when(trend.reach) : '')
     + (trend.short ? ' (sample under ' + TREND_MIN_H + ' h, not applied to the level)' : ''));
 }
+// What goes unused: the allowance does not carry over the reset. At
+// "ahead", where the trend (20 h or more of it) projects UNUSED_MIN points
+// or more under 100 % at the reset, the report, the status report and one
+// toast (readings.mjs) say so: there is room for harder work and more
+// effort, which the level alone does not show.
+const UNUSED_MIN = 10;
+const unused = trend && !trend.short && level === 'ahead' && 100 - trend.projected >= UNUSED_MIN ? Math.round(100 - trend.projected) : null;
+if (unused !== null) console.log('unused: at this pace about ' + unused + ' % of the week goes unused at the reset, and it does not carry over: there is room for harder work and more effort');
 if (premTrend) {
   console.log(premLabel + ' trend: ' + (premTrend.rate >= 0 ? '+' : '') + r1(premTrend.rate) + ' %/day over ' + r1(premTrend.hours) + ' h, projected ' + r1(premTrend.projected) + ' % at reset'
     + (premTrend.reach ? ', reaches 100 % ' + when(premTrend.reach) : '')
@@ -819,7 +827,7 @@ if (opt.brief && !auto) {
     parts.push('reader -> ' + name(readerTier || pick('L')));
     parts.push('verifier -> ' + name(verifierTier || pick('L')) + (verifierTier ? ' (plain runs; checks to judge -> ' + name(pick('L')) + ')' : ''));
   }
-  const keep = l => /^(Weekly used |last reading |last week:|first run:|config.json: |do: |effort: |upward: |note: |next session: |settings.json|desktop app preset)/.test(l)
+  const keep = l => /^(Weekly used |last reading |last week:|first run:|config.json: |do: |effort: |upward: |unused: |note: |next session: |settings.json|desktop app preset)/.test(l)
     || (premLabel && l.startsWith(premLabel + ' used '))
     || (/^(5-hour window|fixed overhead|context) /.test(l) && l.includes(' -> '))
     || (level === 'stop' && l.startsWith('extra usage: '));
@@ -913,6 +921,9 @@ const RISE_MIN = 5, RISE_EARLY = 2, RATE_V = 2;
 const spentArg = opt['spent-usd'] === undefined ? NaN : Number(opt['spent-usd']);
 const spent = Number.isFinite(spentArg) && spentArg > 0 ? spentArg : 0;
 const fin = v => typeof v === 'number' && Number.isFinite(v);
+// the pace (see "the pace" where the reading is put together)
+const PACE_MS = HOUR, PACE_MIN_USD = 0.5, PACE_MIN_SPAN = 15 * 60000, PACE_KEEP = 6 * HOUR;
+const paceOk = p => !!p && typeof p === 'object' && fin(p.usd) && p.usd > 0 && fin(p.at);
 const rateNext = text => {
   let cur = null;
   try { cur = text ? JSON.parse(text) : null; } catch { cur = null; }
@@ -924,7 +935,8 @@ const rateNext = text => {
   if (whole && at > reset.getTime() + HOUR) return { ...cur, carried };
   if (whole && Math.abs(at - reset) <= HOUR) return { ...cur, to: Math.max(cur.to, used), usd: cur.usd + spent, carried };
   const rise = whole ? cur.to - cur.from : 0;
-  return { v: RATE_V, reset: opt.reset, from: used, to: used, usd: 0, carried: rise >= RISE_MIN && cur.usd > 0 ? cur.usd / rise : carried };
+  return { v: RATE_V, reset: opt.reset, from: used, to: used, usd: 0, carried: rise >= RISE_MIN && cur.usd > 0 ? cur.usd / rise : carried,
+    ...(paceOk(cur.pace) ? { pace: cur.pace } : {}) };
 };
 let rateState = null;
 try {
@@ -1012,6 +1024,45 @@ if (auto) {
   if (readerCfg && readerCfg !== 'ladder') nameAt(tierOf[idOf(readerCfg)], readerCfg);
   if (verifierCfg && verifierCfg !== 'ladder') nameAt(tierOf[idOf(verifierCfg)], verifierCfg);
   const prices = Object.fromEntries(Object.values(MODELS).map(m => [m.id, m.price]));
+  // The weekly meter moves in whole points (about $6.50 of use each), so
+  // what is left stood still between them: live, "Budget tokens" rarely
+  // changed. What every local session spent since the meter last moved, from
+  // their transcripts, comes off it: the figure falls with each turn and
+  // meets the next point as the meter does. That time is the first reading
+  // at today's figure after one below it (a move is always logged); never
+  // more than one point comes off. Not on a dry reading.
+  // The same pass gives the pace, the dollars an hour of work costs, with
+  // which the status line says what is left as time ("Budget: 2h 10m
+  // left"): the last hour's spending over the time since its first
+  // response, where that is PACE_MIN_USD over PACE_MIN_SPAN or more (a
+  // session just resumed says nothing yet), half and half with the pace
+  // held when that is under PACE_KEEP old. It is kept in rate.json's `pace`
+  // ({ usd, at }), into the next week too; a dry reading shows the one kept.
+  let sinceUsd = 0;
+  let pace = paceOk(rateState && rateState.pace) ? rateState.pace.usd : null;
+  if (!opt.dry) {
+    const at = now.getTime();
+    let since = at;
+    for (let i = weekLog.length - 1; i >= 0 && weekLog[i].all >= used; i--) since = Math.min(since, Date.parse(weekLog[i].t));
+    try {
+      const w = weekSpend({ since: Math.min(since, at - PACE_MS), until: at, marks: [since, at - PACE_MS] });
+      if (rate !== null && rate > 0 && at > since) sinceUsd = Math.min(rate, w.after[0].usd);
+      const h = w.after[1];
+      if (h.usd >= PACE_MIN_USD && h.first !== null && at - h.first >= PACE_MIN_SPAN) {
+        const fresh = h.usd / ((at - h.first) / HOUR);
+        const held = pace !== null && at - rateState.pace.at < PACE_KEEP && at >= rateState.pace.at;
+        pace = Math.round((held ? (pace + fresh) / 2 : fresh) * 1e4) / 1e4;
+        const kept = { usd: pace, at };
+        updateFile(rateFile, t => {
+          let cur;
+          try { cur = JSON.parse(t); } catch { return null; }
+          if (!cur || cur.v !== RATE_V) return null;
+          return JSON.stringify({ ...cur, pace: kept }) + '\n';
+        });
+      }
+    } catch { /* the meter alone, the pace held */ }
+  }
+  const leftUsd = (budget - used) * (rate || 0) - sinceUsd;
   // the account-wide part of this reading, the same for every session: in
   // line.json too, where every session's status line takes the newest one
   // (readings.mjs, "the newest shared reading"); an older one never replaces it
@@ -1020,7 +1071,12 @@ if (auto) {
     // full-price tokens of tier 1's model (the dollars it is worth, at that
     // model's input price)
     usdPerPoint: rate !== null ? Math.round(rate * 1e4) / 1e4 : null, rateFrom: rateSource,
-    left: { points: r1(budget - used), tokens: rate !== null && fullPrice ? Math.round((budget - used) * rate / fullPrice) : null },
+    // (and the spending since the meter last moved), and the dollars a
+    // full-price token costs, with which each session takes its own turns
+    // off between readings
+    left: { points: r1(budget - used), tokens: rate !== null && fullPrice ? Math.round(leftUsd / fullPrice) : null,
+      ...(sinceUsd > 0 ? { sinceUsd: Math.round(sinceUsd * 1e4) / 1e4 } : {}) },
+    tokenUsd: fullPrice, ...(pace !== null ? { paceUsd: pace } : {}),
     premium: prem === null ? null : r1(prem), premiumAt: premFrom ? premFrom.at : null, premiumOut: premOut };
   if (!opt.dry) {
     try {
@@ -1037,7 +1093,7 @@ if (auto) {
     premium: prem === null ? null : r1(prem), premiumOut: premOut, premiumLabel: premLabel,
     premiumAt: premFrom ? premFrom.at : null, premiumLevel: premLevel, premiumHeld: premHeld, levelBy,
     premiumOfBudget: premLevel && budget > 0 ? Math.round(100 * prem / budget) : null,
-    premiumEstimate: premEstimate, needFull, full: fullAuto,
+    premiumEstimate: premEstimate, needFull, full: fullAuto, unused, reset: opt.reset,
     // what the session should run on, and at "over" the effort one step
     // lower on tier 1: the hooks module offers them in its Switch row
     recommend: sessionTier ? { model: MODELS[sessionTier.model].id, label: sessionTier.label, effort: sessionTier.effort } : null,

@@ -4,7 +4,7 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { pauseNote, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -195,6 +195,111 @@ test('the status line in tokens once budget.mjs has a rate, negative past the li
   next = answer('throttle', 26, { rate: 85000 })
   await $.session.measure(measure(26))
   expect(status.at(-1)).toBe('Budget tokens: -510K · usage: Weekly 26% Fable 40%')
+})
+
+test('with a pace, what is left reads as time: 5 minutes under an hour, 10 from there, whole hours from 10, over past the line', () => {
+  expect(timeText(0.74)).toBe('45m')
+  expect(timeText(0.02)).toBe('0m')
+  expect(timeText(0.99)).toBe('1h')
+  expect(timeText(2.17)).toBe('2h 10m')
+  expect(timeText(3.02)).toBe('3h')
+  expect(timeText(9.99)).toBe('10h')
+  expect(timeText(12.4)).toBe('12h')
+  expect(timeText(30)).toBe('24h+')
+  expect(timeText(-0.66)).toBe('40m')
+  // 850K tokens at $8 a million are $6.80: at $3.40 an hour, two hours
+  const j = { line: 20, all: 10, left: { points: 10, tokens: 850000 }, tokenUsd: 8e-6, paceUsd: 3.4 }
+  expect(budgetText(j)).toBe('Budget: 2h left')
+  expect(budgetText({ ...j, rateFrom: 'estimate' })).toBe('Budget: ~2h left')
+  expect(budgetText({ ...j, left: { points: -2, tokens: -170000 } })).toBe('Budget: 25m over')
+  expect(budgetText({ ...j, left: { points: 0, tokens: -100 } })).toBe('Budget: 0m left')
+  // /pacing-status: the tokens and the pace behind it
+  expect(budgetWords(j)).toBe('Budget: 2h left (850K tokens, at $3.40 an hour)')
+  // no pace yet, or an older budget.mjs: the tokens, as before
+  expect(budgetText({ ...j, paceUsd: undefined })).toBe('Budget tokens: 850K')
+  expect(budgetWords({ ...j, paceUsd: undefined })).toBe('Budget tokens: 850K')
+  expect(budgetText({ line: 20, all: 15.4, left: { points: 4.6, tokens: null }, paceUsd: 3.4, tokenUsd: 8e-6 })).toBe('Budget: 5%')
+  // a cost in the line's unit
+  expect(costText(j, 1.7)).toBe('30m')
+  expect(costText({ tokenUsd: 8e-6 }, 2)).toBe('250K tokens')
+  expect(costText({}, 2)).toBe('')
+  expect(costText(j, 0)).toBe('')
+})
+
+test('in a session: the status line in time, falling with the session\'s turns; /pacing-status adds the tokens and what goes unused', async ($, on) => {
+  const status = engine(on)
+  const toasts: string[] = []
+  on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
+  // 85000 tokens a point at $10 a million; $1.70 an hour
+  on('process.run', () => ({ value: answer('ahead', 10, { rate: 85000, tokenUsd: 1e-5, paceUsd: 1.7, unused: 18, reset: RESET }) }))
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('Budget: 5h left · usage: Weekly 10% Fable 40%')
+  // $0.85 of the session's own: half an hour
+  await $.turn.complete(turn('claude-fable-5-2', 0.85))
+  expect(status.at(-1)).toBe('Budget: 4h 30m left · usage: Weekly 10% Fable 40%')
+  const r = await $.command.run({ command: 'pacing-status' } as any)
+  expect(r.text).toContain('Budget: 4h 30m left (765K tokens, at $1.70 an hour)')
+  expect(r.text).toContain('\nUnused: at this pace about 18% of the week goes unused at the reset; it does not carry over.')
+})
+
+test('what goes unused at the reset: one toast per week and step of 10 points, across sessions by the store', async ($, on) => {
+  engine(on)
+  const toasts: string[] = []
+  on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
+  const store = storeEngine(on)
+  const said = () => new Promise(r => setTimeout(r, 30))
+  let next = answer('ahead', 10, { unused: 9, reset: RESET })
+  on('process.run', () => ({ value: next }))
+  // under 10 points: nothing
+  await $.session.measure(measure(10))
+  await said()
+  expect(toasts).toEqual([])
+  next = answer('ahead', 11, { unused: 18, reset: RESET })
+  await $.session.measure(measure(11))
+  await said()
+  expect(toasts).toEqual([unusedText(18)])
+  expect(unusedText(18)).toBe('💡 at this pace about 18% of the week goes unused at the reset, and it does not carry over: there is room for harder work and more effort.')
+  // the same step again, or a lower one: not again
+  next = answer('ahead', 12, { unused: 19, reset: RESET })
+  await $.session.measure(measure(12))
+  next = answer('ahead', 13, { unused: 12, reset: RESET })
+  await $.session.measure(measure(13))
+  await said()
+  expect(toasts.length).toBe(1)
+  // a step more: once more
+  next = answer('ahead', 14, { unused: 31, reset: RESET })
+  await $.session.measure(measure(14))
+  await said()
+  expect(toasts).toEqual([unusedText(18), unusedText(31)])
+  expect(store.unused).toEqual({ week: Date.parse(RESET), step: 30 })
+  // a new week starts over
+  next = answer('ahead', 2, { unused: 12, reset: '2026-11-26T12:00:00.000Z' })
+  await $.session.measure(measure(2))
+  await said()
+  expect(toasts.at(-1)).toBe(unusedText(12))
+})
+
+test('between readings the session\'s own turns come off Budget tokens, at the reading\'s full-price token; the next reading starts over', async ($, on) => {
+  const status = engine(on)
+  let next = answer('ahead', 10, { rate: 85000, tokenUsd: 1e-5 })
+  on('process.run', () => ({ value: next }))
+  await $.session.measure(measure(10))
+  expect(status.at(-1)).toBe('Budget tokens: 850K · usage: Weekly 10% Fable 40%')
+  // $0.50 at $10 a million: 50K
+  await $.turn.complete(turn('claude-fable-5-2', 0.5))
+  expect(status.at(-1)).toBe('Budget tokens: 800K · usage: Weekly 10% Fable 40%')
+  await $.turn.complete(turn('claude-fable-5-2', 0.25))
+  expect(status.at(-1)).toBe('Budget tokens: 775K · usage: Weekly 10% Fable 40%')
+  // the meter moved: budget.mjs's figure, which counts those turns, from here
+  next = answer('ahead', 11, { rate: 85000, tokenUsd: 1e-5 })
+  await $.session.measure(measure(11))
+  expect(status.at(-1)).toBe('Budget tokens: 765K · usage: Weekly 11% Fable 40%')
+  expect(liveLeft({ left: { points: 1, tokens: 100000 }, tokenUsd: 1e-5 }, 0.2)).toEqual({ left: { points: 1, tokens: 80000 }, tokenUsd: 1e-5 })
+  // no full-price token (an older budget.mjs), no figure, nothing spent: as it stands
+  const j = { left: { points: 1, tokens: 100000 } }
+  expect(liveLeft(j, 0.2)).toBe(j)
+  expect(liveLeft({ left: { points: 1, tokens: null }, tokenUsd: 1e-5 }, 0.2).left.tokens).toBe(null)
+  expect(liveLeft(null, 0.2)).toBe(null)
 })
 
 test('every minute the status line takes the newest shared reading another session wrote; an older one changes nothing', async ($, on) => {
@@ -1516,6 +1621,76 @@ test('Switch runs /model even where the offer saw the target model already, then
   expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 medium.')
 })
 
+test('a switch in a large session says what it costs and offers the compaction first; a small one, an effort alone and a model that is out do not', () => {
+  const base = { premiumModelId: 'claude-fable-5-2', premiumLabel: 'Fable 5.2', prices: PRICES, recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }
+  const plain = 'This week\'s budget suggests Opus 5.5 medium for this session.'
+  expect(SWITCH_LARGE).toBe(200000)
+  // 250 000 tokens at Opus 5.5's $5 a million to store: $1.25
+  expect(switchOffer(base, 'claude-fable-5-2', 'high', 250000)).toMatchObject({ kind: 'model', compactFirst: true,
+    text: plain + ' A switch stores this session\'s 250k tokens again: compact first.' })
+  expect(switchOffer({ ...base, tokenUsd: 8e-6 }, 'claude-fable-5-2', 'high', 250000)?.text)
+    .toBe(plain + ' A switch stores this session\'s 250k tokens again (about 156K tokens of the budget): compact first.')
+  expect(switchOffer({ ...base, tokenUsd: 8e-6, paceUsd: 2.5 }, 'claude-fable-5-2', 'high', 250000)?.text)
+    .toBe(plain + ' A switch stores this session\'s 250k tokens again (about 30m of the budget): compact first.')
+  expect(switchOffer({ ...base, premiumHeld: true, recommend: REC_OPUS_HIGH }, 'claude-fable-5-2', 'high', 250000)).toMatchObject({ kind: 'held', urgent: true, compactFirst: true })
+  // under 200 000 tokens, or a size not known: as before
+  expect(switchOffer(base, 'claude-fable-5-2', 'high', 199999)).toMatchObject({ compactFirst: false, text: plain })
+  expect(switchOffer(base, 'claude-fable-5-2', 'high')).toMatchObject({ compactFirst: false, text: plain })
+  // the same model at another effort stores nothing again
+  expect(switchOffer(base, 'claude-opus-5-5', 'high', 250000)).toMatchObject({ compactFirst: false, text: plain })
+  // out: the compaction would run on the model that is out
+  expect(switchOffer({ ...base, premiumOut: true }, 'claude-fable-5-2', 'high', 250000)).toMatchObject({ kind: 'out', compactFirst: false })
+})
+
+test('Compact, then switch: the compaction first, then /model and /effort; Switch alone still switches at once', async ($, on) => {
+  engine(on)
+  on('process.run', () => ({ value: switchReading({ premiumHeld: true, premiumLabel: 'Fable 5.2', recommend: REC_OPUS_HIGH }) }))
+  const seen = switchEngine(on, { effort: 'medium' })
+  on('session.compact', (_: unknown, e: any) => (seen.runs.push('compact'), { messages: [{ role: 'assistant', text: 's', toolUses: [] }], tokensBefore: 250000, tokensAfter: 40000 }))
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 250000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect(await switchText($)).toBe('⚠️ Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 high; Fable stays for hard tasks. A switch stores this session\'s 250k tokens again: compact first.')
+  expect(await bandKeys($)).toEqual(['pacing-compact-switch', 'pacing-switch', 'pacing-switch-not-now'])
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-compact-switch' })
+  await ui.unmount()
+  expect(seen.runs).toEqual(['compact', '/model claude-opus-5-5', '/effort high'])
+  expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 high; the model menu may still show Fable 5.2.')
+  expect(await switchText($)).toBe(undefined)
+})
+
+test('Compact, then switch in the desktop app: /compact as if typed, then the switch; a compaction that does not start leaves the model alone', async ($, on) => {
+  engine(on)
+  on('process.run', () => ({ value: switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }) }))
+  const seen = switchEngine(on)
+  on('session.compact', () => { throw new Error('pacing: $.session.compact: not available in a headless (-p / SDK) session yet') })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 250000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-compact-switch' })
+  await ui.unmount()
+  expect(seen.runs).toEqual(['/compact ' + COMPACT_INSTRUCTIONS, '/model claude-opus-5-5', '/effort medium'])
+  expect(seen.toasts.at(-1)).toBe('🔁 this session now runs on Opus 5.5 medium; the model menu may still show Fable 5.2.')
+})
+
+test('Compact, then switch where no compaction starts: /compact in the box and the reason, the model left alone', async ($, on) => {
+  engine(on)
+  on('process.run', () => ({ value: switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }) }))
+  const seen = switchEngine(on, { failRun: true })
+  on('session.compact', () => { throw new Error('pacing: $.session.compact: not available here') })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 250000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-compact-switch' })
+  await ui.unmount()
+  expect(seen.runs).toEqual([])
+  expect(seen.fills).toEqual(['/compact'])
+  expect(seen.toasts.at(-1)).toMatch(/^❌ the compaction did not start: .*\/compact is in the box: press Enter to send it\.$/)
+})
+
 test('once per suggestion: Not now holds until the recommendation changes', async ($, on) => {
   engine(on)
   let next = switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } })
@@ -2250,7 +2425,7 @@ test('a plan without the per-model window, extra usage off, no context: - for th
   expect(seen.runs[0].slice(2)).toEqual(['--all', '36', '--reset', RESET, '--source', 'hook', '--five', '11', '--five-reset', '2026-11-13T14:59:00.000Z', '--premium', '-'])
 })
 
-test('no more often than before: one tool call per reading, none while the meter stands still', async ($, on) => {
+test('one tool call per reading: none while the meter stands still, one every 10 minutes', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   const seen = usageEngine(on)
@@ -2260,7 +2435,7 @@ test('no more often than before: one tool call per reading, none while the meter
   expect(seen.calls).toBe(1)
   await $.session.measure(measure(37))
   expect(seen.calls).toBe(2)
-  await clock.advance(29 * 60000)
+  await clock.advance(9 * 60000)
   await $.session.measure(measure(37))
   expect(seen.calls).toBe(2)
   await clock.advance(60000)
@@ -2836,7 +3011,8 @@ test('an agent the engine no longer runs at the reload is dropped; without its l
 
 test('every toast leads with the icon of its kind where "Pacing: " stood, and keeps its words after it', async () => {
   expect(ICON).toEqual({ started: '▶️', done: '✅', still: '⏳', worse: '⚠️', stop: '🔴', better: '🟢', switched: '🔁', failed: '❌',
-    waiting: '📦', compacted: '🗜️', pause: '💤' })
+    waiting: '📦', compacted: '🗜️', pause: '💤', room: '💡' })
+  expect(unusedText(18).startsWith('💡 ')).toBe(true)
   const side = { id: 's1', kind: 'session', label: 'Task s1', startedAt: T0 - 35000 } as any
   const texts: [string, string][] = [
     ['▶️', startedText(FIRST, [FIRST])],

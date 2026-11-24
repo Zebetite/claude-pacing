@@ -235,6 +235,23 @@ describe('the trend', () => {
     assert.equal(levelOf(out), 'ahead');
     assert.match(out, /sample under 20 h, not applied to the level/);
   });
+  test('at "ahead", 10 points or more that the trend leaves at the reset are named as unused', () => {
+    const json = () => JSON.parse(sb.budget(['--all', '40', '--reset', RESET, '--now', now, '--source', 'hook', '--dry']).out.trim());
+    // 5 points a day, 4 days to go: 60 % at the reset
+    seed(24, 35);
+    assert.match(dry(now, 40).out, /^unused: at this pace about 40 % of the week goes unused at the reset, and it does not carry over: there is room for harder work and more effort$/m);
+    assert.equal(json().unused, 40);
+    // 14 points a day: 96 %, under 10 points left over
+    seed(24, 26);
+    assert.doesNotMatch(dry(now, 40).out, /^unused:/m);
+    assert.equal(json().unused, null);
+    // a sample under 20 h says nothing
+    seed(10, 39);
+    assert.doesNotMatch(dry(now, 40).out, /^unused:/m);
+    // not past the line: 50 % used is over it
+    seed(24, 49);
+    assert.doesNotMatch(dry(now, 50).out, /^unused:/m);
+  });
   test('a reading of another week is not a trend', () => {
     sb.write('log.jsonl', JSON.stringify({ t: '2026-11-14T12:00:00Z', all: 5, reset: '2026-11-26T12:00:00Z' }) + '\n');
     assert.doesNotMatch(dry(now, 40).out, /^trend:/m);
@@ -664,7 +681,7 @@ describe('rate.json: dollars per point of the weekly meter', () => {
       assert.equal(reading(s, 15, null, { more: ['--session', 'claude-mystery-1'] }).left.tokens, 156250);
       // the account-wide part, for every session's status line
       const line = JSON.parse(s.read('line.json'));
-      assert.deepEqual(line, { t: '2026-11-13T12:00:00.000Z', all: 15, line: 20, ofBudget: 75, usdPerPoint: 0.25, rateFrom: 'week', left: { points: 5, tokens: 156250 }, premium: null, premiumAt: null, premiumOut: false });
+      assert.deepEqual(line, { t: '2026-11-13T12:00:00.000Z', all: 15, line: 20, ofBudget: 75, usdPerPoint: 0.25, rateFrom: 'week', left: { points: 5, tokens: 156250 }, tokenUsd: FULL, premium: null, premiumAt: null, premiumOut: false });
       assert.equal(opus.t, line.t);
       // an older reading never replaces a newer one; a dry one writes none
       reading(s, 14, null, { now: '2026-11-13T11:00:00Z' });
@@ -674,6 +691,61 @@ describe('rate.json: dollars per point of the weekly meter', () => {
       // rounded to 4 decimals
       reading(s, 16, 0.123456);
       assert.equal(reading(s, 16).usdPerPoint, Math.round(1.373456 / 6 * 1e4) / 1e4);
+    } finally { s.cleanup(); }
+  });
+  test('what every local session spent since the meter last moved comes off the tokens left, never more than a point', () => {
+    const s = sandbox();
+    try {
+      const line = (id, t, input) => JSON.stringify({ type: 'assistant', timestamp: t, message: { id, model: 'claude-opus-5-5', usage: { input_tokens: input } } });
+      const file = path.join(s.home, '.claude', 'projects', 'X--proj', 'sess.jsonl');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, line('a', '2026-11-13T11:00:00Z', 1e6) + '\n'); // before the meter reached 15: not counted
+      // $0.25 a point; the meter reached 15 at 12:00
+      reading(s, 10, null, { now: '2026-11-13T11:30:00Z' }); reading(s, 15, 1.25);
+      fs.appendFileSync(file, line('b', '2026-11-13T12:20:00Z', 25000) + '\n'); // $0.10
+      const j = reading(s, 15, null, { now: '2026-11-13T12:30:00Z' });
+      // ($1.25 left - $0.10) at Fable 5.2's $8 per million
+      assert.deepEqual(j.left, { points: 5, tokens: 143750, sinceUsd: 0.1 });
+      assert.deepEqual(JSON.parse(s.read('line.json')).left, j.left);
+      // a dry reading takes nothing off
+      assert.deepEqual(reading(s, 15, null, { now: '2026-11-13T12:31:00Z', dry: true }).left, { points: 5, tokens: 156250 });
+      // never more than one point: another device, or a rate that lags
+      fs.appendFileSync(file, line('c', '2026-11-13T12:40:00Z', 1e6) + '\n'); // $4
+      assert.deepEqual(reading(s, 15, null, { now: '2026-11-13T12:45:00Z' }).left, { points: 5, tokens: 125000, sinceUsd: 0.25 });
+      // the meter moved: from here on, nothing yet
+      const k = reading(s, 16, null, { now: '2026-11-13T12:50:00Z' });
+      assert.equal(k.left.sinceUsd, undefined);
+      assert.equal(k.left.tokens, Math.round(4 * (1.25 / 6) / FULL));
+    } finally { s.cleanup(); }
+  });
+  test('the pace: the last hour of spending over the time since its first response, kept in rate.json and into a new week', () => {
+    const s = sandbox();
+    try {
+      const line = (id, t, input) => JSON.stringify({ type: 'assistant', timestamp: t, message: { id, model: 'claude-opus-5-5', usage: { input_tokens: input } } });
+      const file = path.join(s.home, '.claude', 'projects', 'X--proj', 'sess.jsonl');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      // nothing spent yet: no pace, and the reading carries none
+      assert.equal(reading(s, 10, null, { now: '2026-11-13T10:00:00Z' }).paceUsd, undefined);
+      fs.writeFileSync(file, [line('a', '2026-11-13T11:10:00Z', 1e6), line('b', '2026-11-13T11:40:00Z', 5e5)].join('\n') + '\n'); // $4 + $2
+      // $6 over the 50 minutes since 11:10
+      const j = reading(s, 10);
+      assert.equal(j.paceUsd, 7.2);
+      assert.deepEqual(rate(s).pace, { usd: 7.2, at: Date.parse('2026-11-13T12:00:00Z') });
+      assert.equal(JSON.parse(s.read('line.json')).paceUsd, 7.2);
+      // an hour with nothing in it: the pace held
+      assert.equal(reading(s, 10, null, { now: '2026-11-13T13:30:00Z' }).paceUsd, 7.2);
+      // work just resumed (under 15 minutes of it): held too
+      fs.appendFileSync(file, line('c', '2026-11-13T13:40:00Z', 4.5e5) + '\n'); // $1.80
+      assert.equal(reading(s, 10, null, { now: '2026-11-13T13:50:00Z' }).paceUsd, 7.2);
+      // half an hour of it at $3.60 an hour: half and half with the one held
+      assert.equal(reading(s, 10, null, { now: '2026-11-13T14:10:00Z' }).paceUsd, 5.4);
+      // a dry reading shows the one kept and writes none
+      fs.appendFileSync(file, line('d', '2026-11-13T14:15:00Z', 5e6) + '\n');
+      assert.equal(reading(s, 10, null, { now: '2026-11-13T14:30:00Z', dry: true }).paceUsd, 5.4);
+      assert.equal(rate(s).pace.usd, 5.4);
+      // a new week keeps it
+      assert.equal(reading(s, 1, null, { reset: NEXT, now: '2026-11-20T09:00:00Z' }).paceUsd, 5.4);
+      assert.equal(rate(s).pace.usd, 5.4);
     } finally { s.cleanup(); }
   });
   test('an older module\'s --spent is taken and ignored', () => {
