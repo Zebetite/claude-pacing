@@ -22,7 +22,9 @@ rules; `skills/pacing/SKILL.md` (reports and settings) and
 
 Open beside the chat from the session's start (`/pacing-pane` reopens
 it): the week as a dial, the time left today to stay on budget, the
-meters, the agents at work, the context and the models. Sample figures:
+meters, the agents at work, the context and the models. Sample figures
+(on the organization library's page, open them under `images/` in the
+file list: the page shows a README's pictures as their descriptions):
 
 ![The pacing pane: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, three agents at work](images/pane-agents.png)
 

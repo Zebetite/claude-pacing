@@ -1081,7 +1081,7 @@ async function pollSessions($, st, t) {
     if (a.kind === 'session' && !ids.has(id)) {
       st.agents.delete(id);
       changed = true;
-      if (notify) $.ui.toast(sessionDoneText(a, t - a.startedAt, st.list()), { timeoutMs: TOAST_LONG });
+      if (notify && !(await paneShown($, st))) $.ui.toast(sessionDoneText(a, t - a.startedAt, st.list()), { timeoutMs: TOAST_LONG });
     }
   }
   for (const r of live) {
@@ -1098,9 +1098,9 @@ async function pollSessions($, st, t) {
   if (changed) { $.ui.status(st.lineNow(t)); redraw($); }
 }
 // Whether the pacing pane is on show in full: it lists the agents at work,
-// so a toast that one started, or that they still run, says nothing new
-// there. A finished agent's toast stays (the pane only shows the running).
-// A pane behind another tab, waiting undrawn or minimized (`st.paneGlance`,
+// so a toast that one started, still runs or is done says nothing new there
+// (the user's word: too many boxes; a finished agent leaves the list, and
+// its answer comes in the chat). A pane behind another tab, waiting undrawn or minimized (`st.paneGlance`,
 // set as it is drawn) shows no agents, and the toasts go on.
 async function paneShown($, st) {
   try {
@@ -2384,7 +2384,7 @@ export const register = on => {
             }
           } finally { running = false; }
         })().catch(() => { /* a record and a reading are conveniences */ });
-        if (await noticesOn($)) $.ui.toast(doneText(a, now - a.startedAt, spent, runningAgents()), { timeoutMs: TOAST_LONG });
+        if ((await noticesOn($)) && !(await paneShown($, st))) $.ui.toast(doneText(a, now - a.startedAt, spent, runningAgents()), { timeoutMs: TOAST_LONG });
         // a run that ended by itself is the type's history for the estimate
         if (!e.isAborted) {
           try {

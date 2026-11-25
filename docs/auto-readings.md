@@ -1209,3 +1209,24 @@ chose to ship them: `pacing/images/pane-*.png` (about 770 KB), linked
 relatively from the plugin's README, and `scripts/pane-images.mjs` copies
 them there. Whether the page draws images from the plugin's own files is
 what this release tries.
+
+## A reactor's glow in the dial, and fewer toasts (0.9.35)
+
+The user's words, in turn: more colour in the meter at the top; less
+gradient and more contrast; the gradient only on the bar for the
+percentage; the colours round the core not changing with the figure, and
+never the bar's own; the figure white with some small marks; and, of the
+sketches, the reactor's glow. So in `reactorSvg` the data ring runs the
+level's colour run (`SWEEPS`) from the top to the figure, with a glow;
+the brackets, the inner ring and the core are in `FRAME`, greens that no
+run takes, the same at every level; the figure and the inner ring's
+square nodes are white (`FIGURE`); the core is a white heart fading out
+through green, ten angled cells and a thin white rim, with a strip of
+twelve cells under the figure lit by the week. `pacing/images` and
+`docs/images` are drawn again with it.
+
+The user's word, too: too many boxes popping up. While the pacing pane is
+on show the toasts that an agent or a side session is done stay away, as
+those that one started or still runs already did: the pane lists them,
+and an agent's answer comes in the chat. With the pane hidden they come
+as before.

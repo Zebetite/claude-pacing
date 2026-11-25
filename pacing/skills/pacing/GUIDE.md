@@ -489,7 +489,8 @@ the parts left; else how long that kind of agent usually takes (from
 three finished runs on), less the time it has run. Without either, or
 once the agent has run past the estimate, no figure is given. The start
 toast names the usual length the same way (`…on Fable 5.2 high, about
-20m.`). `/pacing notify off` turns these toasts
+20m.`). While the pacing pane is on show these three toasts stay away:
+the pane lists the agents at work. `/pacing notify off` turns these toasts
 off; the status line and the row stay. Every toast of the plugin leads with one
 icon for its kind, since a toast has no colour of its own:
 

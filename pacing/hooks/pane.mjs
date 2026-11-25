@@ -239,16 +239,24 @@ export const gaugeSvg = (pct, color, marker = null, size = 132, label = 'WEEK') 
     + '<text x="' + c + '" y="' + num(c + 46) + '" text-anchor="middle" ' + FONT + ' font-size="' + num(size / 16) + '" letter-spacing="2" fill="' + HUD + '">' + label + '</text>');
 };
 
-// A reactor readout in the manner of a ship's console: flat and thin-lined,
-// no glow. From the outside in: four bracket arcs turning slowly, a ring of
-// fine scale marks, the data ring (forty-eight flat blocks in a hollow
-// channel, lit clockwise from the top), an inner ring of three arcs turning
-// the other way, and the core with the figure. The budget line is an amber
+// A reactor readout in the manner of a ship's console. From the outside in:
+// four bracket arcs turning slowly, a ring of fine scale marks, the data ring
+// (forty-eight blocks in a hollow channel, lit clockwise from the top in the
+// level's gradient), an inner ring of three dashed arcs turning the other
+// way, and the glowing core with the figure. The budget line is a white
 // pointer outside the data ring, and a small word says which side of it the
 // week is on.
 export const AMBER = '#fbbf24';
 // the week's budget line on the dial: white, a colour no ring or bar takes
 export const BUDGET_LINE = '#f8fafc';
+// the dial's frame and core marks: fixed colours that differ from one
+// another and stay the same at every level (the user's word: they should
+// not change with the figure); only the data ring and the figure follow it.
+// Greens: no level's colour run (SWEEPS) takes one, so the frame never
+// matches the ring (the user's word)
+export const FRAME = { brackets: ['#a3e635', '#10b981'], inner: '#34d399', core: '#a3e635' };
+// the figure in the core and a few small marks: white (the user's word)
+export const FIGURE = '#f8fafc';
 // behind a readout: a faint grid, and a mark in each corner
 const backdrop = s => {
   let g = '';
@@ -262,23 +270,27 @@ export const reactorSvg = (pct, color, marker = null, size = 160, label = 'WEEK 
   const ring = (r, extra) => '<circle cx="' + c + '" cy="' + c + '" r="' + r + '" fill="none" ' + extra + '/>';
   const turn = (body, from, to, dur) => '<g>' + body + '<animateTransform attributeName="transform" type="rotate" from="' + from + ' ' + c + ' ' + c + '" to="' + to + ' ' + c + ' ' + c + '" dur="' + dur + 's" repeatCount="indefinite"/></g>';
   const stroke = (col, w, op = 1) => 'stroke="' + col + '" stroke-width="' + w + '"' + (op < 1 ? ' stroke-opacity="' + op + '"' : '');
-  // the bracket arcs, one a quadrant
+  // outside the data ring solid colours, no blends (the user's word: more
+  // colour, more contrast), the same at every level (FRAME)
+  // the bracket arcs, one a quadrant, two colours by turns
   let brackets = '';
-  for (let q = 0; q < 4; q++) brackets += '<path d="' + arc(c, c, 77, q * 90 + 18, q * 90 + 72) + '" fill="none" ' + stroke(HUD, 2.5, 0.85) + '/>';
+  for (let q = 0; q < 4; q++) brackets += '<path d="' + arc(c, c, 77, q * 90 + 18, q * 90 + 72) + '" fill="none" ' + stroke(FRAME.brackets[q % 2], 2.5, 0.95) + '/>';
   // the scale: a mark every 5 degrees, longer every 30, and the four axes
   let scale = '';
   for (let a = 0; a < 360; a += 5) scale += line(a, a % 30 ? 67 : 65, 70, stroke(HUD, a % 30 ? 0.8 : 1.4, a % 30 ? 0.45 : 0.9));
   for (let a = 0; a < 360; a += 90) scale += line(a, 71, 79, stroke(HUD, 1.2, 0.9));
-  // the data ring
-  const n = 48, step = 360 / n, lit = p / 100 * n;
-  let blocks = '';
+  // the data ring, the one part in a gradient (the user's word): the lit
+  // blocks run the level's colour run from the top to the figure, with a
+  // glow; the unlit ones a faint grey
+  const n = 48, step = 360 / n, lit = p / 100 * n, span = Math.max(1, Math.ceil(lit) - 1);
+  let blocks = '', dark = '';
   for (let i = 0; i < n; i++) {
     const part = clamp(lit - i, 0, 1);
     const d = arc(c, c, 56, i * step + 1, (i + 1) * step - 1);
-    blocks += part > 0
-      ? '<path d="' + d + '" fill="none" ' + stroke(sweepAt(color, i / (n - 1) * 0.5), 8, 0.4 + 0.6 * part) + '/>'
-      : '<path d="' + d + '" fill="none" ' + stroke('#808080', 8, 0.16) + '/>';
+    if (part > 0) blocks += '<path d="' + d + '" fill="none" ' + stroke(sweepAt(color, i / span), 8, 0.45 + 0.55 * part) + '/>';
+    else dark += '<path d="' + d + '" fill="none" ' + stroke('#808080', 8, 0.16) + '/>';
   }
+  blocks = dark + '<g filter="url(#glow)">' + blocks + '</g>';
   // the budget line: a pointer outside the ring and a hair line across it
   let pointer = '', word = '';
   if (marker !== null) {
@@ -291,24 +303,37 @@ export const reactorSvg = (pct, color, marker = null, size = 160, label = 'WEEK 
     const over = pct > marker;
     word = '<text x="' + c + '" y="' + (c - 15) + '" text-anchor="middle" ' + FONT + ' font-size="6.5" letter-spacing="1.5" fill="' + (over ? AMBER : HUD) + '">' + (over ? 'OVER LINE' : 'NOMINAL') + '</text>';
   }
-  // the inner ring: three arcs with a dot at each start
+  // the inner ring: three dashed arcs with a white square node at each start
   let inner = '';
   for (let k = 0; k < 3; k++) {
     const [dx, dy] = polar(c, c, k * 120, 43);
-    inner += '<path d="' + arc(c, c, 43, k * 120, k * 120 + 96) + '" fill="none" ' + stroke(HUD, 1.4, 0.8) + '/><circle cx="' + num(dx) + '" cy="' + num(dy) + '" r="2" fill="' + HUD + '"/>';
+    inner += '<path d="' + arc(c, c, 43, k * 120, k * 120 + 96) + '" fill="none" ' + stroke(FRAME.inner, 2) + ' stroke-dasharray="7 2"/>'
+      + '<rect x="' + num(dx - 2) + '" y="' + num(dy - 2) + '" width="4" height="4" fill="' + FIGURE + '" transform="rotate(' + k * 120 + ' ' + num(dx) + ' ' + num(dy) + ')"/>';
   }
-  // the core, with six short spokes
-  let spokes = '';
-  for (let a = 30; a < 360; a += 60) spokes += line(a, 32, 37, stroke(color, 1.2, 0.8));
+  // the core, a reactor's glow (the user's pick of the sketches): a white
+  // heart fading out through green, breathing slowly; ten angled cells round
+  // it; a thin white rim; and under the figure a strip of twelve cells lit
+  // by the week in the level's gradient
+  let cells = '';
+  for (let i = 0; i < 10; i++) {
+    const a0 = i * 36 + 4, a1 = i * 36 + 32;
+    const q = [polar(c, c, a0, 30), polar(c, c, a1, 30), polar(c, c, a1 - 3, 36), polar(c, c, a0 + 3, 36)];
+    cells += '<polygon points="' + q.map(([x, y]) => num(x) + ',' + num(y)).join(' ') + '" fill="' + FRAME.inner + '" fill-opacity="0.75"/>';
+  }
+  const on = Math.round(p / 100 * 12);
+  let strip = '';
+  for (let i = 0; i < 12; i++) strip += '<rect x="' + num(62 + i * 3) + '" y="101" width="2.2" height="3" fill="' + (i < on ? sweepAt(color, i / Math.max(1, on - 1)) : '#808080') + '" fill-opacity="' + (i < on ? 1 : 0.25) + '"/>';
+  const core = '<circle cx="' + c + '" cy="' + c + '" r="31" fill="url(#heart)"><animate attributeName="opacity" values="0.8;1;0.8" dur="4s" repeatCount="indefinite"/></circle>'
+    + cells + ring(29, stroke(FIGURE, 0.8, 0.8));
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '" viewBox="0 0 160 160">'
+    + '<defs>' + GLOW + '<radialGradient id="heart"><stop offset="0" stop-color="' + FIGURE + '" stop-opacity="0.55"/><stop offset="0.45" stop-color="' + FRAME.inner + '" stop-opacity="0.25"/><stop offset="1" stop-color="' + FRAME.inner + '" stop-opacity="0"/></radialGradient></defs>'
     + backdrop(160) + turn(brackets, 0, 360, 90)
     + ring(74, stroke(HUD, 0.8, 0.4)) + scale
     + ring(61.5, stroke(HUD, 0.8, 0.5)) + ring(50.5, stroke(HUD, 0.8, 0.5))
     + blocks + pointer
     + turn(inner, 360, 0, 40)
-    + '<circle cx="' + c + '" cy="' + c + '" r="32" fill="' + color + '" fill-opacity="0.08" ' + stroke(color, 1.2, 0.9) + '><animate attributeName="fill-opacity" values="0.05;0.16;0.05" dur="4s" repeatCount="indefinite"/></circle>'
-    + spokes + word
-    + '<text x="' + c + '" y="' + (c + 7) + '" text-anchor="middle" ' + FONT + ' font-size="24" font-weight="700" fill="' + color + '">' + Math.round(clamp(pct, 0, 999)) + '%</text>'
+    + core + strip + word
+    + '<text x="' + c + '" y="' + (c + 7) + '" text-anchor="middle" ' + FONT + ' font-size="24" font-weight="700" fill="' + FIGURE + '">' + Math.round(clamp(pct, 0, 999)) + '%</text>'
     + '<text x="' + c + '" y="' + (c + 18) + '" text-anchor="middle" ' + FONT + ' font-size="6.5" letter-spacing="1.5" fill="' + HUD + '">' + label + '</text>'
     + '</svg>';
 };

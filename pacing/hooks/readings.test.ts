@@ -1485,7 +1485,7 @@ test('one agent: a toast when it starts, the line leads with the count, the assi
   expect(status.at(-1)).toBe('Budget: 10% · usage: Weekly 10% Fable 40%')
 })
 
-test('with the pane on show: no toast that an agent started or still runs (the pane lists them); the toast that it is done stays', async ($, on) => {
+test('with the pane on show: no toast that an agent started, still runs or is done (the pane lists them)', async ($, on) => {
   engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
@@ -1497,8 +1497,7 @@ test('with the pane on show: no toast that an agent started or still runs (the p
   await clock.advance(6 * 60000)
   expect(seen.toasts).toEqual([])
   await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
-  expect(seen.toasts.length).toBe(1)
-  expect(seen.toasts[0]).toMatch(/^✅ reader is done with "a task"/)
+  expect(seen.toasts).toEqual([])
   // behind another tab, or waiting undrawn: the pane shows nothing, so the toasts are back
   panes = [{ id: PANE_ID, title: PANE_TITLE, isShown: false, isFocused: false, isPlaced: true }]
   await spawn($, 'pacing:reader')
