@@ -1230,3 +1230,12 @@ on show the toasts that an agent or a side session is done stay away, as
 those that one started or still runs already did: the pane lists them,
 and an agent's answer comes in the chat. With the pane hidden they come
 as before.
+
+## Fable's line like the week's while under it (0.9.36)
+
+The user's words, in turn: Fable's budget line need not be orange while
+under it, grey or white; then, make it like the weekly one. So `barSvg`
+draws a `loud` bar loudly only past its line: under it the bar is the
+week's own, a white tick with an arrow and no tag, and the words under it
+are plain like the week's. Past the line nothing changed: the thick red
+line, the `OVER +N` tag, the red cells and band, the red words.

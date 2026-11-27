@@ -47,19 +47,20 @@ const GLOW = '<filter id="glow" x="-30%" y="-80%" width="160%" height="260%"><fe
 // optional marker (a share of 100) is a bright tick with a small arrow head.
 // A thin frame with corner marks runs under it.
 export const BAR_CELLS = 36;
-// `loud` (a per-model meter's budget line, the user's word: very visible,
-// more so when over): a thick line in amber with a tag above it naming the
-// line; past it, the cells over the line turn red on a red band, and the
-// line and its tag turn red, the tag saying by how much (still: the user's
-// word, a pulse drew too much).
+// `loud` (a per-model meter's budget line): under the line it is drawn as
+// the week's, a white tick with an arrow; past it, a thick red line with a
+// tag saying by how much, and the cells over the line turn red on a red
+// band (still: the user's word, a pulse drew too much).
 export const LINE_TAG = 18;
 export const barSvg = (segments, marker = null, w = 480, h = 34, loud = false) => {
-  if (loud && marker !== null) return loudBarSvg(segments, marker, w, h + LINE_TAG + 10);
+  const total = clamp(segments.reduce((a, s) => a + Math.max(0, s.pct), 0), 0, 100);
+  // loud only past the line: under it, the week's own tick and arrow (the
+  // user's word: Fable's line like the weekly one)
+  if (loud && marker !== null && total > clamp(marker, 0, 100)) return loudBarSvg(segments, marker, w, h + LINE_TAG + 10);
   // with a marker, room above the cells for its arrow
   if (marker !== null) h += 5;
   const n = BAR_CELLS, gap = 3, slant = 5, top = marker !== null ? 13 : 8, ch = 14;
   const cw = (w - slant - gap * (n - 1)) / n;
-  const total = clamp(segments.reduce((a, s) => a + Math.max(0, s.pct), 0), 0, 100);
   // at least one cell for anything above nothing
   const lit = total > 0 ? Math.max(1, Math.round(total / 100 * n)) : 0;
   const colorAt = i => {
@@ -95,8 +96,8 @@ const loudBarSvg = (segments, marker, w, h) => {
   const total = clamp(segments.reduce((a, s) => a + Math.max(0, s.pct), 0), 0, 100);
   const lit = total > 0 ? Math.max(1, Math.round(total / 100 * n)) : 0;
   const m = clamp(marker, 0, 100);
-  const over = total > m;
-  const lineCol = over ? LEVEL_COLORS.stop : AMBER;
+  // only drawn past the line (barSvg): the line, its tag and arrow in red
+  const lineCol = LEVEL_COLORS.stop;
   const x = clamp(m / 100 * (w - slant) + slant / 2, 2, w - 2);
   const base = segments.length ? segments[0].color : HUD;
   const cell = (i, fill, extra) => {
@@ -112,10 +113,10 @@ const loudBarSvg = (segments, marker, w, h) => {
   }
   // the stretch over the line, as a band behind the cells
   const xEnd = lit / n * (w - slant) + slant / 2;
-  const band = over && xEnd > x
+  const band = xEnd > x
     ? '<rect x="' + num(x) + '" y="' + (top - 3) + '" width="' + num(xEnd - x) + '" height="' + (ch + 6) + '" fill="' + LEVEL_COLORS.stop + '" fill-opacity="0.22"/>' : '';
-  const word = over ? 'OVER +' + Math.round(total - m) : 'BUDGET ' + Math.round(m) + '%';
-  const tw = word.length * 8 + 12, lw = over ? 6 : 5;
+  const word = 'OVER +' + Math.round(total - m);
+  const tw = word.length * 8 + 12, lw = 6;
   const tx = clamp(x - tw / 2, 0, w - tw);
   const tag = '<g>'
     + '<rect x="' + num(tx) + '" y="0" width="' + num(tw) + '" height="' + LINE_TAG + '" rx="2" fill="' + lineCol + '"/>'
@@ -521,9 +522,8 @@ export const paneView = (t, m, o = {}) => {
       between(Text({ weight: 'medium', children: x.label }), Text({ tabular: true, mono: true, weight: 'semibold', color: sweepAt(meterColor(x), x.pct / 100), children: Math.round(x.pct) + '%' })),
       bar([{ pct: x.pct, color: meterColor(x) }], x.line ?? null, x.label + ' ' + Math.round(x.pct) + '% used'
         + (x.loud && x.line != null ? ', budget line ' + Math.round(x.line) + '%' : ''), !!x.loud),
-      // a loud line's words: in its colour, bold when over
-      x.note ? (x.loud && x.over ? Text({ size: 'caption', weight: 'semibold', color: 'error', children: '▲ ' + x.note })
-        : x.loud ? Text({ size: 'caption', color: 'warning', children: x.note }) : cap(x.note)) : null,
+      // a loud line's words: red and bold when over, else plain like the week's
+      x.note ? (x.loud && x.over ? Text({ size: 'caption', weight: 'semibold', color: 'error', children: '▲ ' + x.note }) : cap(x.note)) : null,
     ]))], { rowGap: 1 }));
   }
 

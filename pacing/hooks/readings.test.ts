@@ -3723,8 +3723,9 @@ test('the pane says the budget as time left today, never in tokens or dollars; p
   expect(held.meters[1]).toEqual({ label: 'Fable 5.2', pct: 83, line: 73.3, loud: true, over: true, note: '10 points over its budget line 73%: held, kept for hard tasks' })
   const under = paneModel({ j: { ...base, level: 'ahead', all: 55, line: 73.3, premium: 60, premiumLabel: 'Fable 5.2' } })
   expect(under.meters[1]).toEqual({ label: 'Fable 5.2', pct: 60, line: 73.3, loud: true, over: false, note: 'budget line 73%' })
-  // drawn: a tag above the line, BUDGET under it, OVER past it
-  expect(barSvg([{ pct: 60, color: '#22d3ee' }], 73.3, 480, 34, true)).toContain('>BUDGET 73%<')
+  // drawn: the week's tick under the line, a tag saying OVER past it
+  // under the line: drawn as the weekly bar is, no tag (the user's word)
+  expect(barSvg([{ pct: 60, color: '#22d3ee' }], 73.3, 480, 34, true)).toBe(barSvg([{ pct: 60, color: '#22d3ee' }], 73.3, 480, 34))
   const loud = barSvg([{ pct: 83, color: '#fbbf24' }], 73.3, 480, 34, true)
   expect(loud).toContain('>OVER +10<')
   // still, not pulsing (the user's word)
