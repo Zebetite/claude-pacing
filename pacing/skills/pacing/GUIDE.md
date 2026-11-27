@@ -2,17 +2,16 @@
 
 `/pacing version` shows the installed version.
 
-<!-- help -->Use better models and still save weekly usage at the same time by
-delegating easier work to subagents with cheaper models.<!-- /help --> This skill
-spends your weekly plan allowance on purpose. It uses tiers of models,
-the top tier is used for the most difficult work; the lower tiers do
-easier work through subagents. <!-- help -->A day-by-day budget and the logged trend
-decide how far down the tiers work goes, so the week doesn't run out
-of tokens as easily before the reset.<!-- /help --> That means it uses better models automatically when
-you have more usage left. You can custom set how many tiers you want and
-what model and effort should be on every tier.
+<!-- help -->Claude plans have a weekly usage limit. Pacing lets you use better
+models and still make the week last: your best model does the hard work,
+and easier work goes to subagents on cheaper models. A day-by-day budget
+decides how much moves down.<!-- /help --> While you are under it, nearly everything
+stays on the best model; the further over it you go, the more goes to the
+cheaper ones, so the week doesn't run out before the reset. You
+choose how many tiers there are, and the model and effort of each.
 
-The default ladder:
+The default ladder (a tier is one model with its effort; tier 1 runs the
+session, the lower ones run as subagents):
 
 | tier | model | takes |
 |---|---|---|
@@ -20,9 +19,10 @@ The default ladder:
 | 2 | Opus 5.5 medium | subagents: routine work |
 | 3 | Sonnet 5.5 medium | subagents: bulky output (logs, test runs, many files) |
 
-While Fable's meter is full, **Opus 5.5 high** takes tier 1 in its
-place, so judgment work keeps a strong model and routine work stays on
-the cheaper Opus 5.5 medium (`/pacing fallback` changes or removes that).
+While Fable's own meter is used up (at 100 %), **Opus 5.5 high** takes
+tier 1 in its place, so judgment work keeps a strong model and routine
+work stays on the cheaper Opus 5.5 medium (`/pacing fallback` changes or
+removes that).
 
 <!-- help -->
 ## ⚠️ Setup, two steps
@@ -35,9 +35,32 @@ the cheaper Opus 5.5 medium (`/pacing fallback` changes or removes that).
 <!-- /help -->
 
 That is all. <!-- help -->You can see your weekly budget in the status line:
-`Budget` is how long what the days so far may still use of your allowance
-lasts at your pace. Once it reads `over`, work moves to lower tiers. `/pacing-status` shows how much
-each model is used.<!-- /help -->
+`Budget` is how long the part of your allowance that today's budget still
+leaves you will last at your pace. Once it reads `over`, work moves to
+lower tiers. `/pacing-status` shows how much each model is used.<!-- /help -->
+
+**What you will see.** A status line under the prompt after every turn;
+in the desktop app, a pane beside the chat with the week as a dial, the
+meters and the agents at work; a toast when the budget level changes; now
+and then a row above the prompt that offers to compact a large session or
+to switch model (nothing is compacted or switched without your click);
+and one line from Claude when it hands work to a subagent. After a
+reading you ask for, the recommended model and effort for *new* sessions
+are written into `~/.claude/settings.json` (on Windows also into the
+desktop app's default for new local sessions); `/pacing next off` turns
+that off.
+
+**A few words first** (the whole list is under "Words used here"):
+
+| word | means |
+|---|---|
+| budget line | how much of the week may be used by now; it steps up at midnight |
+| ahead, on pace | the weekly meter is under the budget line: tier 1 does nearly everything |
+| over | up to 5 points past the line: some work moves down a tier |
+| throttle | more than 5 points past it: nearly all work goes to cheaper models |
+| stop | the weekly meter is at 95 % or more: wrap up |
+| Fable held | Fable's own meter is well past its budget line: Opus 5.5 high takes tier 1 and Fable is kept for the hardest tasks |
+| Fable out | Fable's own meter is at 100 %: used up until the weekly reset |
 
 ## What it watches
 
@@ -622,7 +645,7 @@ so, as in `Pacing: no reading to show (the last reading is 45 min old).
 | `/pacing notify on`, `/pacing notify off` | turns the toasts about running subagents on (the default) or off: when one starts, when one ends, and every 5 minutes while any runs; the status line and the row above the prompt still show them |
 | `/pacing compact on`, `/pacing compact off` | turns the offers to compact a large session on (the default) or off: a row above the prompt with Compact now from 300 000 tokens, plainer from 500 000, and a warning before the cache of an idle session lapses |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model meter belongs to (Fable by default), or says the plan has none |
-| `/pacing fallback opus high`, `/pacing fallback none` | the tier that takes the top place while that meter is full (Opus 5.5 high by default); none lets the remaining tiers move up |
+| `/pacing fallback opus high`, `/pacing fallback none` | the tier that takes the top place while that meter is used up (Opus 5.5 high by default); none lets the remaining tiers move up |
 | `/pacing reader haiku medium`, `/pacing reader ladder` | the model the reader agent reads on (Haiku 5.5 medium by default), or the lowest tier |
 | `/pacing verifier haiku medium`, `/pacing verifier ladder` | the model the verifier runs plain test runs on (Haiku 5.5 medium by default), or the lowest tier |
 | `/pacing notes` | where the role agents' notes for this project are, and how long each is |

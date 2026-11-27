@@ -1,21 +1,52 @@
 # claude-pacing
 
-A Claude Code plugin marketplace with one plugin, **pacing**.
+**Pacing** is a plugin for Claude Code. Claude plans have a weekly usage
+limit. Pacing lets you use better models and still make the week last:
+your best model does the hard work, and easier work goes to subagents on
+cheaper models. A day-by-day budget decides how much moves down. While you
+are under it, nearly everything stays on the best model; the further over
+it you go, the more goes to the cheaper ones, so the week doesn't run out
+before the reset. You choose how many tiers there are, and the model and
+effort of each.
 
-The plugin makes use of better AI models and saves tokens at the same time by
-delegating easier tasks to subagents with cheaper models. This skill
-spends your weekly plan allowance on purpose. It uses tiers of models,
-the top tier is used for the most difficult work; the lower tiers do
-easier work through subagents. A day-by-day budget and the logged trend
-decide how far down the tiers work goes, so the week doesn't run out
-of tokens as easily before the reset. That means it uses better models automatically when
-you have more usage left. You can custom set how many tiers you want and
-set exactly what model and effort each tier should use.
+<p>
+<img src="docs/images/pane-agents.png" width="260" alt="The pacing pane with sample figures: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, three agents at work, the context at 18% and the models this session">
+<img src="docs/images/pane-within.png" width="260" alt="The pacing pane with sample figures: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, one agent at work">
+<img src="docs/images/pane-week-over.png" width="260" alt="The pacing pane with the week over its budget line: the week at 79% against a line of 73%, 1h 40m over today's budget, Fable 5.2 at 68% under its line, two agents at work">
+</p>
 
-4 role agents (reader, verifier, implementer and researcher) each
-stay with the session and keep notes per project, and a long
-session hands its work over to a new one. A status line shows what is left
-of the budget and the usage.
+The pacing pane, with sample figures.
+
+## Who it is for
+
+Anyone who uses Claude Code on a Claude plan with weekly usage limits and
+runs into them, or wants a stronger model without running out. It does
+most in the Claude desktop app, where it reads every usage meter by
+itself and shows the pane. In a plain terminal session it has the weekly
+meter and the 5-hour window, and carries the per-model figure over from
+the last full reading.
+
+It needs Node.js 18 or later on the PATH of the shell Claude Code uses.
+
+## What you will see after installing
+
+- **A status line** under the prompt after every turn, such as
+  `Budget: 2h 10m left · usage: Weekly 36% Fable 40%`: how long what
+  today's budget still allows will last at your pace, then the weekly
+  meters.
+- **A pane beside the chat** in the desktop app (the pictures above): the
+  week as a dial, the meters, the agents at work, the session's context.
+- **Short messages.** A toast when the budget level changes, and now and
+  then a row above the prompt that offers to compact a large session or
+  to switch model. Nothing is compacted or switched without your click.
+- **Work handed to subagents.** Claude says in one line which agent it
+  started, on which model, and for what, and gives you the result in the
+  same session.
+- **Two settings written for you.** After a reading you ask for, the
+  recommended model and effort for *new* sessions go into
+  `~/.claude/settings.json` (on Windows also into the desktop app's
+  default for new local sessions). `/pacing next off` turns that off.
+  Everything else the plugin keeps is in `~/.claude/pacing`.
 
 The plugin lives in [`pacing/`](pacing/); its [README](pacing/README.md)
 has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
@@ -24,7 +55,7 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 
 - **Tiers of models.** By default Fable 5.2 high runs the session, and
   Opus 5.5 medium and Sonnet 5.5 medium take work as subagents. While
-  Fable's meter is full, Opus 5.5 high takes the top place.
+  Fable's own meter is used up, Opus 5.5 high takes the top place.
   The number of tiers and each tier's model and effort are yours to set.
 - **A budget line for every day.** The weekly meter is compared with a
   budget line that steps up at midnight. Ahead of it, the top model does nearly
@@ -32,43 +63,28 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   can raise the level before the meter gets there. Fable's meter is
   paced on the same budget line while Fable runs the session, so a long session
   cannot drain it unseen.
-- **A status line after every turn** (new in 0.8):
+- **A status line after every turn:**
 
   ```
   Budget: 2h 10m left · usage: Weekly 36% Fable 40%
   ```
 
-  What is left under today's budget line, as the time it lasts at the
-  last hour's pace (`Budget: 40m over` past the line; until a pace is
-  known, `Budget tokens: 850K`, in full-price tokens of tier 1's model),
-  the same in every session (learned from what the spending cost, so cache reads
-  count at their lower price; until then estimated from this week's
-  transcripts and marked `~`, as in `Budget: ~2h 10m left`), then the usage of the weekly meters; while subagents run, how many first (`⏳ 2 Subagents
-  running`). The budget and the usage always show whole; where room is
-  short (70 characters in the desktop app, 75 in a terminal) only the
-  agents' part shrinks (`⏳ 2 Subagents · Budget: 2h 10m left · usage:
-  Weekly 36% Fable 40%`). `/pacing-status` shows the whole status line in words, with
-  how this session's own use splits over the ladder's models
-  (subagents included), and what fills the session's context: tool
-  results by tool, the largest of them, and the fixed parts.
+  What is left under today's budget line, as the time it lasts at your
+  pace (`Budget: 40m over` past the line), then the weekly meters. While
+  subagents run, their count comes first (`⏳ 2 Subagents running`).
+  `/pacing-status` gives it in words, with how this session's use splits
+  over the models and what fills the session's context.
 - **A pacing pane**, open beside the chat from the session's start and
   drawn as a ship's console: a reactor dial for the week, the time left
   today to stay on budget, the meters, the agents at work as small
-  robots, the context and the models (`/pacing-pane` reopens it).
-  Fable's own meter marks its budget line: a `BUDGET` tag under it, and
-  past it a red `OVER` tag and the stretch over the line in red.
-  It comes from readings the plugin takes by itself after a turn, on a
-  Claude Code version with hooks modules; older versions run the rest of
-  the plugin as before.
-
-  <p>
-  <img src="docs/images/pane-agents.png" width="260" alt="The pacing pane with sample figures: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, three agents at work, the context at 18% and the models this session">
-  <img src="docs/images/pane-within.png" width="260" alt="The pacing pane with sample figures: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, one agent at work">
-  <img src="docs/images/pane-week-over.png" width="260" alt="The pacing pane with the week over its budget line: the week at 79% against a line of 73%, 1h 40m over today's budget, Fable 5.2 at 68% under its line, two agents at work">
-  </p>
-
-  Sample figures, drawn by the pane's own code (`node scripts/pane-images.mjs`
-  makes them again); the desktop app's type and spacing differ a little.
+  robots, the context and the models (`/pacing-pane` reopens it). Past
+  its budget line, Fable's own meter gets a red `OVER` tag and the
+  stretch over the line in red. The pane comes from readings the plugin
+  takes by itself after a turn, on a Claude Code version with hooks
+  modules; older versions run the rest of the plugin as before. The
+  pictures at the top are drawn by the pane's own code with sample
+  figures (`node scripts/pane-images.mjs` makes them again); the desktop
+  app's type and spacing differ a little.
 - **Role agents the session keeps.** A reader (Haiku 5.5 by default) for
   logs, searches and unfamiliar code, a verifier for tests and checks, an
   implementer for specified edits, and a researcher for documentation.
@@ -84,8 +100,8 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   the recommended model with Switch. In a session of 200 000 tokens or
   more it says what storing the session again on the new model costs,
   and offers **Compact, then switch**.
-- **Large results flagged.** A tool result of 10 000 tokens or more in
-  the session gets a toast with its size: every later turn sends it
+- **Large results counted.** `/pacing-status` says how many tool results
+  of 10 000 tokens or more the session holds: every later turn sends them
   again, and the reader agent reads such things for less.
 - **Room left over.** When the trend leaves 10 points or more of the week
   unused at the reset, one toast and `/pacing-status` say so: the
@@ -95,7 +111,8 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 
 ## Install
 
-In a Claude Code session:
+This repository is a Claude Code plugin marketplace with one plugin. In a
+Claude Code session:
 
 ```
 /plugin marketplace add Zebetite/claude-pacing
@@ -113,9 +130,8 @@ pacing@claude-pacing`. A running session then shows a row above the prompt
 that says to type `/reload-plugins` or open a new session, with **Not now**
 (`/pacing reload off` puts a one-line toast in its place).
 
-Requirements: Node.js 18 or later on the PATH of the shell Claude Code
-uses, and a Claude plan with usage limits (the plugin reads the usage
-card's weekly meters). With a plan that has no per-model meter, run
+The plugin reads the weekly meters on your plan's usage card. If the card
+has no meter for one model (no "Weekly · Fable" or similar line), run
 `/pacing:pacing premium none` once.
 
 ## Tests

@@ -8,7 +8,7 @@ Read by the session on `/pacing setup`; SKILL.md points here.
    - the tiers (2 to 6), and each tier's model and effort;
    - optionally: the last-day weight, the next-session switch, the model
      of the plan's per-model meter (or none), the fallback tier that takes
-     the top place while that meter is full, and the models of the reader
+     the top place while that meter is used up, and the models of the reader
      agent and of the verifier's plain runs (or the lowest tier).
 
    Models: fable, opus, sonnet, haiku. Efforts: low, medium, high, xhigh,

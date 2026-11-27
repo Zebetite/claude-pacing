@@ -178,7 +178,8 @@ async function release(args) {
     return;
   }
 
-  git('add', '-A', '--', 'pacing', 'docs', 'tests', 'scripts', 'README.md', 'package.json');
+  // (.claude-plugin: the marketplace entry, whose description is the plugin's)
+  git('add', '-A', '--', 'pacing', 'docs', 'tests', 'scripts', '.claude-plugin', 'README.md', 'package.json');
   say(git('diff', '--cached', '--stat'));
   git('commit', '-q', '-F', messageFile);
   step('committed ' + git('log', '--oneline', '-1'));

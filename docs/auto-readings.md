@@ -1324,3 +1324,21 @@ Not done: the model price table (its cache-read prices are 2.5 %, 5 % and
 `CLAUDE_CONFIG_DIR` and the app's preset per account, splitting
 `budget.mjs`, the docs' first screen. Not tried live: a /clear, a failing
 reading, and the notification case.
+
+## The docs' first screen (0.9.39)
+
+From the review: a newcomer could not tell in a minute what the plugin is
+for, whom it is for, or what happens after install; the opening stood in
+four places in odd English ("custom set"), and the write to
+`~/.claude/settings.json` sat in a table further down. Now one opening
+paragraph stands on the GitHub front page, in the plugin's README and at
+the top of the guide (the short help takes its first three sentences);
+under it, who it is for, that it needs Node.js 18, and what shows after
+installing, with the two settings written and `/pacing next off`. The
+pane's pictures lead the front page, the guide has a short word table
+near its top, and the plugin's description is new (the same in the
+marketplace entry, which `release.mjs` now commits: `.claude-plugin` was
+not in its `git add`). "Meter is full" reads "used up": a newcomer took
+"full" for room left. Still as it was: the rest of the guide's order, the
+rules said twice across the skill and agent files, the other front-page
+bullets.

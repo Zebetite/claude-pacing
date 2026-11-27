@@ -1,18 +1,39 @@
 # pacing — a Claude Code plugin that paces the weekly allowance
 
-Use better models and still save weekly usage at the same time by
-delegating easier work to subagents with cheaper models. This skill
-spends your weekly plan allowance on purpose. It uses tiers of models,
-the top tier is used for the most difficult work; the lower tiers do
-easier work through subagents. A day-by-day budget and the logged trend
-decide how far down the tiers work goes, so the week doesn't run out
-of tokens as easily before the reset. That means it uses better models automatically when
-you have more usage left. You can custom set how many tiers you want and
-what model and effort should be on every tier.
+Claude plans have a weekly usage limit. Pacing lets you use better models
+and still make the week last: your best model does the hard work, and
+easier work goes to subagents on cheaper models. A day-by-day budget
+decides how much moves down. While you are under it, nearly everything
+stays on the best model; the further over it you go, the more goes to the
+cheaper ones, so the week doesn't run out before the reset. You choose how
+many tiers there are, and the model and effort of each.
+
+**Who it is for:** anyone who uses Claude Code on a Claude plan with
+weekly usage limits. It does most in the Claude desktop app, where it
+reads every usage meter by itself and shows a pane beside the chat; a
+plain terminal session has the weekly meter and the 5-hour window. It
+needs Node.js 18 or later.
+
+**What you will see after installing:**
+
+- a status line under the prompt after every turn, such as
+  `Budget: 2h 10m left · usage: Weekly 36% Fable 40%`: how long what
+  today's budget still allows will last at your pace, then the weekly
+  meters;
+- the pacing pane beside the chat, in the desktop app;
+- a toast when the budget level changes, and now and then a row above the
+  prompt that offers to compact a large session or to switch model
+  (nothing is compacted or switched without your click);
+- one line from Claude when it hands work to a subagent, saying which
+  agent, which model and what for, and the result in the same session;
+- two settings written for you: after a reading you ask for, the
+  recommended model and effort for *new* sessions go into
+  `~/.claude/settings.json` (on Windows also into the desktop app's
+  default for new local sessions). `/pacing next off` turns that off.
 
 The default tiers are Fable 5.2 high for the session, Opus 5.5 medium and
-Sonnet 5.5 medium for subagents; while Fable's meter is full, Opus 5.5
-high takes the top place. The budget line is drawn against the weekly
+Sonnet 5.5 medium for subagents; while Fable's own meter is used up, Opus
+5.5 high takes the top place. The budget line is drawn against the weekly
 meter (**Weekly · all models**), and against Fable's meter while Fable
 runs the session. `skills/pacing/GUIDE.md` explains the
 rules; `skills/pacing/SKILL.md` (reports and settings) and

@@ -23,7 +23,7 @@ test('every part of it is the guide\'s own words, and the parts it needs are mar
   assert.ok(parts.length >= 4, parts.length + ' marked parts');
   for (const p of parts) assert.ok(short.includes(p), p.slice(0, 60));
   // what it must hold: what the plugin does, the two setup steps, the status line
-  assert.match(short, /delegating easier work to subagents/);
+  assert.match(short, /easier work goes to subagents on cheaper models/);
   assert.match(short, /\*\*1\.\*\* Type `\/pacing setup`/);
   assert.match(short, /\*\*2\.\*\* In the model menu/);
   assert.match(short, /^ {4}Budget: 2h 10m left · usage: Weekly 36% Fable 40%$/m);
