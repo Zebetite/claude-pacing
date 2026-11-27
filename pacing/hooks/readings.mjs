@@ -476,11 +476,25 @@ export const autoCompactOf = c => {
 // /autocompact could not change it: that counts as had. Claude Code keeps the
 // value set but measures against no more than the model's context window
 // (`window`, where known): a 200k model set to 750 000 shows 200 000.
+// The figure is where the session compacts: Claude Code compacts a buffer
+// short of its window (about 32k: a 400k window compacts near 368k), so
+// pacing sets the window that much higher (the user's word: the pane's
+// numbers stay the point it compacts at). The buffer is the breakdown's own
+// (its 'Autocompact buffer' row, kind 'buffer'), else AUTO_COMPACT_BUFFER.
+export const AUTO_COMPACT_BUFFER = 33000;
+export const autoCompactBuffer = bd => {
+  const row = bd && Array.isArray(bd.categories) && bd.categories.find(c => c && c.kind === 'buffer');
+  const b = row ? row.tokens : 0;
+  return Number.isFinite(b) && b > 0 && b < 200000 ? Math.round(b) : AUTO_COMPACT_BUFFER;
+};
+// the window /autocompact gets for `want`, no more than it takes
+export const autoCompactWindow = (want, buffer = AUTO_COMPACT_BUFFER) => Math.min(want + buffer, AUTO_COMPACT_MAX);
 export const autoCompactHas = (bd, want, window = null) => {
   const source = bd && bd.autocompactSource;
   if (source === 'env') return true;
   if (want === 'auto') return source !== 'settings';
-  return source === 'settings' && bd.rawMaxTokens === (window > 0 ? Math.min(want, window) : want);
+  const set = autoCompactWindow(want, autoCompactBuffer(bd));
+  return source === 'settings' && bd.rawMaxTokens === (window > 0 ? Math.min(set, window) : set);
 };
 // The last token count the setting held ($.store, across sessions), so the
 // pane's toggle back from Claude Code's own auto-compact returns to it;
@@ -495,27 +509,30 @@ async function autoCompactKeep($, v) {
   try { await $.store.set(AUTO_COMPACT_LAST, v); } catch { /* the default then */ }
 }
 // the pane's words for the setting
-export const autoCompactText = v => (v === 'auto' ? 'Auto-compact: Claude Code\'s default' : 'Auto-compact at ' + kText(v));
-export const autoCompactFailedText = (want, why) => {
+export const autoCompactText = v => (v === 'auto' ? 'Auto-compact: Claude Code\'s default' : 'Compact at ' + kText(v));
+// `arg`: what /autocompact was given (the window, a buffer above `want`)
+export const autoCompactFailedText = (want, why, arg = want) => {
   const w = String(why || '').replace(/\s+/g, ' ').trim();
   const short = w.length > 80 ? w.slice(0, 79) + '…' : w;
   return ICON.failed + ' Claude Code\'s auto-compact was not set to ' + (want === 'auto' ? 'its default' : kText(want))
-    + (short ? ': ' + short.replace(/[.\s]+$/, '') : '') + '. /autocompact ' + want + ' sets it.';
+    + (short ? ': ' + short.replace(/[.\s]+$/, '') : '') + '. /autocompact ' + arg + ' sets it.';
 };
 // config.mjs stores a press's value (it owns config.json)
 export const autoCompactArgv = (root, v) => ['node', root + '/skills/pacing/scripts/config.mjs', 'autocompact', String(v)];
 // /autocompact with `want`; whether it took. A failure is told once per
 // load where `quiet` (the run at a start or a change), at every press else.
-async function autoCompactRun($, ac, want, quiet) {
-  let why = '';
+async function autoCompactRun($, ac, want, quiet, bd = null) {
+  let why = '', arg = String(want);
   try {
-    const r = await $.command.run({ command: 'autocompact', args: String(want) });
+    if (want !== 'auto' && !bd) bd = await breakdownNow($);
+    if (want !== 'auto') arg = String(autoCompactWindow(want, autoCompactBuffer(bd)));
+    const r = await $.command.run({ command: 'autocompact', args: arg });
     if (!commandFailed(r)) return true;
     why = (r && r.text) || '';
   } catch (err) { why = (err && err.message) || ''; }
   if (quiet && ac.told) return false;
   if (quiet) ac.told = true;
-  try { $.ui.toast(autoCompactFailedText(want, why), { timeoutMs: TOAST_LONG }); } catch { /* no toast */ }
+  try { $.ui.toast(autoCompactFailedText(want, why, arg), { timeoutMs: TOAST_LONG }); } catch { /* no toast */ }
   return false;
 }
 // The check. `ac` is what it reads and writes of the copy's memory (see
@@ -540,7 +557,7 @@ async function autoCompactCheck($, ac, model) {
     ac.due = false;
     ac.want = want;
     if (model || !ac.model) ac.model = model || (typeof bd.model === 'string' ? bd.model : null);
-    if (!autoCompactHas(bd, want, u.context.window)) await autoCompactRun($, ac, want, true);
+    if (!autoCompactHas(bd, want, u.context.window)) await autoCompactRun($, ac, want, true, bd);
   } catch { /* the next start or change */ } finally { ac.busy = false; }
 }
 // A press on the pane's −, + or its toggle for Claude Code's own: config.json
@@ -596,12 +613,12 @@ export const closedByPerson = e => !!e && e.id === PANE_ID && !!e.origin && e.or
 // as its words, the values a press on − and + gives (a step of
 // AUTO_COMPACT_STEP on the step's grid, none past the bounds) and `own`,
 // whether Claude Code's own auto-compact is on ('auto'): then no − and +,
-// a short `note` instead, and `back`, the token count the toggle returns
+// a short `note` instead, and `back`, the token count the switch returns
 // to (`autoCompactLast`, the last one kept, else the default). For 'off'
 // (pacing leaves /autocompact alone) one dim line, `off` and its `text`,
 // with no buttons; nothing when none is given.
 export const PANE_COMPACT_AT = 300000;
-// the pane's note under the toggle while Claude Code's own auto-compact is on
+// the pane's note under the switch while Claude Code's own auto-compact is on
 export const AUTO_COMPACT_OWN_NOTE = 'It compacts near the end of the window.';
 // the pane's one line while pacing leaves /autocompact alone ('off')
 export const AUTO_COMPACT_OFF_TEXT = 'Auto-compact: pacing leaves it alone (/pacing autocompact 750k or auto turns it back on)';
@@ -626,13 +643,13 @@ export const modelArrow = (m, session, prices) => {
 };
 // What an agent is doing or has just produced, in a small box under its row
 // (the user's word: show a subagent's output where the pane has room): its
-// last OUT_LINES lines, newest last. The engine hands the module, for a
-// subagent's loop, each step's visible text (turn.step's response `answer`)
-// and each tool call with its result (tool.call, `agentId`), and at its end
-// the report it handed back (turn.complete's `answer`); nothing is read
-// from a transcript. A line is cut at OUT_CHARS (the pane cuts it at its
-// width too). OUT_SHOWN agents show the box at once: the ones with the
-// newest output.
+// main tasks alone (meaningOf, below; OUT_MAIN lines). The engine hands the
+// module, for a subagent's loop, each tool call with its result (tool.call,
+// `agentId`), and at its end the report it handed back (turn.complete's
+// `answer`); nothing is read from a transcript. outLine, actionLine and
+// noteOut (each call as a line, the last OUT_LINES) are no longer drawn.
+// The pane cuts a line at its width too. OUT_SHOWN agents show the box at
+// once: the ones with the newest output.
 export const OUT_LINES = 3;
 export const OUT_CHARS = 90;
 export const OUT_SHOWN = 2;
@@ -650,13 +667,25 @@ export const finishedText = (a, state, ms) => {
   const task = taskOf(a);
   return nameOf(a) + (task ? ': ' + task : '') + ' ' + (TASK_MARKS[state] || TASK_MARKS.done) + ' · ' + dur(ms);
 };
-// what a call read or ran, in a few words: a file's name, a command's first line
+// a command without what leads up to it: each leading "cd <dir> &&" or
+// "cd <dir>;" and "VAR=...;" left out ("cd /x/app; F=a.txt; grep b $F" is "grep b $F")
+const LEAD = /^\s*(cd\s+("[^"]*"|'[^']*'|\S+)\s*(&&|;)|[A-Za-z_]\w*=("[^"]*"|'[^']*'|[^\s;]*)\s*;)\s*/;
+export const commandWhat = command => {
+  let s = String(command || '');
+  for (let left = s.replace(LEAD, ''); left !== s; left = s.replace(LEAD, '')) s = left;
+  return s;
+};
+// what a call read or ran, in a few words: a file's name; for a shell
+// command the short description its call carries ("Run all checks"), else
+// its first line (commandWhat)
 const callWhat = e => {
   const file = e.file_path || e.notebook_path || e.path;
-  return file ? String(file).split(/[\\/]/).pop() : outLine(e.command || e.pattern || e.url || e.query || e.description || '');
+  if (file) return String(file).split(/[\\/]/).pop();
+  if ((e.tool === 'Bash' || e.tool === 'PowerShell') && e.command) return outLine(e.description || commandWhat(e.command));
+  return outLine(e.command || e.pattern || e.url || e.query || e.description || '');
 };
-// One tool call and how it came out: "Bash npm test → 448 pass" (a
-// command's last line of output), "Read pane.mjs → 737 lines", "Edit
+// One tool call and how it came out: "Bash Run the tests → 448 pass" (a
+// command's description, its last line of output), "Read pane.mjs → 737 lines", "Edit
 // pane.mjs → saved", "Grep stepBarOf → 3 lines"; refused or failed says so.
 // '' for the call that says a step (config.mjs part): the bar shows it.
 // a command's outcome: of its last lines, the last that says how it went
@@ -681,6 +710,94 @@ export const noteOut = (out, line) => {
   const list = Array.isArray(out) ? out : [];
   if (!line || list[list.length - 1] === line) return list;
   return [...list, line].slice(-OUT_LINES);
+};
+// The box says only the agent's main tasks (the user's words: the main
+// point, not all detailed calls; not much text under agents, just main
+// tasks): the files it is changing ("Changing readings.mjs and pane.mjs")
+// and its latest test, check, build or lint run with how it came out
+// ("Tests: 455 pass", "Checks failed: 2 fail"); once it ended, its report's
+// first clause ("Done: the band row waits for the turn"). No narration, no
+// reads, searches, listings or other commands. A line each, the newest
+// first, at most OUT_MAIN, each cut at OUT_MAIN_CHARS; none yet, no box.
+export const OUT_MAIN = 2;
+export const OUT_MAIN_CHARS = 60;
+// the files an agent changed, as one line, the newest two by name: "Changing
+// pane.mjs", "Changing a.mjs and b.mjs", "Changing a.mjs, b.mjs and 3 more"; '' for none
+export const changedLine = (files, verb = 'Changing') => {
+  if (!files || !files.length) return '';
+  const last = files.slice(-2), more = files.length - last.length;
+  return cut(verb + ' ' + (more ? last.join(', ') + ' and ' + more + ' more' : last.join(' and ')), OUT_MAIN_CHARS);
+};
+// a finished run's line: "Done: " and its report's first clause (a leading
+// "Done." left out); "Failed: ", "Stopped: " likewise; '' for no report
+const ENDED = { done: 'Done', failed: 'Failed', stopped: 'Stopped' };
+export const doneLine = (state, answer) => {
+  const first = (reportLines(answer)[0] || '').replace(/…$/, '').replace(/^done\b[.,:;!\s—-]*/i, '');
+  const clause = first.split(/[.;:!?](?=\s|$)|\s[—–-]\s/)[0].trim();
+  return clause ? cut((ENDED[state] || ENDED.done) + ': ' + clause, OUT_MAIN_CHARS) : '';
+};
+// the file a call changed (Edit, Write, NotebookEdit that was not refused or failed); null for any other
+export const changedFile = (e, r) => {
+  if (!e || !['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(e.tool) || (r && (r.deny || r.isError))) return null;
+  const file = e.file_path || e.notebook_path || e.path;
+  return file ? String(file).split(/[\\/]/).pop() : null;
+};
+// a shell command that only reads or lists is no run, whatever its words say
+const PLAIN_COMMAND = /^(grep|rg|cat|head|tail|less|ls|dir|find|sed|awk|wc|echo|pwd|which|type|git\s+(diff|status|log|show|ls-files|blame)|Get-Content|Get-ChildItem|Select-String)\b/i;
+const RUN_KINDS = [['Tests', /\btests?\b|\bspecs?\b|\b(vitest|jest|pytest|mocha)\b/i], ['Checks', /\bchecks?\b|\bvalidat\w*|\btsc\b|\btypecheck\b/i],
+  ['Build', /\bbuild\b/i], ['Lint', /\b(es)?lint\b/i]];
+// what kind of run a shell call is (Tests, Checks, Build, Lint), by its description or its command; null for none
+export const runKind = e => {
+  if (!e || (e.tool !== 'Bash' && e.tool !== 'PowerShell') || !e.command) return null;
+  const what = commandWhat(String(e.command)).trim();
+  if (PLAIN_COMMAND.test(what) || PART_CALL.test(String(e.command))) return null;
+  // (its description first: "Run all checks" over the "test" in its command)
+  const kind = RUN_KINDS.find(([, re]) => re.test(e.description || '')) || RUN_KINDS.find(([, re]) => re.test(what));
+  return kind ? kind[0] : null;
+};
+// the largest count a run's output gives before or after a word ("455 pass", "# pass 448")
+const countOf = (text, word) => {
+  let n = null;
+  for (const m of text.matchAll(new RegExp('(\\d+)\\s+' + word + '|\\b' + word + '\\s+(\\d+)', 'gi'))) n = Math.max(n ?? 0, +(m[1] ?? m[2]));
+  return n;
+};
+// a run and how it came out: "Tests: 455 pass", "Build: ok", "Checks failed:
+// 2 fail" (or the line that says how it went); '' for a call that is no run
+export const runLine = (e, r) => {
+  const kind = runKind(e);
+  if (!kind || !r || r.deny) return '';
+  const text = textsOf(r).join('\n');
+  const pass = countOf(text, 'pass(?:ed|es|ing)?'), fail = countOf(text, 'fail(?:ed|ing|ures?|s)?');
+  if (r.isError || fail > 0) {
+    const detail = fail ? fail + ' fail' : outLine(resultLine(text.split('\n').filter(l => l.trim())));
+    return cut(kind + ' failed' + (detail ? ': ' + detail : ''), OUT_CHARS);
+  }
+  return cut(kind + ': ' + (pass !== null ? pass + ' pass' : 'ok'), OUT_CHARS);
+};
+// the box after a new main task of `kind` ('files', 'run'): it first, the
+// other after it, none the same twice, at most OUT_MAIN
+export const noteMeaning = (list, kind, text) => {
+  const was = Array.isArray(list) ? list : [];
+  if (!text) return was;
+  return [{ kind, text }, ...was.filter(x => x.kind !== kind && x.text !== text)].slice(0, OUT_MAIN);
+};
+// an agent's box after the call `e` with its result `r`; true when it changed
+export const meaningOf = (a, e, r) => {
+  const before = JSON.stringify(a.mean || []);
+  const file = changedFile(e, r);
+  if (file) {
+    a.files = [...(a.files || []).filter(f => f !== file), file];
+    a.mean = noteMeaning(a.mean, 'files', changedLine(a.files));
+  }
+  a.mean = noteMeaning(a.mean, 'run', runLine(e, r));
+  a.out = (a.mean || []).map(x => x.text);
+  return JSON.stringify(a.mean || []) !== before;
+};
+// a finished run's box: how it ended with its report's first clause, then
+// its newest main task ("Changed …" now), at most OUT_MAIN
+export const finishedOut = (a, state, answer) => {
+  const lines = [doneLine(state, answer), ...(a.mean || []).map(x => (x.kind === 'files' ? changedLine(a.files, 'Changed') : x.text))].filter(Boolean);
+  return lines.filter((l, i) => lines.indexOf(l) === i).slice(0, OUT_MAIN);
 };
 // An agent's progress as a bar under its row: the steps it said ("step 2 of
 // 4": a segment each), else the time it has run against the time it is
@@ -2316,6 +2433,14 @@ export const register = on => {
   // the effort each agent runs at, by its id: a kept agent's later tasks come
   // by SendMessage, with no Agent call to say it
   const keptEffort = new Map();
+  // A kept agent's next task comes by SendMessage from the main thread: its
+  // `summary` is the task the row shows, in place of the first Agent call's
+  // description. `to` names the agent by its id or by the name its Agent
+  // call gave (names: by id and by name, the id); a recipient the module does not
+  // know is left alone. nextTask: the summary by id, until the resumed run's
+  // spawn takes it.
+  const names = new Map();
+  const nextTask = new Map();
   // a role whose next task goes to a fresh agent: the line for the session,
   // by role, until the next prompt carries it
   const fresh = new Map();
@@ -2387,13 +2512,25 @@ export const register = on => {
       }
     } catch { /* no step known */ }
     if (e.agentId) {
-      // a subagent's call and how it came out: a line of its output box
+      // a subagent's call: a file it changed or a run's outcome is a line
+      // of its output box (meaningOf); other calls are not shown
       const r = await next(e);
       try {
-        const a = agents.get(e.agentId), line = a ? actionLine(e, r) : '';
-        if (line) { a.out = noteOut(a.out, line); a.outAt = await $.clock.now(); redraw($); }
+        const a = agents.get(e.agentId);
+        if (a && meaningOf(a, e, r)) { a.outAt = await $.clock.now(); redraw($); }
       } catch { /* not shown */ }
       return r;
+    }
+    // a task sent to a kept agent: its summary is the row's task from now on
+    if (e.tool === 'SendMessage' && typeof e.summary === 'string' && e.summary.trim()) {
+      try {
+        const to = String(e.to || ''), id = agents.has(to) ? to : names.get(to);
+        if (id) {
+          nextTask.set(id, e.summary.trim());
+          const a = agents.get(id);
+          if (a) { a.description = e.summary.trim(); keepAgents($, st); redraw($); }
+        }
+      } catch { /* the first task's words stay */ }
     }
     const r = await next(e);
     // a background task this call started, or one a TaskStop ended
@@ -2428,9 +2565,12 @@ export const register = on => {
         // the provisional entry of its Agent call, if any: the time it was first shown
         const early = agents.get('call:' + (e.tool_use_id || ''));
         if (early) agents.delete(early.id);
-        const a = { id: r.agentId, type, description: e.description, model: r.model || e.model || e.parentModel,
+        const a = { id: r.agentId, type, description: nextTask.get(r.agentId) || e.description, model: r.model || e.model || e.parentModel,
           effort: efforts.get(e.tool_use_id) || keptEffort.get(r.agentId), background: !!e.background, startedAt: early ? early.startedAt : now, runs: [], step: null };
         efforts.delete(e.tool_use_id);
+        nextTask.delete(r.agentId);
+        names.set(r.agentId, r.agentId);
+        if (e.name) names.set(e.name, r.agentId);
         if (a.effort) keptEffort.set(a.id, a.effort);
         // a fresh agent of a role is what a waiting line about one asked for
         if (!e.resume && roleFor(type)) fresh.delete(roleFor(type));
@@ -2997,8 +3137,8 @@ export const register = on => {
         if (!agents.size) stopTick();
         // its row stays its minute with how it ended and its report's first lines
         try {
-          const report = reportLines(e.answer);
-          finished.set(e.agentId, { a, endedAt: now, state: e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done', out: report.length ? report : a.out || [] });
+          const state = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done';
+          finished.set(e.agentId, { a, endedAt: now, state, out: finishedOut(a, state, e.answer) });
           $.clock.after(TASK_DONE_FOR, () => { finished.delete(e.agentId); redraw($); });
         } catch { /* no row kept */ }
         $.ui.status(lineNow(now));
@@ -3110,13 +3250,8 @@ export const register = on => {
         if (typeof e.effort === 'string' && EFFORT_ORDER.includes(e.effort)) here.effort = e.effort;
       }
     } catch { /* not noted */ }
-    const res = yield* next(e);
-    // a subagent's step that said something: a line of its output box
-    try {
-      const a = e.agentId ? agents.get(e.agentId) : null, line = a && res ? outLine(res.answer) : '';
-      if (line) { a.out = noteOut(a.out, line); a.outAt = await $.clock.now(); redraw($); }
-    } catch { /* not shown */ }
-    return res;
+    // (a subagent's step text is not shown: its box says main tasks alone)
+    return yield* next(e);
   });
 
   on('session.measure', async ($, e, next) => {

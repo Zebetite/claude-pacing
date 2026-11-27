@@ -5,6 +5,11 @@
 //
 //   node scripts/pane-images.mjs            writes docs/images/pane-*.png,
 //                                           and copies them to pacing/images
+//   node scripts/pane-images.mjs --stress <file.png>
+//                                           writes a narrow pane (360 px) of
+//                                           agents with long texts, tags and
+//                                           unbroken words to <file.png> alone,
+//                                           to see that nothing spills
 //
 // The app draws Box, Text, Button and Svg itself; here they are flex boxes,
 // text in the app's dark theme, and the same SVG. Spacing and type sizes
@@ -31,8 +36,13 @@ const WEIGHT = { medium: 500, semibold: 600, bold: 700 };
 // the element table the pane is drawn with
 const t = {
   Box: p => {
-    const st = ['display:flex', 'flex-direction:' + (p.flexDirection || 'row'), 'min-width:0'];
+    // (a flex item does not shrink under its content's width unless its
+    // minWidth says so, as in the app)
+    const st = ['display:flex', 'flex-direction:' + (p.flexDirection || 'row')];
+    if (p.minWidth != null) st.push('min-width:' + p.minWidth + (typeof p.minWidth === 'number' ? 'px' : ''));
+    if (p.overflow) st.push('overflow:' + p.overflow);
     if (p.rowGap) st.push('row-gap:' + p.rowGap * CELL + 'px');
+    if (p.marginTop) st.push('margin-top:' + p.marginTop * CELL + 'px');
     if (p.columnGap) st.push('column-gap:' + p.columnGap * CELL + 'px');
     if (p.paddingX) st.push('padding:4px ' + p.paddingX * CELL + 'px');
     if (p.backgroundColor) st.push('background:' + p.backgroundColor);
@@ -56,7 +66,8 @@ const t = {
     if (p.wrap === 'truncate-end') st.push('white-space:nowrap;overflow:hidden;text-overflow:ellipsis');
     return el('<div style="' + st.join(';') + '">' + kids(p.children) + '</div>');
   },
-  Button: p => el('<div><span style="display:inline-block;padding:5px 14px;border:1px solid #4b5563;border-radius:6px;font-size:13px;color:#e5e7eb">' + esc(p.label) + '</span></div>'),
+  // a plain Button with children (the auto-compact switch): the children alone
+  Button: p => (p.plain && p.children ? el('<div style="display:flex;cursor:pointer">' + kids(p.children) + '</div>') : el('<div><span style="display:inline-block;padding:5px 14px;border:1px solid #4b5563;border-radius:6px;font-size:13px;color:#e5e7eb">' + esc(p.label) + '</span></div>')),
   Svg: p => el('<div style="' + (p.width ? 'width:' + p.width + 'px;height:' + p.height + 'px;flex-shrink:0' : 'width:100%') + '">'
     + p.source.replace('<svg ', '<svg style="display:block;width:100%;height:auto" ') + '</div>'),
 };
@@ -88,13 +99,13 @@ const SHOTS = [
         // (the two with the newest output show its box: the implementer and the
         // researcher that just finished; the reviewer's is older)
         { id: 'a1', text: 'reviewer: the release notes, step 1 of 3 · 6m', model: 'claude-fable-5-2', effort: 'high', on: 'Fable 5.2 high', bar: { done: 1, total: 3 },
-          out: ['Read pane.mjs → 737 lines'], outAt: 10 },
+          out: ['Checks: 12 pass'], outAt: 10 },
         { id: 'a2', text: 'implementer: step 2 of 4, the band row · 4m, about 3m left', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: { done: 2, total: 4 },
-          out: ['Edit readings.mjs → saved', 'The band row now waits for the turn to end.', 'Bash npm test → # pass 448'], outAt: 30 },
+          out: ['Tests: 448 pass', 'Changing readings.mjs and pane.mjs'], outAt: 30 },
         { id: 'a3', text: 'reader: reading the test logs · 2m 10s, about 1m left', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { frac: 0.65 } },
         { id: null, text: 'side session 1m 30s, Fix the docs build', model: null, effort: null, on: '', bar: null },
         { id: 'a4', done: true, text: 'researcher: the hooks API ✓ done · 3m', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: null,
-          out: ['turn.step gives each step\'s text, tool.call each result.', 'turn.complete carries the report as its answer.'], outAt: 20 },
+          out: ['Done: the hooks API hands over each call and its result'], outAt: 20 },
       ]),
       // a shell in the background, as the pane's last section lists it
       tasks: [{ kind: 'shell', what: 'Run the dev server', state: 'running', time: '12m' }],
@@ -118,6 +129,8 @@ const SHOTS = [
         { id: 'a2', text: 'verifier: running the test suite · 40s, about 2m left', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { frac: 0.25 } },
       ]),
       context: { used: '96k', of: '1M', pct: 10 },
+      // the auto-compact switch, off, and the limit pacing sets
+      autoCompact: paneModel({ autoCompact: 750000 }).autoCompact,
     },
   },
   {
@@ -143,8 +156,33 @@ const SHOTS = [
     },
   },
 ];
+// the stress sample: many agents, long tasks and tags, a path, a URL, a
+// word of 200 letters, long output lines, a finished run's long report
+const LONG = 'x'.repeat(200);
+const STRESS = {
+  name: 'pane-stress',
+  m: {
+    ...base,
+    meters: [{ label: 'Weekly', pct: 55, line: 73.3, note: 'budget line 73%' }],
+    ...made({ all: 55, line: 73.3 }, { model: 'claude-opus-5-5', effort: 'high' }, [
+      { id: 'a1', text: 'implementer: rework the whole settings page so that every toggle is saved at once and the old ones are migrated, step 2 of 7 · 14m, about 20m left', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: { done: 2, total: 7 },
+        out: ['Changing a-very-long-file-name-that-keeps-going-and-going.mjs and pane.mjs', LONG], outAt: 30 },
+      { id: 'a2', text: 'researcher: https://example.com/a/very/long/url/that/goes/on/and/on/without/any/space/at/all/index.html · 3m', model: 'claude-fable-5-2', effort: 'xhigh', on: 'Fable 5.2 xhigh with a very long model tag that will not fit', bar: { frac: 0.3 } },
+      { id: 'a3', text: 'reader: ' + LONG, model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { done: 30, total: 40 } },
+      { id: 'a4', text: 'reviewer: X:/pacing/pacing/skills/pacing/scripts/very-long-file-name-that-keeps-going.mjs · 1m', model: 'claude-opus-5-5', effort: 'high', on: 'Opus 5.5 high', bar: { done: 1, total: 24 } },
+      { id: null, text: 'side session 1m 30s, ' + LONG, model: null, effort: null, on: '', bar: null },
+      { id: 'a5', done: true, text: 'verifier: check every page of the docs for broken links and pinned wording ✓ done · 9m', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: null,
+        out: ['Done: all forty-two pages checked, three broken links fixed in README.md', 'https://example.com/' + LONG], outAt: 40 },
+      { id: 'a6', text: 'tester: run the suite', model: 'claude-haiku-5-5', effort: 'low', on: 'Haiku 5.5 low', bar: { frac: 0.9 } },
+    ]),
+    tasks: [{ kind: 'shell', what: 'node ' + LONG, state: 'running', time: '12m' }],
+  },
+};
+const stressAt = process.argv.indexOf('--stress');
+const stress = stressAt >= 0 ? process.argv[stressAt + 1] : null;
+if (stressAt >= 0 && !stress) { console.log('pane-images: --stress needs a file to write'); process.exit(1); }
 
-const browser = ['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+const browser =['C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/usr/bin/google-chrome', '/usr/bin/chromium'].find(p => fs.existsSync(p));
 if (!browser) { console.error('pane-images: no Chrome or Edge found'); process.exit(1); }
 // the shot is the window's height: cut it under the last row that is not
@@ -155,22 +193,24 @@ const crop = png => {
     + "$h=[Math]::Min($b.Height,$last+32); $c=$b.Clone((New-Object System.Drawing.Rectangle 0,0,$b.Width,$h),$b.PixelFormat); $b.Dispose(); $c.Save($p,[System.Drawing.Imaging.ImageFormat]::Png); $c.Dispose()";
   execFileSync('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' });
 };
-fs.mkdirSync(out, { recursive: true });
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-images-'));
-const W = 400, H = 2200;
-for (const s of SHOTS) {
+const W = stress ? 360 : 400, H = stress ? 3200 : 2200;
+for (const s of stress ? [STRESS] : SHOTS) {
   const body = paneView(t, s.m, { surface: 'desktop', placement: 'dock', onRefresh: () => {} });
-  const html = '<!doctype html><meta charset="utf-8"><body style="margin:0;background:#1f1f1e;color:#e5e7eb;font-family:system-ui,Segoe UI,sans-serif">'
-    + '<div id="pane" style="width:' + (W - 32) + 'px;padding:16px">' + body.html + '</div></body>';
+  // (the pane's own width; in the stress shot what is drawn past it shows on red)
+  const html = '<!doctype html><meta charset="utf-8"><body style="margin:0;background:' + (stress ? '#7f1d1d' : '#1f1f1e') + ';color:#e5e7eb;font-family:system-ui,Segoe UI,sans-serif">'
+    + '<div id="pane" style="width:' + (W - 32) + 'px;padding:16px;background:#1f1f1e">' + body.html + '</div></body>';
   const file = path.join(tmp, s.name + '.html');
   fs.writeFileSync(file, html);
-  const png = path.join(out, s.name + '.png');
+  const png = stress ? path.resolve(stress) : path.join(out, s.name + '.png');
+  fs.mkdirSync(path.dirname(png), { recursive: true });
   execFileSync(browser, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--force-device-scale-factor=2',
-    '--window-size=' + W + ',' + H, '--screenshot=' + png, pathToFileURL(file).href], { stdio: 'ignore' });
+    '--window-size=' + (stress ? W + 160 : W) + ',' + H, '--screenshot=' + png, pathToFileURL(file).href], { stdio: 'ignore' });
   if (process.platform === 'win32') crop(png);
-  console.log('wrote ' + path.relative(root, png));
+  console.log('wrote ' + (stress ? png : path.relative(root, png)));
 }
 fs.rmSync(tmp, { recursive: true, force: true });
+if (stress) process.exit(0);
 // the plugin ships them too: the organization library's page shows the
 // plugin's README and not images from other sites
 const shipped = path.join(root, 'pacing', 'images');

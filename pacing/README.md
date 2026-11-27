@@ -46,12 +46,12 @@ rules; `skills/pacing/SKILL.md` (reports and settings) and
 
 Open beside the chat from the session's start (`/pacing-pane` reopens
 it): the week as a dial, the time left today to stay on budget, the
-meters, the agents at work with their model, a bar of their steps and a
-box of their latest output, the context and the models. Sample figures
+meters, the agents at work with their model, a bold bar of their steps and a
+box of their main tasks, the context and the models. Sample figures
 (on the organization library's page, open them under `images/` in the
 file list: the page shows a README's pictures as their descriptions):
 
-![The pacing pane: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, five agents at work with step bars, two with a box of their latest output](images/pane-agents.png)
+![The pacing pane: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, five agents at work with step bars, two with a box of their main tasks](images/pane-agents.png)
 
 ![The pacing pane within budget: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, two agents at work with step bars](images/pane-within.png)
 

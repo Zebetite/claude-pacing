@@ -1516,3 +1516,126 @@ leaves it alone (/pacing autocompact 750k or auto turns it back on)", with no bu
 on the desktop and the terminal alike (the user's word: show a dim line
 when autocompact is off). The `auto` and token-count rows are as they
 were.
+
+## Background tasks wrap (0.9.44)
+
+A background task's description in the pane was cut at the pane's edge
+("Wait for pacing 0.9.42 to be insta…", seen live): it now wraps onto
+further lines, as the agents' rows do since 0.9.42.
+
+## The auto-compact switch (0.9.44)
+
+The pane's auto-compact rows were too cramped (the user's word, from a
+screenshot: "Auto-compact at 750k [−] [+]" with "☐ Let Claude Code
+decide" as a button under it). The Context section now shows a row "Use
+Claude Auto Compact" with an iPhone-style switch at its right end: a plain
+Button holding a Text track, grey (#9ca3af) with the knob left when off,
+green (#22c55e) with the knob right when on; the terminal draws it as
+"○ off" or "◉ on". While off, "Compact at 750k" with − and + follows on a
+row of its own; while on, the dim note "It compacts near the end of the
+window." stays under the switch. The rows keep a line of space between
+them and above them. The key and the press are as before.
+
+## The agents' rows: a call's description, a kept agent's next task (0.9.44)
+
+Seen live: an implementer's row read its first task ("Dim line for
+auto-c…") while it worked on its third, and its output box held three
+lines like `Bash cd /x/pacing; F="C:/User…`, cut before any outcome.
+A shell call's line now names the call's `description` ("Bash Run all
+checks → ok validation, 3 s"), else the command without its leading
+`cd <dir> &&`, `cd <dir>;` and `VAR=...;` (`commandWhat`). And a
+SendMessage from the main thread with a `summary`, to an agent the module
+knows (by the id its spawn answered, or the `name` its Agent call gave),
+makes that summary the row's task: at once for a running agent, and for
+an idle one when the resumed run's spawn comes. An unknown recipient
+changes nothing.
+
+## The switch drawn, at the section's bottom (0.9.44)
+
+The user's words: move the Claude switch to the bottom of the Context
+section, and make it look better (a picture of an iPhone switch). The
+limit row with − and + now comes first and the switch last. Where Svg
+draws, the switch is a picture (`switchSvg`): a pill, blue `#3b82f6` with
+the white knob right when on, grey `#4b5563` with it left when off, and a
+plain Button with blank text laid over it (`position: 'absolute'`, the
+picture's 46 × 26) takes the press, since a Button holds only text. The
+terminal keeps `◉ on` / `○ off`; a surface without Svg the text track.
+
+## Fable's own colours (0.9.44)
+
+The user's words: Fable is used more freely than the week, so the pane
+should not alert to too much use with strong signs; Fable gets another
+gradient, normal to 20% over, then yellow to 40% over, orange to 60% and
+red at 80%.
+
+- **A second scale.** `pane.mjs` keeps OVER_CALM 5 and OVER_RED 30
+  (`overShade`, `overText`) for the weekly meter, the dial and the level
+  words, and adds PREM_CALM 20, PREM_YELLOW 40 and PREM_RED 80
+  (`premShade`, `premText`) for the per-model meter, the one with
+  `loud`. Both run along OVER_RUN through one helper (`runAt`).
+- **The stops.** Up to 20 points over: no colour of the run (`premText`
+  is null). Over 20 to 40: YELLOW. 40 to 60: yellow to ORANGE, orange at
+  60. 60 to 80: orange to red, `#f43f5e` from 80.
+- **Calm means normal.** Up to 20 over the loud bar's cells past the line
+  keep the bar's own sweep; the line, its arrow, the `OVER +N` tag and
+  the band are drawn in HUD; the figure keeps its sweep colour and the
+  note is the plain dim caption without the ▲. From 20 over each takes
+  `premText`, the cells by how far past the line each stands, the rest by
+  the meter's own points over.
+- **Colour only.** Levels, holding, routing, toasts and the Switch row
+  are unchanged.
+
+**Agents at work, inside the pane, main tasks, bold bars.** The user's
+words: test the agents window so it does not break outside the pane,
+the messages show the main point and not all detailed calls; then: not
+much text under agents, just main tasks; and progress bars matter more
+than text, so make them more visible.
+
+- **Nothing past the pane.** Every Box in the section has `minWidth: 0`
+  (the panel, the row, the words' column, the output box, which is also
+  `overflow: 'hidden'`). The words wrap, and `breakable(s)` puts a
+  zero-width space after / \ . _ ? & = - and every `BREAK_AT` (24)
+  letters in a run of more than 24 without a space, so a path, a URL or
+  a long word wraps too; the Button's label keeps the plain text and the
+  terminal gets none. The model tag and the output lines are cut with an
+  ellipsis. Background tasks' text is made breakable as well.
+- **A stress picture.** `node scripts/pane-images.mjs --stress <file>`
+  draws a 360 px pane of agents with long tasks, tags, paths, URLs and a
+  200-letter word on a red ground, so anything that spills shows; the
+  README pictures are not touched. The script's HTML Box no longer sets
+  `min-width: 0` on every box: it maps `minWidth` and `overflow`, so a
+  box that would not give way in the app does not in the picture.
+- **Main tasks only.** The box (`meaningOf` in readings.mjs, from
+  tool.call) holds at most `OUT_MAIN` (2) lines of at most
+  `OUT_MAIN_CHARS` (60), newest first, one per kind: the files changed
+  (`changedLine`: "Changing readings.mjs and pane.mjs", the newest two by
+  name, "and N more") and the last test, check, build or lint run
+  (`runKind` by the call's description, else its command; plain reads
+  and listings such as grep, ls, git diff are none; `runLine`: "Tests:
+  455 pass", the largest pass count in the output, or "Checks failed: 2
+  fail"). Step texts, reads, searches and other commands are not shown;
+  with no main task there is no box. A finished run keeps `finishedOut`:
+  "Done: " with its report's first clause (a leading "Done." left out),
+  then its newest main task ("Changed …"). outLine, actionLine and
+  noteOut are no longer drawn (kept, tested).
+- **Bold step bars.** `stepsSvg` is twice as tall (`STEPS_H` 24): the
+  steps done in the agent's colour, the one at work at 0.55, the rest a
+  track in the colour at 0.14 with an edge at 0.45; the time bar is 15
+  high on the same track. It stands right under the words, above the
+  model tag and the box. The terminal draws it in full blocks in the
+  agent's colour (two cells a step up to 12 steps: `████▓▓░░`; the time
+  as 24 cells). The step count stays in the row's words.
+
+## Compact at the figure shown (0.9.44)
+
+The pane's "Compact at 750k" was a little high: Claude Code compacts a
+buffer short of the window `/autocompact` gives it (a 400k window
+compacted at 92 %, near 368k). The user wants the pane's numbers kept as
+the point the session compacts at, so pacing now gives `/autocompact` the
+figure plus that buffer: 750k runs `/autocompact 783000`. The buffer is
+the breakdown's own "Autocompact buffer" row (`autoCompactBuffer`), else
+33 000 (`AUTO_COMPACT_BUFFER`); the window is no more than 1M
+(`autoCompactWindow`), so 1M and anything within the buffer of it compact
+a little sooner. `autoCompactHas` compares the window with the figure
+plus the buffer. config.json, `/pacing autocompact` and the pane's − and +
+keep the figure itself; a refused run's toast names the command that ran.

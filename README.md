@@ -10,7 +10,7 @@ before the reset. You choose how many tiers there are, and the model and
 effort of each.
 
 <p>
-<img src="docs/images/pane-agents.png" width="260" alt="The pacing pane with sample figures: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, the 5-hour window at 46%, five agents at work with their models and step bars, two of them with a box of their latest output (one just done, with its report), the context at 18% and the models this session">
+<img src="docs/images/pane-agents.png" width="260" alt="The pacing pane with sample figures: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, the 5-hour window at 46%, five agents at work with their models and step bars, two of them with a box of their main tasks (one just done, with its report's first clause), the context at 18% and the models this session">
 <img src="docs/images/pane-within.png" width="260" alt="The pacing pane with sample figures: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, the 5-hour window at 18%, two agents at work with their models and step bars">
 <img src="docs/images/pane-week-over.png" width="260" alt="The pacing pane with the week over its budget line: the week at 77% against a line of 73%, 4 points over it, 1h 40m over today's budget, Fable 5.2 at 68% under its line, the 5-hour window at 71%, two agents at work with their models and step bars">
 </p>
@@ -36,7 +36,7 @@ It needs Node.js 18 or later on the PATH of the shell Claude Code uses.
   meters.
 - **A pane beside the chat** in the desktop app (the pictures above): the
   week as a dial, the meters, the agents at work with a bar for their
-  steps and a box of their latest output, the session's context.
+  steps and a box of their main tasks, the session's context.
 - **Short messages.** A toast when the budget gets far over its line or
   the week is nearly used, and now and then a row above the prompt that
   offers to compact a large session or, when Fable is out or far over its
@@ -81,10 +81,12 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 - **A pacing pane**, open beside the chat from the session's start and
   drawn as a ship's console: a reactor dial for the week, the time left
   today to stay on budget, the meters, the agents at work as small
-  robots with their model, a bar of their steps and a box of their latest
-  output, the context and the models (`/pacing-pane` reopens it). Past
+  robots with their model, a bold bar of their steps and a box of their main
+  tasks, the context and the models (`/pacing-pane` reopens it). Past
   its budget line, Fable's own meter gets an `OVER` tag; on every bar
-  the stretch over the line runs yellow, orange, red the further over. The pane comes from readings the plugin
+  the stretch over the line runs yellow, orange, red the further over
+  (Fable's meter stays in its normal colours up to 20 points over, red
+  only from 80). The pane comes from readings the plugin
   takes by itself after a turn, on a Claude Code version with hooks
   modules; older versions run the rest of the plugin as before. The
   pictures at the top are drawn by the pane's own code with sample

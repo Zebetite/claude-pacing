@@ -282,13 +282,16 @@ too, until you type `/pacing-pane`. From the top:
   meter with its own, and the 5-hour window: when it resets, and when it
   would be full first at your pace.
 - **Agents at work**: each running agent as a small robot with its task;
-  in the terminal a click on one opens its transcript (the desktop app has no view to open it in). Under the words, its model (↑ or ↓
-  when stronger or weaker than the session's) and a bar: a segment per
-  step it reports, or the time it has run against its estimate. For the
-  two agents with the newest output, a small box shows its last three
-  lines: what it said, or a call and how it came out ("Bash npm test →
-  # pass 448"). A finished agent stays a minute with ✓ done and the first
-  lines of its report.
+  in the terminal a click on one opens its transcript (the desktop app has no view to open it in). Right under the words a bold bar in
+  the agent's colour: a segment per step it reports, or the time it has
+  run against its estimate. Then its model (↑ or ↓ when stronger or
+  weaker than the session's). For the two agents with the newest output,
+  a small box shows at most two main tasks, newest first: the files it
+  is changing ("Changing readings.mjs and pane.mjs") and its last test,
+  check, build or lint run ("Tests: 455 pass"). Reads, searches and its
+  own narration are left out; with no main task yet there is no box. A
+  finished agent stays a minute with ✓ done and its report's first
+  clause ("Done: …"). Long words, paths and links wrap inside the pane.
 - **Context**: how full the session's context is, one figure, and from
   300 000 tokens a **Compact** button. Under it, where Claude Code
   compacts by itself ("Auto-compact at 750k"), with **−** and **+** (50k a
@@ -303,6 +306,10 @@ The colours say how far over a budget line you are. A bar keeps its
 colours up to its line; the cells past it run yellow, orange, red the
 further over they stand. The words and figures keep their colours up to
 5 points over, then run yellow, orange, red, red by 30 points over.
+Fable's meter is used more freely than the week, so it has a calmer
+scale: its bar, line, `OVER` tag, figure and words keep their normal
+colours up to 20 points over, are yellow up to 40, turn orange by 60 and
+red by 80.
 
 While the pane is on show, the toasts that an agent started, is still
 running or is done stay away, since the pane lists the agents.
@@ -638,7 +645,7 @@ so, as in `Pacing: no reading to show (the last reading is 45 min old).
 | `/pacing reload on`, `/pacing reload off` | turns the new-version row on (the default) or off; off, one toast per version says the same. The plugin runs nothing itself either way |
 | `/pacing notify on`, `/pacing notify off` | turns the toasts about running subagents on (the default) or off: when one starts, when one ends, and every 5 minutes while any runs; the status line and the row above the prompt still show them |
 | `/pacing compact on`, `/pacing compact off` | turns the offer to compact on (the default) or off: a row above the prompt with Compact now from 400 000 tokens, in the warning colour from 650 000, and a warning before the cache of an idle session lapses |
-| `/pacing autocompact 750k`, `/pacing autocompact auto`, `/pacing autocompact off` | where Claude Code compacts a session by itself: pacing sets its `/autocompact` to this at each session start and when the model changes (750k by default; 100k to 1M, as 750000, 750k or 0.75M). auto: Claude Code's own default (the pane's ☐ Let Claude Code decide; pressed again it returns to your last value). off: pacing leaves `/autocompact` alone, and the pane shows one dim line saying so |
+| `/pacing autocompact 750k`, `/pacing autocompact auto`, `/pacing autocompact off` | where Claude Code compacts a session by itself: pacing sets its `/autocompact` at each session start and when the model changes, so the session compacts at this figure (Claude Code compacts a buffer of about 33k short of the window it is given, so pacing gives it that much more; 750k by default; 100k to 1M, as 750000, 750k or 0.75M). auto: Claude Code's own default (the pane's Use Claude Auto Compact switch; switched off again it returns to your last value). off: pacing leaves `/autocompact` alone, and the pane shows one dim line saying so |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model meter belongs to (Fable by default), or says the plan has none |
 | `/pacing fallback opus high`, `/pacing fallback none` | the tier that takes the top place while that meter is used up (Opus 5.5 high by default); none lets the remaining tiers move up |
 | `/pacing reader haiku medium`, `/pacing reader ladder` | the model the reader agent reads on (Haiku 5.5 medium by default), or the lowest tier |

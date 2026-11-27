@@ -44,12 +44,24 @@ export const OVER_RED = 30;
 export const YELLOW = '#facc15';
 export const ORANGE = '#fb923c';
 export const OVER_RUN = [YELLOW, ORANGE, '#f43f5e'];
-export const overShade = by => {
-  const at = clamp((by - OVER_CALM) / (OVER_RED - OVER_CALM), 0, 1) * 2, i = Math.min(1, Math.floor(at));
+// the colour at `k` (0 to 1) along OVER_RUN
+const runAt = k => {
+  const at = clamp(k, 0, 1) * 2, i = Math.min(1, Math.floor(at));
   return blend(OVER_RUN[i], OVER_RUN[i + 1], at - i);
 };
+export const overShade = by => runAt((by - OVER_CALM) / (OVER_RED - OVER_CALM));
 // a text's colour at `by` points over its line: null (its normal colour) up to OVER_CALM
 export const overText = by => (typeof by === 'number' && by > OVER_CALM ? overShade(by) : null);
+// The per-model meter (Fable's, `loud`) is used more freely than the week,
+// so it has a scale of its own (the user's word): its normal colours up to
+// PREM_CALM points over, everywhere (cells, line, tag, figure, words); then
+// yellow up to PREM_YELLOW, orange at half way to PREM_RED, red from PREM_RED.
+export const PREM_CALM = 20;
+export const PREM_YELLOW = 40;
+export const PREM_RED = 80;
+export const premShade = by => runAt((by - PREM_YELLOW) / (PREM_RED - PREM_YELLOW));
+// its colour at `by` points over its line: null (its normal colour) up to PREM_CALM
+export const premText = by => (typeof by === 'number' && by > PREM_CALM ? premShade(by) : null);
 // the colour at `k` (0 to 1) along a level's run; a colour without a run is itself
 export const sweepAt = (color, k) => {
   const stops = SWEEPS[color];
@@ -58,6 +70,13 @@ export const sweepAt = (color, k) => {
   return blend(stops[i], stops[i + 1], at - i);
 };
 const num = n => (Math.round(n * 100) / 100).toString();
+// A text that wraps breaks only at a space, so a path, a URL or a long word
+// stood past the pane's edge. In a run of more than BREAK_AT letters
+// without a space, a break is allowed (a zero-width space) after each / \ . _
+// ? & = - and in any stretch still longer than BREAK_AT; nothing is shown.
+export const BREAK_AT = 24;
+export const breakable = s => String(s ?? '').replace(new RegExp('\\S{' + (BREAK_AT + 1) + ',}', 'g'),
+  w => w.replace(/[/\\._?&=-]/g, '$&​').replace(new RegExp('[^​]{' + BREAK_AT + '}(?=[^​])', 'g'), '$&​'));
 
 // ---- a drawing's own names, and each drawing built once ----
 // Every drawing named its glow filter "glow", each with a region of its own
@@ -134,7 +153,8 @@ export const BAR_CELLS = 36;
 // saying by how much, on a band behind the cells over the line (still: the
 // user's word, a pulse drew too much), in the shade of how far over it is.
 // On every bar with a line the cells past it take overShade by how far past
-// the line each stands; the cells up to it keep the bar's own colours.
+// the line each stands (a loud bar's premText: its own colours up to
+// PREM_CALM past); the cells up to it keep the bar's own colours.
 export const LINE_TAG = 18;
 export const barSvg = memo('bar', (segments, marker = null, w = 480, h = 34, loud = false) => {
   const total = clamp(segments.reduce((a, s) => a + Math.max(0, s.pct), 0), 0, 100);
@@ -152,7 +172,8 @@ export const barSvg = memo('bar', (segments, marker = null, w = 480, h = 34, lou
   const colorAt = i => {
     // (a cell's middle, in points of the bar)
     const mid = (i + 0.5) / n * 100;
-    if (marker !== null && segments.length === 1 && mid > marker) return overShade(mid - marker);
+    const past = marker !== null && segments.length === 1 && mid > marker ? (loud ? premText(mid - marker) : overShade(mid - marker)) : null;
+    if (past) return past;
     if (segments.length === 1) return sweepAt(segments[0].color, i / (n - 1));
     const at = (i + 0.5) / lit * total;
     let run = 0;
@@ -187,8 +208,8 @@ const loudBarSvg = (segments, marker, w, h) => {
   const lit = total > 0 ? Math.max(1, Math.round(total / 100 * n)) : 0;
   const m = clamp(marker, 0, 100);
   // only drawn past the line (barSvg): the line, its tag, its arrow and the
-  // band in the shade of how far over the meter is
-  const lineCol = overShade(total - m);
+  // band in the shade of how far over the meter is (HUD up to PREM_CALM)
+  const lineCol = premText(total - m) || HUD;
   const x = clamp(m / 100 * (w - slant) + slant / 2, 2, w - 2);
   const base = segments.length ? segments[0].color : HUD;
   const cell = (i, fill, extra) => {
@@ -199,7 +220,7 @@ const loudBarSvg = (segments, marker, w, h) => {
   for (let i = 0; i < n; i++) {
     const mid = i * (cw + gap) + slant / 2 + cw / 2;
     if (i >= lit) off += cell(i, '#808080', ' fill-opacity="0.2"');
-    else if (mid > x) hot += cell(i, overShade((mid - slant / 2) / (w - slant) * 100 - m), '');
+    else if (mid > x) hot += cell(i, premText((mid - slant / 2) / (w - slant) * 100 - m) || sweepAt(base, i / (n - 1)), '');
     else on += cell(i, sweepAt(base, i / (n - 1)), '');
   }
   // the stretch over the line, as a band behind the cells
@@ -302,31 +323,38 @@ export const barText = (segments, cells = 24, marker = null) => {
   return s.join('');
 };
 
-// An agent's progress under its row (readings.mjs stepBarOf): a slanted
-// segment a step, the steps done lit in `color`, the one at work half lit,
-// the rest dark; past STEPS_MAX steps, or with no steps, one thin bar lit by
-// the share done (the time run against the estimate: `frac`).
+// An agent's progress right under its words (readings.mjs stepBarOf), the
+// most visible part of its row (the user's word: the bars matter more than
+// the text): a slanted segment a step, the steps done lit in `color`, the
+// one at work half lit, the rest a dim track edged in the colour; past
+// STEPS_MAX steps, or with no steps, one bar lit by the share done (the
+// time run against the estimate: `frac`). Twice the height it had (0.9.44).
 export const STEPS_MAX = 24;
+export const STEPS_H = 24;
+const TRACK = c => 'fill="' + c + '" fill-opacity="0.14" stroke="' + c + '" stroke-opacity="0.45" stroke-width="1"';
 export const stepsSvg = memo('steps', (bar, color = HUD, w = 480) => {
-  const h = 12, slant = 4;
+  const h = STEPS_H, slant = 6;
   let body = '';
   if (bar.total && bar.total <= STEPS_MAX) {
-    const n = bar.total, gap = 6, sw = (w - slant - gap * (n - 1)) / n;
+    const n = bar.total, gap = 6, sw = (w - slant - 1 - gap * (n - 1)) / n;
     for (let i = 0; i < n; i++) {
-      const fill = i < bar.done ? 'fill="' + color + '"' : i === bar.done ? 'fill="' + color + '" fill-opacity="0.4"' : 'fill="#808080" fill-opacity="0.2"';
-      body += '<path d="M' + num(i * (sw + gap) + slant) + ' 2h' + num(sw) + 'l' + (-slant) + ' 8h' + num(-sw) + 'z" ' + fill + '/>';
+      const fill = i < bar.done ? 'fill="' + color + '"' : i === bar.done ? 'fill="' + color + '" fill-opacity="0.55"' : TRACK(color);
+      body += '<path d="M' + num(i * (sw + gap) + slant + 0.5) + ' 3h' + num(sw) + 'l' + (-slant) + ' 18h' + num(-sw) + 'z" ' + fill + '/>';
     }
   } else {
     const k = bar.total ? bar.done / bar.total : clamp(bar.frac || 0, 0, 1);
-    body = '<rect x="0" y="4" width="' + w + '" height="4" rx="2" fill="#808080" fill-opacity="0.2"/>'
-      + (k > 0 ? '<rect x="0" y="4" width="' + num(Math.max(4, k * w)) + '" height="4" rx="2" fill="' + color + '"/>' : '');
+    body = '<rect x="0.5" y="4.5" width="' + (w - 1) + '" height="15" rx="4" ' + TRACK(color) + '/>'
+      + (k > 0 ? '<rect x="0.5" y="4.5" width="' + num(Math.max(8, k * (w - 1))) + '" height="15" rx="4" fill="' + color + '"/>' : '');
   }
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">' + body + '</svg>';
 });
-// the same in characters, for a surface without Svg
-export const stepsText = bar => (bar.total && bar.total <= STEPS_MAX
-  ? '▰'.repeat(bar.done) + '▱'.repeat(bar.total - bar.done)
-  : barText([{ pct: 100 * (bar.total ? bar.done / bar.total : clamp(bar.frac || 0, 0, 1)) }], 12));
+// the same in full blocks, for a surface without Svg: a step two cells (one
+// past 12 steps), done █, at work ▓, to come ░; the time as 24 cells
+export const stepsText = bar => {
+  if (!(bar.total && bar.total <= STEPS_MAX)) return barText([{ pct: 100 * (bar.total ? bar.done / bar.total : clamp(bar.frac || 0, 0, 1)) }], 24);
+  const per = bar.total <= 12 ? 2 : 1, done = Math.min(bar.done, bar.total);
+  return '█'.repeat(per * done) + (done < bar.total ? '▓'.repeat(per) + '░'.repeat(per * (bar.total - done - 1)) : '');
+};
 
 // ---- other dials for the week ----
 // Each takes what ringSvg takes and draws the same three things another
@@ -602,12 +630,13 @@ export const DIAL_SIZE = 124;
 //     section (o.onCompact), reading "Compacting…" while one runs; on the
 //     terminal a line of text in its place
 //   autoCompact { text, own, less, more, note, back, off } | null: Claude Code's
-//     auto-compact window in the Context section: the toggle for Claude
-//     Code's own (to 'auto', or while `own` back to `back`), and the words
-//     with − (to `less`) and + (to `more`) where each is given; while
-//     `own`, `note` in their place (o.onAutoCompact(value)); on the
-//     terminal a line of text in place of it all; while `off` (pacing
-//     leaves it alone) `text` alone, one dim line, on every surface
+//     auto-compact window in the Context section: a row with the on/off
+//     switch for Claude Code's own (to 'auto', or while `own` back to
+//     `back`) at its right end, then on a row of its own the words with
+//     − (to `less`) and + (to `more`) where each is given; while `own`,
+//     `note` under the switch in their place (o.onAutoCompact(value)). The
+//     terminal draws the switch as ◉ on / ○ off. While `off` (pacing leaves
+//     it alone) `text` alone, one dim line, on every surface
 //   tasks [{ kind, what, state, time }]: the background tasks, the last
 //     section; state 'running', 'done', 'failed' or 'stopped'
 //   running items may also carry tag (the model, ↑ or ↓ against the
@@ -618,8 +647,18 @@ export const DIAL_SIZE = 124;
 // `o`: surface, placement, onRefresh, onAgent(id), onCompact, onAutoCompact(v), dial (a key of
 // DIALS), now (ms: where the animations stand, see phased; absent in a still
 // picture).
-// the toggle's words, after ☐ or ☑
-export const AUTO_COMPACT_OWN_LABEL = 'Let Claude Code decide';
+// the switch row's words, left of the switch
+export const AUTO_COMPACT_OWN_LABEL = 'Use Claude Auto Compact';
+// the switch, as an iPhone's: a blue or grey pill, a white knob right or
+// left. Where Svg draws, it is a picture under a plain Button laid over it
+// (a Button holds only text); elsewhere a text track
+export const SWITCH_ON = '#3b82f6';
+export const SWITCH_OFF = '#4b5563';
+export const SWITCH_KNOB = { on: '    ● ', off: ' ●    ' };
+export const SWITCH_W = 46, SWITCH_H = 26;
+export const switchSvg = on => '<svg xmlns="http://www.w3.org/2000/svg" width="' + SWITCH_W + '" height="' + SWITCH_H + '" viewBox="0 0 ' + SWITCH_W + ' ' + SWITCH_H + '">'
+  + '<rect x="1" y="1" width="' + (SWITCH_W - 2) + '" height="' + (SWITCH_H - 2) + '" rx="' + (SWITCH_H / 2 - 1) + '" fill="' + (on ? SWITCH_ON : SWITCH_OFF) + '"/>'
+  + '<circle cx="' + (on ? SWITCH_W - SWITCH_H / 2 : SWITCH_H / 2) + '" cy="' + SWITCH_H / 2 + '" r="' + (SWITCH_H / 2 - 3) + '" fill="#ffffff"/></svg>';
 export const TASK_MARKS = { done: '✓ done', failed: '✗ failed', stopped: '■ stopped' };
 export const paneView = (t, m, o = {}) => {
   const { Box, Text, Button } = t;
@@ -640,11 +679,12 @@ export const paneView = (t, m, o = {}) => {
   const panel = (kind, children, extra = {}) => {
     const accent = ACCENTS[kind] || HUD;
     if (!hasSvg) return col(children, extra);
+    // (it gives way to the pane's width: minWidth 0)
     return col([
       t.Svg({ source: moving(frameSvg(kind, false, accent)), alt: 'The upper edge of a section' }),
-      Box({ flexDirection: 'column', paddingX: 1, backgroundColor: tint(accent), ...extra, children: children.filter(Boolean) }),
+      Box({ flexDirection: 'column', paddingX: 1, backgroundColor: tint(accent), minWidth: 0, ...extra, children: children.filter(Boolean) }),
       t.Svg({ source: frameSvg(kind, true, accent), alt: 'The lower edge of a section' }),
-    ]);
+    ], { minWidth: 0 });
   };
   const between = (left, right) => row([left, right], { justifyContent: 'space-between', columnGap: 1 });
   const dot = c => Text({ color: c, children: '● ' });
@@ -654,10 +694,12 @@ export const paneView = (t, m, o = {}) => {
   // A bar keeps the normal colours up to its line (the cells past it are
   // shaded in barSvg); one without a line turns red when full. A figure and
   // a meter's words keep theirs up to OVER_CALM points over the line, then
-  // take overShade; a meter used up is red.
+  // take overShade; the per-model meter's (loud) up to PREM_CALM, then
+  // premShade; a meter used up is red.
   const byOf = x => (x && x.line != null ? x.pct - x.line : null);
+  const shadeOf = x => (x.loud ? premText : overText)(byOf(x));
   const meterColor = x => (x.line == null && x.pct >= 100 ? LEVEL_COLORS.stop : LEVEL_COLORS.ok);
-  const figureColor = x => (x.pct >= 100 ? LEVEL_COLORS.stop : overText(byOf(x)) || sweepAt(LEVEL_COLORS.ok, x.pct / 100));
+  const figureColor = x => (x.pct >= 100 ? LEVEL_COLORS.stop : shadeOf(x) || sweepAt(LEVEL_COLORS.ok, x.pct / 100));
   // the week's own words at the top: by the week's points over its line; at
   // 'stop' (the week nearly used) red
   const week = m.meters && m.meters[0];
@@ -697,9 +739,9 @@ export const paneView = (t, m, o = {}) => {
       between(Text({ weight: 'medium', children: x.label }), Text({ tabular: true, mono: true, weight: 'semibold', color: figureColor(x), children: Math.round(x.pct) + '%' })),
       bar([{ pct: x.pct, color: meterColor(x) }], x.line ?? null, x.label + ' ' + Math.round(x.pct) + '% used'
         + (x.loud && x.line != null ? ', budget line ' + Math.round(x.line) + '%' : ''), !!x.loud),
-      // a loud line's words: plain like the week's up to OVER_CALM points
+      // a loud line's words: plain like the week's up to PREM_CALM points
       // over, then bold in the shade of how far over
-      x.note ? (x.loud && overText(byOf(x)) ? Text({ size: 'caption', weight: 'semibold', color: overText(byOf(x)), children: '▲ ' + x.note }) : cap(x.note)) : null,
+      x.note ? (x.loud && shadeOf(x) ? Text({ size: 'caption', weight: 'semibold', color: shadeOf(x), children: '▲ ' + x.note }) : cap(x.note)) : null,
     ]))], { rowGap: 1 }));
   }
 
@@ -708,11 +750,16 @@ export const paneView = (t, m, o = {}) => {
     // Button holds text alone, so the robot stays beside it), else text.
     // `plain`: no brackets round it on the terminal; a desktop draws its
     // own button for it either way
+    // Nothing here may draw past the pane (the user's word): every Box gives
+    // way (minWidth 0), the words wrap with a long path, URL or word made
+    // breakable, a tag and the output lines are cut with an ellipsis, and
+    // the step bar's drawing takes the slot's width.
+    const shown = s => (hasSvg ? breakable(s) : s);
     const words = (x, lead) => (x && typeof x === 'object' && x.id && o.onAgent
       // the words as a Text child, which wraps; a label alone stays on one
       // line and the narrow pane cut it (seen live in 0.9.41)
-      ? Button({ key: 'pacing-agent-' + x.id, plain: true, label: lead + x.text, onPress: () => o.onAgent(x.id), children: Text({ wrap: 'wrap', children: lead + x.text }) })
-      : Text({ children: lead + (x && typeof x === 'object' ? x.text : x) }));
+      ? Button({ key: 'pacing-agent-' + x.id, plain: true, label: lead + x.text, onPress: () => o.onAgent(x.id), children: Text({ wrap: 'wrap', children: shown(lead + x.text) }) })
+      : Text({ wrap: 'wrap', children: shown(lead + (x && typeof x === 'object' ? x.text : x)) }));
     // under the words its model as a tag (↑ or ↓ against the session's),
     // its step bar and its output box
     sections.push(panel('agents', [head('Agents at work', ACCENTS.agents), ...m.running.map((x, i) => {
@@ -722,17 +769,19 @@ export const paneView = (t, m, o = {}) => {
       const out = x && typeof x === 'object' && Array.isArray(x.out) && x.out.length ? x.out : null;
       if (!hasSvg) {
         const said = tag ? { ...x, text: x.text + ' (' + tag + ')' } : x;
-        return steps || out ? col([words(said, '🤖 '), steps ? cap('   ' + stepsText(steps)) : null, ...(out || []).map(l => cap('   │ ' + l))]) : words(said, '🤖 ');
+        return steps || out ? col([words(said, '🤖 '), steps ? Text({ color: c, wrap: 'truncate-end', children: '   ' + stepsText(steps) }) : null, ...(out || []).map(l => cap('   │ ' + l, { wrap: 'truncate-end' }))], { minWidth: 0 }) : words(said, '🤖 ');
       }
-      return row([t.Svg({ source: moving(robotSvg(c, i)), alt: 'An agent at work', width: 36, height: 36 }), Box({ flexDirection: 'column', flexShrink: 1, flexGrow: 1, justifyContent: 'center', children: [
+      // the words, then the step bar right under them (the most visible
+      // part), then the model tag and the box
+      return row([t.Svg({ source: moving(robotSvg(c, i)), alt: 'An agent at work', width: 36, height: 36 }), Box({ flexDirection: 'column', flexShrink: 1, flexGrow: 1, minWidth: 0, justifyContent: 'center', children: [
         words(x, ''),
-        tag ? Text({ size: 'caption', mono: true, color: c, children: tag }) : null,
         steps ? t.Svg({ source: stepsSvg(steps, c), alt: steps.total ? 'Step ' + steps.done + ' of ' + steps.total : 'About ' + Math.round(100 * steps.frac) + '% of its time' }) : null,
+        tag ? Text({ size: 'caption', mono: true, color: c, wrap: 'truncate-end', children: tag }) : null,
         // its latest output, or its report's first lines once done: a small
         // dim box, each line cut at the pane's width
-        out ? Box({ flexDirection: 'column', paddingX: 1, borderStyle: 'round', borderColor: tint(c, 0.35), backgroundColor: OUT_FILL, children: out.map(l => Text({ size: 'caption', mono: true, dimColor: true, wrap: 'truncate-end', children: l })) }) : null,
-      ].filter(Boolean) })], { columnGap: 1, alignItems: 'center' });
-    })], { rowGap: 1 }));
+        out ? Box({ flexDirection: 'column', minWidth: 0, overflow: 'hidden', paddingX: 1, borderStyle: 'round', borderColor: tint(c, 0.35), backgroundColor: OUT_FILL, children: out.map(l => Text({ size: 'caption', mono: true, dimColor: true, wrap: 'truncate-end', children: l })) }) : null,
+      ].filter(Boolean) })], { columnGap: 1, alignItems: 'center', minWidth: 0 });
+    })], { rowGap: 1, minWidth: 0 }));
   }
 
   // the context: how full it is, one figure and one bar; and from a size
@@ -742,23 +791,40 @@ export const paneView = (t, m, o = {}) => {
   const compact = !m.compact ? null
     : o.surface === 'terminal' ? cap(m.compact === 'running' ? 'Compacting…' : '/compact cuts it.')
     : row([Button({ key: 'pacing-pane-compact', label: m.compact === 'running' ? 'Compacting…' : 'Compact', variant: 'secondary', onPress: o.onCompact || (() => {}) })]);
-  // The auto-compact window pacing sets: its words, then − and + (a step
-  // each), small, and a toggle for Claude Code's own auto-compact; while
-  // that is on, the toggle and a short note alone. The terminal gets the
-  // command, typed there. Left alone ('off'): one dim line, no buttons.
+  // The auto-compact window pacing sets: last a row with an on/off switch
+  // for Claude Code's own auto-compact at its right end (a plain Button
+  // holding a green or grey track with its knob; the terminal's reads
+  // ◉ on or ○ off), above it, while it is off, the window's words with − and +
+  // (a step each) on a row of their own; while on, a short note under the
+  // switch. Left alone ('off'): one dim line, no buttons.
   const ac = m.autoCompact;
   const setTo = v => () => (o.onAutoCompact ? o.onAutoCompact(v) : undefined);
-  const own = ac && !ac.off && Button({ key: 'pacing-pane-autocompact-auto', label: (ac.own ? '☑ ' : '☐ ') + AUTO_COMPACT_OWN_LABEL, variant: 'secondary', onPress: setTo(ac.own ? ac.back : 'auto') });
+  const knob = ac && !ac.off && (o.surface === 'terminal'
+    ? Button({ key: 'pacing-pane-autocompact-auto', label: ac.own ? '◉ on' : '○ off', plain: true, onPress: setTo(ac.own ? ac.back : 'auto') })
+    : hasSvg ? Box({ position: 'relative', width: SWITCH_W, height: SWITCH_H, children: [
+      t.Svg({ source: switchSvg(ac.own), alt: AUTO_COMPACT_OWN_LABEL + (ac.own ? ': on' : ': off'), width: SWITCH_W, height: SWITCH_H }),
+      Box({ position: 'absolute', top: 0, left: 0, width: SWITCH_W, height: SWITCH_H, children: [
+        Button({ key: 'pacing-pane-autocompact-auto', label: AUTO_COMPACT_OWN_LABEL + (ac.own ? ': on' : ': off'), plain: true, onPress: setTo(ac.own ? ac.back : 'auto'),
+          children: [Text({ mono: true, children: '      ' })] })] })] })
+    : Button({ key: 'pacing-pane-autocompact-auto', label: AUTO_COMPACT_OWN_LABEL + (ac.own ? ': on' : ': off'), plain: true, onPress: setTo(ac.own ? ac.back : 'auto'),
+      children: [Text({ mono: true, color: '#ffffff', backgroundColor: ac.own ? SWITCH_ON : SWITCH_OFF, children: ac.own ? SWITCH_KNOB.on : SWITCH_KNOB.off })] }));
   const autoCompact = !ac ? null
     : ac.off ? cap(ac.text)
-    : o.surface === 'terminal' ? cap(ac.text + '; /pacing autocompact <tokens>, auto or off changes it.')
-    : ac.own ? row([own, ac.note ? cap(ac.note) : null], { columnGap: 1, alignItems: 'center', flexWrap: 'wrap' })
-    : row([
-      Text({ size: 'caption', children: ac.text }),
-      ac.less != null ? Button({ key: 'pacing-pane-autocompact-less', label: '−', variant: 'secondary', onPress: setTo(ac.less) }) : null,
-      ac.more != null ? Button({ key: 'pacing-pane-autocompact-more', label: '+', variant: 'secondary', onPress: setTo(ac.more) }) : null,
-      own,
-    ], { columnGap: 1, alignItems: 'center', flexWrap: 'wrap' });
+    : col([
+      // pacing's own limit first; Claude Code's switch at the section's
+      // bottom (the user's word)
+      ac.own ? null : row([
+        Text({ size: 'caption', children: ac.text }),
+        row([
+          ac.less != null ? Button({ key: 'pacing-pane-autocompact-less', label: '−', variant: 'secondary', onPress: setTo(ac.less) }) : null,
+          ac.more != null ? Button({ key: 'pacing-pane-autocompact-more', label: '+', variant: 'secondary', onPress: setTo(ac.more) }) : null,
+        ], { columnGap: 1 }),
+      ], { justifyContent: 'space-between', alignItems: 'center', columnGap: 1 }),
+      col([
+        row([Text({ size: 'caption', children: AUTO_COMPACT_OWN_LABEL }), knob], { justifyContent: 'space-between', alignItems: 'center', columnGap: 1 }),
+        ac.own && ac.note ? cap(ac.note) : null,
+      ]),
+    ], { rowGap: 1, marginTop: 1 });
   if (m.context) {
     const c = m.context;
     sections.push(panel('context', [head('Context', ACCENTS.context),
@@ -783,7 +849,7 @@ export const paneView = (t, m, o = {}) => {
     sections.push(panel('tasks', [head('Background tasks', ACCENTS.tasks), ...m.tasks.map(x => {
       const mark = TASK_MARKS[x.state];
       return between(
-        row([Text({ mono: true, ...(mark ? { dimColor: true } : { color: ACCENTS.tasks }), children: x.kind }), Text({ wrap: 'truncate-end', dimColor: !!mark, children: x.what || '' })], { columnGap: 1, flexShrink: 1 }),
+        row([Text({ mono: true, ...(mark ? { dimColor: true } : { color: ACCENTS.tasks }), children: x.kind }), Text({ wrap: 'wrap', dimColor: !!mark, children: hasSvg ? breakable(x.what || '') : x.what || '' })], { columnGap: 1, flexShrink: 1, minWidth: 0 }),
         Text({ tabular: true, mono: true, ...(x.state === 'done' ? { color: 'success' } : x.state === 'failed' ? { color: 'error' } : { dimColor: true }), children: (mark ? mark + ' · ' : '') + x.time }));
     })]));
   }
