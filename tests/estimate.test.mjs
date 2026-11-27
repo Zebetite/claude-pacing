@@ -25,12 +25,14 @@ const home = () => {
   return { s, dir, a, b, sub, cache: path.join(s.data, 'scan.json') };
 };
 const points = h => JSON.parse(fs.readFileSync(h.cache, 'utf8')).files;
-// the bytes a scan read from the files
+// the bytes a scan read from the transcripts (Node 18's readFileSync goes
+// through fs.readSync too, so reads of scan.json are left out by their fd)
 const reading = fn => {
-  const real = fs.readSync;
+  const real = fs.readSync, open = fs.openSync, fds = new Set();
   let bytes = 0;
-  fs.readSync = (...a) => { const got = real(...a); bytes += got; return got; };
-  try { return { out: fn(), bytes }; } finally { fs.readSync = real; }
+  fs.openSync = (f, ...a) => { const fd = open(f, ...a); if (String(f).endsWith('.jsonl')) fds.add(fd); return fd; };
+  fs.readSync = (fd, ...a) => { const got = real(fd, ...a); if (fds.has(fd)) bytes += got; return got; };
+  try { return { out: fn(), bytes }; } finally { fs.readSync = real; fs.openSync = open; }
 };
 // the same scan with the checkpoints and without them
 const both = (h, o) => {

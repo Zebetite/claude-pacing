@@ -133,7 +133,8 @@ has no meter for one model (no "Weekly · Fable" or similar line), run
 
 ## Tests
 
-`npm test` (or `node --test`) in this folder runs the tests in `tests/`.
+`npm test` (or `node --test tests/*.test.mjs`) in this folder runs the
+tests in `tests/`.
 They need nothing installed. Each script runs in a child process whose
 home folder is a new temp folder, so the tests never read or change your
 own `~/.claude`. The `tests/` folder is outside the plugin and is not

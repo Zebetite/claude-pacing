@@ -111,7 +111,9 @@ const passedOn = () => { try { return JSON.parse(fs.readFileSync(CACHE, 'utf8'))
 async function checks() {
   const exe = claudeExe();
   const results = await Promise.all([
-    run('node tests', process.execPath, ['--test']),
+    // tests/ only: a Node that strips types would also take the hooks
+    // module's kit tests (*.test.ts), which need Claude Code's test kit
+    run('node tests', process.execPath, ['--test', ...fs.readdirSync(path.join(ROOT, 'tests')).filter(n => n.endsWith('.test.mjs')).map(n => path.join('tests', n))]),
     run('kit tests', exe, ['plugin', 'test', PLUGIN]),
     run('validation', exe, ['plugin', 'validate', PLUGIN, '--profile', 'directory', '--strict']),
   ]);

@@ -1395,3 +1395,17 @@ let back bring none. The toast is short: the change and one step
 (`levelToastText`), where it held the whole `do:` line and was cut off.
 The room-left-over toast is gone (the pane and `/pacing-status` keep the
 note). The session's start line asks for a switch only when Fable is out.
+
+## The tests on GitHub, and handover done on Windows (0.9.41)
+
+The first GitHub run of the tests (0.9.40) failed in three ways. A Node
+22 that strips types took the hooks module's kit tests
+(`readings.test.ts`), which need Claude Code's test kit; the workflow,
+`npm test` and `release.mjs` now run `tests/*.test.mjs` only. On Node 18
+`readFileSync` goes through `fs.readSync`, so the estimate test counted
+the read of `scan.json` as transcript bytes; it now counts reads on the
+transcripts' own file descriptors. And on Windows three sessions filing
+the same handover away at once all said "picked up": a rename did not
+refuse the later two. `handover done` now claims the file with a hard
+link into `done/` (made once, EEXIST for the rest), with a rename where
+links are not supported.

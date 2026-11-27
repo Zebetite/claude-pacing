@@ -373,10 +373,20 @@ switch (cmd || 'show') {
       if (!which.length) { console.log(b ? 'no waiting handover named ' + b : 'no handover is waiting for ' + root); break; }
       fs.mkdirSync(path.join(dir, 'done'), { recursive: true });
       for (const f of which) {
-        // two sessions filing the same handover away: one moves it, the other
-        // finds it gone
-        try { fs.renameSync(f, path.join(dir, 'done', path.basename(f))); } catch (e) {
-          if (e.code !== 'ENOENT') throw e;
+        // two sessions filing the same handover away: one claims it, the
+        // other finds it claimed or gone. The claim is a hard link into done/,
+        // made or refused at once (EEXIST); a rename alone let three sessions
+        // at once all succeed on Windows. Where links are not supported, a
+        // rename.
+        const to = path.join(dir, 'done', path.basename(f));
+        try {
+          try { fs.linkSync(f, to); } catch (e) {
+            if (!['EPERM', 'ENOTSUP', 'EXDEV', 'ENOSYS'].includes(e.code)) throw e;
+            fs.renameSync(f, to);
+          }
+          try { fs.unlinkSync(f); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+        } catch (e) {
+          if (e.code !== 'ENOENT' && e.code !== 'EEXIST') throw e;
           console.log('already picked up: ' + path.basename(f));
           continue;
         }
