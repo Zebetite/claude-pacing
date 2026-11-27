@@ -1639,3 +1639,17 @@ the breakdown's own "Autocompact buffer" row (`autoCompactBuffer`), else
 a little sooner. `autoCompactHas` compares the window with the figure
 plus the buffer. config.json, `/pacing autocompact` and the pane's − and +
 keep the figure itself; a refused run's toast names the command that ran.
+
+## The switch as text, the context against the compact point (0.9.45)
+
+Live in 0.9.44 the switch drew wrong: the desktop draws a Button's label
+over its children, so "Use Claude Auto Compact: off" ran past the pane,
+and the Svg laid under the Button stretched the row. The switch is now a
+Button with no label holding one Text, a track in blue (on) or grey (off)
+with its knob, and no Svg or absolute Box. Its caption wraps.
+
+The Context section's figure reads against the point the session
+compacts at where a window was set (`autocompactSource` 'settings':
+"167k of 400k" under "Compact at 400k"), since pacing now sets the window
+a buffer above the figure; with Claude Code's own window it reads
+against the window as before.

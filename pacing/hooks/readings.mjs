@@ -896,8 +896,12 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, now = D
   // the readings fail: the figures above are older than they look
   if (failing) m.notes.unshift(FAILED_NOTE);
   if (bd && typeof bd.totalTokens === 'number') {
-    const max = bd.rawMaxTokens || bd.maxTokens;
-    m.context = { used: kText(bd.totalTokens), of: max ? kText(max) : '', pct: max ? bd.percentage : null };
+    // Against the point it compacts at where a window was set (pacing sets it
+    // a buffer above the figure, so "of 400k" matches "Compact at 400k"), the
+    // window else.
+    const at = bd.autocompactSource === 'settings' && bd.isAutoCompactEnabled && bd.autoCompactThreshold > 0 ? bd.autoCompactThreshold : 0;
+    const max = at || bd.rawMaxTokens || bd.maxTokens;
+    m.context = { used: kText(bd.totalTokens), of: max ? kText(max) : '', pct: max ? (at ? Math.round(bd.totalTokens / at * 100) : bd.percentage) : null };
   } else m.contextNote = 'Not measured yet; it shows after the next turn.';
   // the agents' rows: the model as a tag, the step bar, the rung
   // the output box (`out`, `outAt` its newest line's time) for the

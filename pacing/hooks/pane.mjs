@@ -801,13 +801,12 @@ export const paneView = (t, m, o = {}) => {
   const setTo = v => () => (o.onAutoCompact ? o.onAutoCompact(v) : undefined);
   const knob = ac && !ac.off && (o.surface === 'terminal'
     ? Button({ key: 'pacing-pane-autocompact-auto', label: ac.own ? '◉ on' : '○ off', plain: true, onPress: setTo(ac.own ? ac.back : 'auto') })
-    : hasSvg ? Box({ position: 'relative', width: SWITCH_W, height: SWITCH_H, children: [
-      t.Svg({ source: switchSvg(ac.own), alt: AUTO_COMPACT_OWN_LABEL + (ac.own ? ': on' : ': off'), width: SWITCH_W, height: SWITCH_H }),
-      Box({ position: 'absolute', top: 0, left: 0, width: SWITCH_W, height: SWITCH_H, children: [
-        Button({ key: 'pacing-pane-autocompact-auto', label: AUTO_COMPACT_OWN_LABEL + (ac.own ? ': on' : ': off'), plain: true, onPress: setTo(ac.own ? ac.back : 'auto'),
-          children: [Text({ mono: true, children: '      ' })] })] })] })
-    : Button({ key: 'pacing-pane-autocompact-auto', label: AUTO_COMPACT_OWN_LABEL + (ac.own ? ': on' : ': off'), plain: true, onPress: setTo(ac.own ? ac.back : 'auto'),
-      children: [Text({ mono: true, color: '#ffffff', backgroundColor: ac.own ? SWITCH_ON : SWITCH_OFF, children: ac.own ? SWITCH_KNOB.on : SWITCH_KNOB.off })] }));
+    // The desktop draws a Button's label where it has one, children or not
+    // (live, 0.9.44: the label ran past the pane and the Svg laid under it
+    // stretched the row), so the switch is a Button with no label: a track
+    // of text in blue or grey with its knob, one press anywhere on it.
+    : Box({ flexShrink: 0, children: [Button({ key: 'pacing-pane-autocompact-auto', plain: true, onPress: setTo(ac.own ? ac.back : 'auto'),
+      children: [Text({ mono: true, color: '#ffffff', backgroundColor: ac.own ? SWITCH_ON : SWITCH_OFF, children: ac.own ? SWITCH_KNOB.on : SWITCH_KNOB.off })] })] }));
   const autoCompact = !ac ? null
     : ac.off ? cap(ac.text)
     : col([
@@ -821,7 +820,7 @@ export const paneView = (t, m, o = {}) => {
         ], { columnGap: 1 }),
       ], { justifyContent: 'space-between', alignItems: 'center', columnGap: 1 }),
       col([
-        row([Text({ size: 'caption', children: AUTO_COMPACT_OWN_LABEL }), knob], { justifyContent: 'space-between', alignItems: 'center', columnGap: 1 }),
+        row([Text({ size: 'caption', wrap: 'wrap', children: AUTO_COMPACT_OWN_LABEL }), knob], { justifyContent: 'space-between', alignItems: 'center', columnGap: 1, minWidth: 0 }),
         ac.own && ac.note ? cap(ac.note) : null,
       ]),
     ], { rowGap: 1, marginTop: 1 });
