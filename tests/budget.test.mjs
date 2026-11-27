@@ -425,8 +425,64 @@ describe('arguments', () => {
   });
   test('the session model by id: upward line on a lower tier', () => {
     const out = dry('2026-11-13T12:00:00Z', 10, '--session', 'claude-opus-5-5').out;
-    assert.match(out, /^upward: this session runs on Opus 5.5 medium/m);
+    assert.match(out, /^upward: room in the week: .* may go to a Fable 5\.2 xhigh subagent$/m);
     assert.match(dry('2026-11-13T12:00:00Z', 10, '--session', 'claude-haiku-5-5').out, /^note: the session's model "claude-haiku-5-5" is not on the ladder$/m);
+  });
+});
+
+describe('upward: subagents above the session where the budget has room', () => {
+  const now = '2026-11-13T12:00:00Z';
+  const upward = out => (out.match(/^upward: (.*)$/m) || [])[1] || null;
+  const WORK = 'work that a stronger model or more effort does better (design, a hard bug with a clear case, a review, the final check of a large change) may go to ';
+  test('room in the week and in the per-model meter: the top model, one effort step above the session\'s', () => {
+    assert.equal(upward(dry(now, 10, '--premium', '10').out), 'room in the week and in Fable 5.2\'s meter: ' + WORK + 'a Fable 5.2 xhigh subagent');
+    assert.equal(upward(dry(now, 18, '--premium', '18').out), 'room in the week and in Fable 5.2\'s meter: ' + WORK + 'a Fable 5.2 xhigh subagent');
+    // no per-model meter: the week alone
+    assert.equal(upward(dry(now, 18, '--premium', '-').out), 'room in the week: ' + WORK + 'a Fable 5.2 xhigh subagent');
+  });
+  test('allowance that would go unused: two steps up, at most max', () => {
+    // Sunday, 5 points a day: 40 % goes unused at the reset
+    const sunday = '2026-11-15T12:00:00Z';
+    sb.write('log.jsonl', JSON.stringify({ t: new Date(Date.parse(sunday) - 24 * 3600000).toISOString(), all: 35, line: 30, level: 'ahead', reset: RESET }) + '\n');
+    try {
+      assert.match(dry(sunday, 40).out, /^unused: /m);
+      assert.equal(upward(dry(sunday, 40).out), 'room in the week: ' + WORK + 'a Fable 5.2 max subagent');
+      sb.config(['set', '1', 'fable', 'medium']);
+      assert.equal(upward(dry(sunday, 40).out), 'room in the week: ' + WORK + 'a Fable 5.2 xhigh subagent');
+      sb.config(['set', '1', 'fable', 'xhigh']);
+      assert.equal(upward(dry(sunday, 40).out), 'room in the week: ' + WORK + 'a Fable 5.2 max subagent');
+      // the session on max already: nothing above it
+      sb.config(['set', '1', 'fable', 'max']);
+      assert.equal(upward(dry(sunday, 40, '--session', 'claude-fable-5-2').out), null);
+    } finally { sb.config(['reset']); fs.rmSync(sb.file('log.jsonl'), { force: true }); }
+  });
+  test('one step at most max without unused', () => {
+    sb.config(['set', '1', 'fable', 'xhigh']);
+    try { assert.equal(upward(dry(now, 18, '--premium', '-').out), 'room in the week: ' + WORK + 'a Fable 5.2 max subagent'); } finally { sb.config(['reset']); }
+  });
+  test('the per-model meter over its line: no upward line; held: only the held one', () => {
+    assert.equal(upward(dry(now, 10, '--premium', '22').out), null);
+    assert.equal(upward(dry(now, 10, '--premium', '22', '--session', 'claude-opus-5-5').out), null);
+    assert.equal(upward(dry(now, 10, '--premium', '30').out), 'Fable 5.2 is kept for judgment work: one contained hard task with a clear deliverable may go to a Fable 5.2 high subagent; an open debugging hunt may not');
+  });
+  test('the week over its line: nothing goes up', () => {
+    assert.equal(upward(dry(now, 22, '--premium', '10').out), null);
+    assert.equal(upward(dry(now, 22, '--session', 'claude-opus-5-5').out), null);
+    assert.equal(upward(dry(now, 30, '--session', 'claude-opus-5-5').out), null);
+  });
+  test('a session below the top: the top model one step above the higher of its effort and tier 1\'s', () => {
+    // Opus 5.5 medium under Fable 5.2 high: from high
+    assert.equal(upward(dry(now, 18, '--premium', '-', '--session', 'claude-opus-5-5').out), 'room in the week: ' + WORK + 'a Fable 5.2 xhigh subagent');
+    // Sonnet 5.5 xhigh under Opus 5.5 medium: from xhigh
+    sb.config(['apply', 'set', '1', 'opus', 'medium', '+', 'set', '2', 'sonnet', 'xhigh', '+', 'premium', 'none']);
+    try { assert.equal(upward(dry(now, 18, '--session', 'claude-sonnet-5-5').out), 'room in the week: ' + WORK + 'an Opus 5.5 max subagent'); } finally { sb.config(['reset']); sb.config(['premium', 'fable']); }
+  });
+  test('no room but the week on pace (a per-model meter off tier 1 over its line): the session below tier 1 may send one task up', () => {
+    sb.config(['premium', 'opus']);
+    try {
+      assert.equal(upward(dry(now, 10, '--premium', '22', '--session', 'claude-sonnet-5-5').out), 'this session runs on Sonnet 5.5 medium; one contained hard task with a clear deliverable may go to a Fable 5.2 high subagent');
+      assert.equal(upward(dry(now, 22, '--premium', '22', '--session', 'claude-sonnet-5-5').out), null);
+    } finally { sb.config(['premium', 'fable']); }
   });
 });
 

@@ -57,7 +57,6 @@ export const ICON = {
   compacted: '🗜️', // compacted, or a compaction on offer
   pause: '💤', // the cache lapsed, or is about to, in a pause
   room: '💡', // allowance that goes unused at the reset
-  bulky: '🧱', // a tool result large enough to weigh on every later turn
 };
 // Routine toasts (started, still running, a switch or a compaction the
 // person just pressed for) stay the engine's 4 seconds; what should not be
@@ -416,62 +415,18 @@ async function takeReading($, rd, { at, week, five, lastFirst = false } = {}) {
     return j;
   } catch { return null; } finally { rd.running = false; sayFailing($, rd.health); }
 }
-// What goes unused at the reset (budget.mjs's `unused`, points of the week
-// the trend leaves at "ahead") is a note in the pane and in /pacing-status,
-// no toast (the user's word: fewer messages).
-export const UNUSED_STEP = 10;
-export const unusedText = n => ICON.room + ' at this pace about ' + n + '% of the week goes unused at the reset, and it does not carry over: there is room for harder work and more effort.';
-// A large tool result in the main thread stays in the session: every later
-// turn sends it again (from the cache, but it counts), and it brings the
-// compaction nearer. /pacing-status counts them; no toast (the user's word:
-// no messages about tokens used). Subagents' results are left out:
-// only their answer reaches the session. Tokens are estimated from the text
-// the model reads, 4 characters a token.
-export const BULKY_TOKENS = 10000;
-export const tokensOfText = text => (typeof text === 'string' ? Math.round(text.length / 4) : 0);
-export const toolLabel = tool => {
-  const name = String(tool || 'tool');
-  const short = name.startsWith('mcp__') ? name.split('__').pop() : name;
-  return short.length > 20 ? short.slice(0, 19) + '…' : short;
-};
-export const bulkyStatus = b => (b && b.count ? '\nLarge results: ' + b.count + ' this session, about ' + kText(b.tokens)
-  + ' tokens that every later turn sends again; bulky reads cost less in the reader agent.' : '');
 const kText = n => (n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(Math.round(n)));
 
 // ---- what fills the session's context ----
 // The engine breaks the window down by category as /context does
 // ($.session.usage({ breakdown: 'summary' }): estimated locally, no request
-// sent). Its Messages row does not say what in the conversation is large, so
-// the module counts the main thread's tool results itself (tokensOfText),
-// by tool, with the largest few, from the last compaction (or load) on.
-// /pacing-status and the pane show both.
-export const RESULTS_TOP = 5;
-export const newResults = () => ({ total: 0, byTool: {}, top: [] });
-// what a call read or ran, in a few words: a file's name, a command's start
-export const whatOf = e => {
-  const file = e.file_path || e.notebook_path || e.path;
-  const raw = file ? String(file).split(/[\\/]/).pop() : String(e.command || e.pattern || e.url || e.query || e.description || '');
-  const one = raw.split('\n')[0].trim();
-  return one.length > 30 ? one.slice(0, 29) + '…' : one;
-};
-export const noteResult = (r, tool, what, tokens) => {
-  if (!(tokens > 0)) return r;
-  const name = toolLabel(tool);
-  r.total += tokens;
-  r.byTool[name] = (r.byTool[name] || 0) + tokens;
-  r.top = [...r.top, { tool: name, what: what || '', tokens }].sort((a, b) => b.tokens - a.tokens).slice(0, RESULTS_TOP);
-  return r;
-};
-const byToolText = r => {
-  const top = Object.entries(r.byTool).sort((a, b) => b[1] - a[1]).slice(0, 3);
-  return top.length ? ' (' + top.map(([n, t]) => n + ' ' + kText(t)).join(', ') + ')' : '';
-};
-// The context in lines: the total against the window and where it compacts by
-// itself, the conversation split into tool results and the rest, the fixed
-// parts (system prompt, tools, memory, skills) largest first, and the
-// largest results. Categories are told apart by `kind`; the Messages row is
-// the one the engine names so (its name is the only mark it has).
-export const contextLines = (bd, r) => {
+// sent). /pacing-status shows it in lines: the total against the window and
+// where it compacts by itself, the Messages row's total, and the fixed parts
+// (system prompt, tools, memory, skills) largest first. Categories are told
+// apart by `kind`; the Messages row is the one the engine names so (its name
+// is the only mark it has). No split of the large results: compacting is
+// what the module offers when the session is large (the user's word).
+export const contextLines = bd => {
   const lines = [];
   if (bd && typeof bd.totalTokens === 'number') {
     const max = bd.rawMaxTokens || bd.maxTokens;
@@ -479,16 +434,10 @@ export const contextLines = (bd, r) => {
       + (bd.isAutoCompactEnabled && bd.autoCompactThreshold ? '; it compacts by itself at ' + kText(bd.autoCompactThreshold) : ''));
     const used = (bd.categories || []).filter(c => c.kind === 'used' && c.tokens > 0);
     const msgs = used.find(c => /^messages$/i.test(String(c.name)));
-    if (msgs) {
-      const tools = r && r.total ? Math.min(r.total, msgs.tokens) : 0;
-      lines.push('  Messages ' + kText(msgs.tokens) + (tools ? ': tool results about ' + kText(tools) + byToolText(r) + ', the rest about ' + kText(msgs.tokens - tools) : ''));
-    }
+    if (msgs) lines.push('  Messages ' + kText(msgs.tokens));
     const rest = used.filter(c => c !== msgs).sort((a, b) => b.tokens - a.tokens);
     if (rest.length) lines.push('  ' + rest.map(c => c.name + ' ' + kText(c.tokens)).join(' · '));
-  } else if (r && r.total) {
-    lines.push('Context: tool results about ' + kText(r.total) + byToolText(r));
   }
-  if (r && r.top.length) lines.push('Largest results: ' + r.top.map(t => t.tool + (t.what ? ' ' + t.what : '') + ' ' + kText(t.tokens)).join('; '));
   return lines;
 };
 // the breakdown now, or null where the engine gives none
@@ -524,13 +473,27 @@ export const autoCompactOf = c => {
 // settings set is the window measured against (rawMaxTokens), with the
 // source 'settings'; 'auto' is any window the settings did not set. One from
 // CLAUDE_CODE_AUTO_COMPACT_WINDOW (source 'env') outranks the settings, so
-// /autocompact could not change it: that counts as had.
-export const autoCompactHas = (bd, want) => {
+// /autocompact could not change it: that counts as had. Claude Code keeps the
+// value set but measures against no more than the model's context window
+// (`window`, where known): a 200k model set to 750 000 shows 200 000.
+export const autoCompactHas = (bd, want, window = null) => {
   const source = bd && bd.autocompactSource;
   if (source === 'env') return true;
   if (want === 'auto') return source !== 'settings';
-  return source === 'settings' && bd.rawMaxTokens === want;
+  return source === 'settings' && bd.rawMaxTokens === (window > 0 ? Math.min(want, window) : want);
 };
+// The last token count the setting held ($.store, across sessions), so the
+// pane's toggle back from Claude Code's own auto-compact returns to it;
+// none kept is the default.
+export const AUTO_COMPACT_LAST = 'autoCompactLast';
+export const autoCompactLastOf = v => (Number.isInteger(v) && v >= AUTO_COMPACT_MIN && v <= AUTO_COMPACT_MAX ? v : AUTO_COMPACT_DEFAULT);
+async function autoCompactLast($) {
+  try { return autoCompactLastOf(await $.store.get(AUTO_COMPACT_LAST)); } catch { return AUTO_COMPACT_DEFAULT; }
+}
+async function autoCompactKeep($, v) {
+  if (!Number.isInteger(v)) return;
+  try { await $.store.set(AUTO_COMPACT_LAST, v); } catch { /* the default then */ }
+}
 // the pane's words for the setting
 export const autoCompactText = v => (v === 'auto' ? 'Auto-compact: Claude Code\'s default' : 'Auto-compact at ' + kText(v));
 export const autoCompactFailedText = (want, why) => {
@@ -567,22 +530,27 @@ async function autoCompactCheck($, ac, model) {
     const want = autoCompactOf(await configOf($));
     const same = !model || !ac.model || sameModel(ac.model, model) || sameModel(model, ac.model);
     if (!ac.due && want === ac.want && same) return;
+    if (want !== ac.want) await autoCompactKeep($, want);
     if (want === 'off') { ac.want = want; ac.due = false; return; }
-    const bd = await breakdownNow($);
+    let u = null;
+    try { u = await $.session.usage({ breakdown: 'summary' }); } catch { /* none */ }
+    const bd = (u && u.context && u.context.breakdown) || null;
     // none yet: the next turn's end asks again
     if (!bd) { ac.due = true; return; }
     ac.due = false;
     ac.want = want;
     if (model || !ac.model) ac.model = model || (typeof bd.model === 'string' ? bd.model : null);
-    if (!autoCompactHas(bd, want)) await autoCompactRun($, ac, want, true);
+    if (!autoCompactHas(bd, want, u.context.window)) await autoCompactRun($, ac, want, true);
   } catch { /* the next start or change */ } finally { ac.busy = false; }
 }
-// A press on the pane's −, + or Auto: config.json first, through config.mjs,
-// then /autocompact with the new value. One press at a time.
+// A press on the pane's −, + or its toggle for Claude Code's own: config.json
+// first, through config.mjs, then /autocompact with the new value. The token
+// count it leaves for 'auto' is kept (autoCompactKeep). One press at a time.
 async function autoCompactPress($, ac, v) {
   if (ac.pressing) return;
   ac.pressing = true;
   try {
+    if (v === 'auto') { try { await autoCompactKeep($, autoCompactOf(await configOf($))); } catch { /* the last kept */ } }
     let r = null;
     try { r = await $.process.run(autoCompactArgv($.plugin.root, v), { timeoutMs: 20000 }); } catch { /* said below */ }
     if (!r || r.exitCode !== 0) {
@@ -591,6 +559,7 @@ async function autoCompactPress($, ac, v) {
       return;
     }
     configStale();
+    await autoCompactKeep($, v);
     // the check at the next turn's end has nothing more to do
     ac.want = v;
     redraw($);
@@ -625,23 +594,117 @@ export const closedByPerson = e => !!e && e.id === PANE_ID && !!e.origin && e.or
 // the pane's button is there for whoever looks, the row is what interrupts.
 // `autoCompact`: the setting (autoCompactOf), drawn in the Context section
 // as its words, the values a press on − and + gives (a step of
-// AUTO_COMPACT_STEP on the step's grid, none past the bounds; from 'auto'
-// they step from the default) and whether Auto is offered; nothing for
-// 'off' or none given.
+// AUTO_COMPACT_STEP on the step's grid, none past the bounds) and `own`,
+// whether Claude Code's own auto-compact is on ('auto'): then no − and +,
+// a short `note` instead, and `back`, the token count the toggle returns
+// to (`autoCompactLast`, the last one kept, else the default). Nothing for
+// 'off' (pacing leaves /autocompact alone) or none given.
 export const PANE_COMPACT_AT = 300000;
+// the pane's note under the toggle while Claude Code's own auto-compact is on
+export const AUTO_COMPACT_OWN_NOTE = 'It compacts near the end of the window.';
 // the 5-hour window's figure from which heavy work waits (budget.mjs says HOLD there too)
 export const FIVE_HOLD = 85;
+// ---- the agents' rows in the pane: model tags, output, step bars ----
+// A model as the reading's prices name it: an id the session or an agent
+// reports ("claude-opus-5-5", with a suffix or not), or an alias the Agent
+// call gave ("haiku"); null where the prices know none.
+export const modelIdOf = (m, prices) => {
+  if (typeof m !== 'string' || !m || !prices) return null;
+  const ids = Object.keys(prices);
+  return ids.find(id => m.startsWith(id)) || ids.find(id => id.startsWith('claude-' + m.toLowerCase() + '-')) || null;
+};
+// ↑ or ↓ for a model stronger or weaker than the session's, by its price;
+// '' when the same, or either is not known
+export const modelArrow = (m, session, prices) => {
+  const a = modelIdOf(m, prices), b = modelIdOf(session, prices);
+  if (!a || !b || a === b) return '';
+  const pa = prices[a] && prices[a][0], pb = prices[b] && prices[b][0];
+  return typeof pa !== 'number' || typeof pb !== 'number' || pa === pb ? '' : pa > pb ? '↑' : '↓';
+};
+// What an agent is doing or has just produced, in a small box under its row
+// (the user's word: show a subagent's output where the pane has room): its
+// last OUT_LINES lines, newest last. The engine hands the module, for a
+// subagent's loop, each step's visible text (turn.step's response `answer`)
+// and each tool call with its result (tool.call, `agentId`), and at its end
+// the report it handed back (turn.complete's `answer`); nothing is read
+// from a transcript. A line is cut at OUT_CHARS (the pane cuts it at its
+// width too). OUT_SHOWN agents show the box at once: the ones with the
+// newest output.
+export const OUT_LINES = 3;
+export const OUT_CHARS = 90;
+export const OUT_SHOWN = 2;
+// a text's first line with words in it, its spaces made one; '' for none
+export const outLine = text => {
+  const line = String(text || '').split('\n').map(l => l.replace(/\s+/g, ' ').trim()).find(l => /\w/.test(l)) || '';
+  return cut(line, OUT_CHARS);
+};
+// the first OUT_LINES lines of an agent's report, its markdown marks left out
+export const reportLines = text => String(text || '').split('\n')
+  .map(l => l.replace(/^\s*(#+|[-*>]|\d+\.)\s+/, '').replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim())
+  .filter(l => /\w/.test(l)).slice(0, OUT_LINES).map(l => cut(l, OUT_CHARS));
+// a finished run's row: "reviewer: the release notes ✓ done · 6m" (`state`: done, failed, stopped)
+export const finishedText = (a, state, ms) => {
+  const task = taskOf(a);
+  return nameOf(a) + (task ? ': ' + task : '') + ' ' + (TASK_MARKS[state] || TASK_MARKS.done) + ' · ' + dur(ms);
+};
+// what a call read or ran, in a few words: a file's name, a command's first line
+const callWhat = e => {
+  const file = e.file_path || e.notebook_path || e.path;
+  return file ? String(file).split(/[\\/]/).pop() : outLine(e.command || e.pattern || e.url || e.query || e.description || '');
+};
+// One tool call and how it came out: "Bash npm test → 448 pass" (a
+// command's last line of output), "Read pane.mjs → 737 lines", "Edit
+// pane.mjs → saved", "Grep stepBarOf → 3 lines"; refused or failed says so.
+// '' for the call that says a step (config.mjs part): the bar shows it.
+// a command's outcome: of its last lines, the last that says how it went
+// (a test runner ends on "# duration_ms …" after "# pass 448"), else its
+// last line
+const SAYS_RESULT = /\b(pass(ed)?|fail(ed|ures?)?|errors?|ok|tests?|done|warnings?)\b|✓|✗/i;
+const resultLine = lines => [...lines.slice(-12)].reverse().find(l => SAYS_RESULT.test(l) && !/duration/i.test(l)) || lines[lines.length - 1] || '';
+export const actionLine = (e, r) => {
+  if (!e || !e.tool || (e.tool === 'Bash' && PART_CALL.test(String(e.command || '')))) return '';
+  const tool = String(e.tool).startsWith('mcp__') ? String(e.tool).split('__').pop() : String(e.tool);
+  const what = callWhat(e);
+  const text = r && !r.deny ? textsOf(r).join('\n') : '';
+  const lines = text.split('\n').filter(l => l.trim());
+  const outcome = !r ? '' : r.deny ? 'refused' : r.isError ? 'failed' + (outLine(text) ? ': ' + outLine(text) : '')
+    : e.tool === 'Bash' || e.tool === 'PowerShell' ? outLine(resultLine(lines))
+    : e.tool === 'Read' || e.tool === 'Grep' || e.tool === 'Glob' ? (lines.length ? lines.length + (lines.length === 1 ? ' line' : ' lines') : 'nothing')
+    : e.tool === 'Edit' || e.tool === 'Write' || e.tool === 'NotebookEdit' ? 'saved' : '';
+  return cut(tool + (what ? ' ' + what : '') + (outcome ? ' → ' + outcome : ''), OUT_CHARS);
+};
+// the agent's box after a new line: the last OUT_LINES, one the same as the last not twice
+export const noteOut = (out, line) => {
+  const list = Array.isArray(out) ? out : [];
+  if (!line || list[list.length - 1] === line) return list;
+  return [...list, line].slice(-OUT_LINES);
+};
+// An agent's progress as a bar under its row: the steps it said ("step 2 of
+// 4": a segment each), else the time it has run against the time it is
+// estimated to take (leftOf: `frac`, 0 to 1), else none.
+export const stepBarOf = (a, now) => {
+  if (a && a.part && a.part.total >= 1) return { done: Math.min(a.part.done, a.part.total), total: a.part.total };
+  const left = a ? leftOf(a, now) : null;
+  if (left == null) return null;
+  const run = Math.max(0, now - a.startedAt);
+  return { frac: run + left > 0 ? Math.min(1, run / (run + left)) : 1 };
+};
 // The budget is said as time alone, never in tokens or dollars: "9h 30m" and
 // "left to use today to stay on budget"; past the line, "40m" and "over
 // today's budget". Without a pace there is no time: the points of the week.
-export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky = null, now = Date.now(), busy = false, failing = false, tasks = [], tokens = null, compacting = false, autoCompact = null } = {}) => {
+// `session`: the session's { model, effort }, for the agents' model tags.
+// An agent given as { text, model, effort, on, bar, out, outAt } (paneNow)
+// is drawn with its model as a tag (`tag`: `on`, ↑ or ↓ before it against
+// the session's model), its step bar (`bar`, stepBarOf) and its output box
+// (`out`, for the OUT_SHOWN agents with the newest output).
+export const paneModel = ({ j = null, mix = [], running = [], bd = null, now = Date.now(), busy = false, failing = false, tasks = [], tokens = null, compacting = false, autoCompact = null, autoCompactLast = null, session = null } = {}) => {
   const m = { level: 'ok', levelText: '', budget: null, meters: [], notes: [], mix, running, context: null, contextNote: '', empty: '', tasks, compact: null, autoCompact: null };
-  if (autoCompact !== null && autoCompact !== 'off') {
-    const n = typeof autoCompact === 'number' ? autoCompact : AUTO_COMPACT_DEFAULT;
+  if (autoCompact === 'auto') m.autoCompact = { text: autoCompactText(autoCompact), own: true, note: AUTO_COMPACT_OWN_NOTE, back: autoCompactLastOf(autoCompactLast) };
+  else if (typeof autoCompact === 'number') {
+    const n = autoCompact;
     const less = Math.max(AUTO_COMPACT_MIN, Math.ceil(n / AUTO_COMPACT_STEP) * AUTO_COMPACT_STEP - AUTO_COMPACT_STEP);
     const more = Math.min(AUTO_COMPACT_MAX, Math.floor(n / AUTO_COMPACT_STEP) * AUTO_COMPACT_STEP + AUTO_COMPACT_STEP);
-    const auto = autoCompact === 'auto';
-    m.autoCompact = { text: autoCompactText(autoCompact), less: auto || less < n ? less : null, more: auto || more > n ? more : null, auto: !auto };
+    m.autoCompact = { text: autoCompactText(n), own: false, less: less < n ? less : null, more: more > n ? more : null };
   }
   const size = typeof tokens === 'number' ? tokens : bd && typeof bd.totalTokens === 'number' ? bd.totalTokens : null;
   if (compacting) m.compact = 'running';
@@ -655,7 +718,16 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky =
     const wl = j.weekLevel || (j.levelBy !== 'premium' ? j.level
       : typeof j.all === 'number' && typeof j.line === 'number' ? (j.all >= 95 ? 'stop' : j.all - j.line > 5 ? 'throttle' : j.all > j.line ? 'over' : 'ahead') : 'ahead');
     m.level = wl === 'stop' ? 'stop' : wl === 'throttle' ? 'throttle' : wl === 'over' ? 'over' : 'ok';
-    m.levelText = { ok: 'Within budget', over: 'Over the budget line', throttle: 'Far over the budget line', stop: 'The week is nearly used' }[m.level];
+    // The words say the weekly meter's own points over its line, not the
+    // level: a trend or the per-model meter can raise the level to throttle
+    // while the week is 3 over (the user's word: "far over" then reads
+    // wrong): on or under it within budget, over by up to 5, far over past
+    // that, with the points; the week nearly used says so.
+    const over = typeof j.all === 'number' && typeof j.line === 'number' ? j.all - j.line : null;
+    const by = over !== null && over > 0 ? Math.max(1, Math.round(over)) : 0;
+    m.levelText = m.level === 'stop' ? 'The week is nearly used'
+      : over === null ? { ok: 'Within budget', over: 'Over the budget line', throttle: 'Far over the budget line' }[m.level]
+      : !by ? 'Within budget' : (by > 5 ? 'Far over the budget line' : 'Over the budget line') + ' · +' + by;
     const h = hoursLeft(j);
     const points = j.left && typeof j.left.points === 'number' ? j.left.points : typeof j.line === 'number' && typeof j.all === 'number' ? j.line - j.all : null;
     if (h !== null) {
@@ -702,12 +774,22 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky =
   } else m.empty = busy ? 'Reading the meters…' : 'No reading yet in this session: /pacing usage takes one.';
   // the readings fail: the figures above are older than they look
   if (failing) m.notes.unshift(FAILED_NOTE);
-  const b = bulkyStatus(bulky);
-  if (b) m.notes.push(b.replace(/^\n/, ''));
   if (bd && typeof bd.totalTokens === 'number') {
     const max = bd.rawMaxTokens || bd.maxTokens;
     m.context = { used: kText(bd.totalTokens), of: max ? kText(max) : '', pct: max ? bd.percentage : null };
   } else m.contextNote = 'Not measured yet; it shows after the next turn.';
+  // the agents' rows: the model as a tag, the step bar, the rung
+  // the output box (`out`, `outAt` its newest line's time) for the
+  // OUT_SHOWN agents with the newest output alone
+  const prices = j && j.prices;
+  const hasOut = a => a && typeof a === 'object' && Array.isArray(a.out) && a.out.length;
+  const shown = new Set(running.filter(hasOut).sort((x, y) => (y.outAt || 0) - (x.outAt || 0)).slice(0, OUT_SHOWN));
+  m.running = running.map(a => {
+    if (!a || typeof a !== 'object' || !('on' in a || 'bar' in a || 'model' in a || 'out' in a)) return a;
+    const arrow = session && session.model ? modelArrow(a.model, session.model, prices) : '';
+    return { id: a.id ?? null, text: a.text, tag: a.on ? (arrow ? arrow + ' ' : '') + a.on : '', bar: a.bar || null,
+      out: shown.has(a) ? a.out : null, ...(a.done ? { done: true } : {}) };
+  });
   return m;
 };
 // A change of level is one toast, and so is the session moved off the
@@ -717,11 +799,6 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky =
 // do: line, 250 characters and more) was cut off in the desktop app's toast
 // (the user's word: can't see the full text). The pane and /pacing-status
 // have the rest.
-const LEVEL_STEP = {
-  'ahead': 'Nearly all work stays on the top model.',
-  'on pace': 'Work splits over the tiers as usual.',
-  'over': 'Medium tasks go to subagents too.',
-};
 export const levelStepText = j => {
   const rec = j.recommend ? j.recommend.label + ' ' + j.recommend.effort : null;
   const prem = j.premiumLabel || 'The per-model meter\'s model';
@@ -729,7 +806,7 @@ export const levelStepText = j => {
   if (j.premiumHeld) return prem + ' is kept for hard tasks' + (rec ? '; the Switch row offers ' + rec : '') + '.';
   if (j.level === 'throttle') { const t2 = j.tierNames && j.tierNames[2]; return 'Most work goes to ' + (t2 ? t2 + ' ' : '') + 'subagents.'; }
   if (j.level === 'stop') return /extra usage/.test(j.do || '') ? 'The week is nearly used; past 100% it is charged to extra usage.' : 'Wrap up: the week is nearly used.';
-  return LEVEL_STEP[j.level] || '';
+  return '';
 };
 export const levelToastText = (was, j) => levelIcon(j) + ' ' + levelPhrase(was.level) + ' -> ' + levelPhrase(j.level)
   + (j.levelBy === 'premium' && j.premiumLabel ? ' (' + j.premiumLabel.split(' ')[0] + '\'s meter)' : '') + '. ' + levelStepText(j);
@@ -1981,9 +2058,13 @@ export const viewDeniedText = why => {
   const w = typeof why === 'string' ? why.replace(/\s+/g, ' ').trim().replace(/[.\s]+$/, '') : '';
   return ICON.failed + ' the agent\'s transcript did not open' + (w ? ': ' + (w.length > 80 ? w.slice(0, 79) + '…' : w) : '') + '.';
 };
+// set once the engine says this session draws no main view: rows stop
+// offering the press (a module variable: a reload tries again)
+let viewNone = false;
 async function openAgent($, id) {
   let why = null;
   try { const r = await $.ui.view({ agentId: id }); if (r && r.deny) why = r.deny; else return; } catch (err) { why = (err && err.message) || ''; }
+  if (/no main view|draws none/i.test(String(why || ''))) { viewNone = true; redraw($); }
   try { $.ui.toast(viewDeniedText(why)); } catch { /* no toast */ }
 }
 
@@ -2064,7 +2145,8 @@ async function runSwitch($, pr, target) {
     // only the part that differs from what the session runs on (here);
     // with neither known to differ, /model all the same
     const modelSame = sameModel(here.model, target.model);
-    const effortSame = !target.effort || here.effort === target.effort;
+    // here is empty after a reload; the stored effort (ss) stands then
+    const effortSame = !target.effort || (here.effort || ss.effort) === target.effort;
     if (!modelSame || effortSame) {
       modelRan = await $.command.run({ command: 'model', args: target.model });
       if (commandFailed(modelRan)) throw new Error('refused');
@@ -2134,13 +2216,11 @@ export const register = on => {
   let liveFrom = 0;
   // what was said of the allowance going unused (sayUnused)
   const un = { said: null };
-  // the large results this session (see BULKY_TOKENS)
-  const bulky = { count: 0, tokens: 0 };
   // the context lines for /pacing-status and the pane: a fresh breakdown
   // where the engine gave one, else the last
   const ctxText = bd => {
     if (bd) ctxNow = bd;
-    const l = contextLines(bd || ctxNow, results);
+    const l = contextLines(bd || ctxNow);
     return l.length ? '\n' + l.join('\n') : '';
   };
   // (the session's dollars priced again at the reading's prices first: turns
@@ -2202,11 +2282,9 @@ export const register = on => {
   let timers = [];
   let nowFor = null;
   const clearTimers = () => { for (const t of timers) { try { t.cancel(); } catch { /* gone */ } } timers = []; };
-  // the main thread's tool results since the last compaction, and the last
-  // breakdown of the context (see "what fills the session's context")
-  let results = newResults();
+  // the last breakdown of the context (see "what fills the session's context")
   let ctxNow = null;
-  const forget = () => { offer = null; offered = {}; results = newResults(); ctxNow = null; };
+  const forget = () => { offer = null; offered = {}; ctxNow = null; };
   // what a press's work reads and writes (see "what the band's buttons do");
   // `waited` calls off the toast that a queued /compact waits, set while one
   // is queued; `compacting`: a compaction the band's or the pane's button
@@ -2238,6 +2316,10 @@ export const register = on => {
   // by role, until the next prompt carries it
   const fresh = new Map();
   const runningAgents = () => [...agents.values()].sort((x, y) => x.startedAt - y.startedAt);
+  // subagents whose run ended, by id: their row stays in the pane
+  // TASK_DONE_FOR with how it ended and the first lines of the report
+  // ({ a, endedAt, state, out }); the module's memory alone
+  const finished = new Map();
   // the status line as it stands, with the agents when any run
   const lineNow = now => {
     const list = runningAgents();
@@ -2300,22 +2382,16 @@ export const register = on => {
         if (parted) keepAgents($, st); else if (stepped) st.stepMoved = true;
       }
     } catch { /* no step known */ }
-    if (e.agentId) return next(e);
+    if (e.agentId) {
+      // a subagent's call and how it came out: a line of its output box
+      const r = await next(e);
+      try {
+        const a = agents.get(e.agentId), line = a ? actionLine(e, r) : '';
+        if (line) { a.out = noteOut(a.out, line); a.outAt = await $.clock.now(); redraw($); }
+      } catch { /* not shown */ }
+      return r;
+    }
     const r = await next(e);
-    // a large result in the main thread (an agent's answer is the delegation
-    // itself, not a read to delegate)
-    try {
-      // the module's own calls (the usage tool, the sessions list) answer
-      // the module, not the model
-      const own = e.tool === USAGE_TOOL || e.tool === SESSIONS_TOOL;
-      const all = r && !r.deny && !own ? tokensOfText(r.text) : 0;
-      if (all) results = noteResult(results, e.tool, whatOf(e), all);
-      const n = e.tool !== 'Agent' ? all : 0;
-      if (n >= BULKY_TOKENS) {
-        bulky.count += 1;
-        bulky.tokens += n;
-      }
-    } catch { /* not counted */ }
     // a background task this call started, or one a TaskStop ended
     try {
       const task = taskStarted(e, r);
@@ -2481,7 +2557,7 @@ export const register = on => {
         clearTimers();
         sw = null;
         switchSeen.clear();
-        bulky.count = 0; bulky.tokens = 0;
+        finished.clear();
         for (const k of Object.keys(tokens)) delete tokens[k];
         for (const k of Object.keys(agentTokens)) delete agentTokens[k];
         spend.total = 0; spend.sent = 0; liveFrom = 0;
@@ -2659,23 +2735,31 @@ export const register = on => {
     try { now = await $.clock.now(); } catch { now = Date.now(); }
     const text = lineOf(liveLeft(reading, spend.total - liveFrom), sessionModel, tokens, agentTokens, now, true, runningAgents());
     return { text: 'Pacing: ' + text + (reading.do ? '\nNow: ' + reading.do : '')
-      + (typeof reading.unused === 'number' ? '\nUnused: at this pace about ' + reading.unused + '% of the week goes unused at the reset; it does not carry over.' : '') + ctxText(await breakdownNow($)) + bulkyStatus(bulky), isTextDisplayOnly: true };
+      + (typeof reading.unused === 'number' ? '\nUnused: at this pace about ' + reading.unused + '% of the week goes unused at the reset; it does not carry over.' : '') + ctxText(await breakdownNow($)), isTextDisplayOnly: true };
   });
   // The report of `budget.mjs last`: the bars and the tier sheet. Where the
   // last reading is too old to show, the module takes one itself first, if
   // the app's usage tool answers; else it says why and where to measure.
   // the pane: what /pacing-status says, a row each, then the context
-  const paneNow = (now, autoCompact = null) => {
+  // (`session`: the session's model and effort, for the agents' model tags)
+  const paneNow = (now, autoCompact = null, session = null, autoCompactLast = null) => {
     const j = reading ? liveLeft(reading, spend.total - liveFrom) : null;
     return paneModel({
       j,
       mix: j ? tierMix(tokens, j.tierOf || {}, j.prices || {}, agentTokens, j.agentTierOf).map(x => ({ name: tierName(j, x.tier), share: x.share })) : [],
-      // (an id only where the engine has a transcript to show: a subagent it spawned)
-      running: runningAgents().map(a => ({ id: a.kind === 'session' || a.provisional ? null : a.id,
+      // (an id only where the engine has a transcript to show: a subagent it
+      // spawned; the model and effort go to the row's tag, the steps or the
+      // time to its bar)
+      running: [...runningAgents().map(a => ({ id: a.kind === 'session' || a.provisional ? null : a.id,
         text: (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { task: TASK_MAX, time: 1, est: 1, step: 1 })
-          + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.kind === 'session' && a.description ? ', ' + a.description : '') })),
-      bd: ctxNow, bulky, now, busy: rd.running || loading, failing: readingsFail(rd.health),
-      tasks: taskRows(tasks.values(), now), tokens: contextTokens, compacting: pr.compacting, autoCompact,
+          + (a.kind === 'session' && a.description ? ', ' + a.description : ''),
+        model: a.model || null, effort: a.effort || null, on: runOn(a), bar: stepBarOf(a, now), out: a.out || [], outAt: a.outAt || 0 })),
+      // the runs that ended in the last TASK_DONE_FOR, after them
+      ...[...finished.entries()].filter(([, f]) => now - f.endedAt < TASK_DONE_FOR).map(([id, f]) => ({ id, done: true,
+        text: finishedText(f.a, f.state, f.endedAt - f.a.startedAt),
+        model: f.a.model || null, effort: f.a.effort || null, on: runOn(f.a), bar: null, out: f.out, outAt: f.endedAt }))],
+      bd: ctxNow, now, busy: rd.running || loading, failing: readingsFail(rd.health),
+      tasks: taskRows(tasks.values(), now), tokens: contextTokens, compacting: pr.compacting, autoCompact, autoCompactLast, session,
     });
   };
   // a person's close keeps it closed in later sessions; a plugin's own, or an
@@ -2721,11 +2805,16 @@ export const register = on => {
     // Compact, in the Context section: the row's Compact now (compactNow),
     // one at a time; the pause's timers end with it, as at the row's press
     const size = typeof contextTokens === 'number' ? contextTokens : ctxNow && ctxNow.totalTokens;
-    // the auto-compact window, with its −, + and Auto (autoCompactPress)
+    // the auto-compact window, with its −, + and the toggle for Claude
+    // Code's own (autoCompactPress), which returns to the last count kept
     let autoCompact = null;
     try { autoCompact = autoCompactOf(await configOf($)); } catch { /* no row */ }
-    return paneView($.ui.resolve(e), paneNow(now, autoCompact), { surface: e.surface, placement: e.props && e.props.placement, now, onRefresh: () => refreshPane(false),
-      onAgent: id => openAgent($, id),
+    const autoCompactBack = autoCompact === 'auto' ? await autoCompactLast($) : null;
+    const session = { model: modelNow(), effort: await effortNow($, ss) };
+    return paneView($.ui.resolve(e), paneNow(now, autoCompact, session, autoCompactBack), { surface: e.surface, placement: e.props && e.props.placement, now, onRefresh: () => refreshPane(false),
+      // only where a main view can show the transcript: the desktop app has
+      // none ("no main view here", seen live in 0.9.41), so its rows are text
+      onAgent: e.surface === 'terminal' && !viewNone ? id => openAgent($, id) : null,
       onCompact: () => { if (!claimCompact()) return; clearTimers(); redraw($); later($, () => compactNow($, pr, { tokens: size })); },
       onAutoCompact: v => autoCompactPress($, ac, v) });
   });
@@ -2902,6 +2991,12 @@ export const register = on => {
         keepAgents($, st);
         const now = await $.clock.now();
         if (!agents.size) stopTick();
+        // its row stays its minute with how it ended and its report's first lines
+        try {
+          const report = reportLines(e.answer);
+          finished.set(e.agentId, { a, endedAt: now, state: e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done', out: report.length ? report : a.out || [] });
+          $.clock.after(TASK_DONE_FOR, () => { finished.delete(e.agentId); redraw($); });
+        } catch { /* no row kept */ }
         $.ui.status(lineNow(now));
         redraw($);
         const spent = u ? (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) : 0;
@@ -3011,7 +3106,13 @@ export const register = on => {
         if (typeof e.effort === 'string' && EFFORT_ORDER.includes(e.effort)) here.effort = e.effort;
       }
     } catch { /* not noted */ }
-    return yield* next(e);
+    const res = yield* next(e);
+    // a subagent's step that said something: a line of its output box
+    try {
+      const a = e.agentId ? agents.get(e.agentId) : null, line = a && res ? outLine(res.answer) : '';
+      if (line) { a.out = noteOut(a.out, line); a.outAt = await $.clock.now(); redraw($); }
+    } catch { /* not shown */ }
+    return res;
   });
 
   on('session.measure', async ($, e, next) => {

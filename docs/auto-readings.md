@@ -1409,3 +1409,101 @@ the same handover away at once all said "picked up": a rename did not
 refuse the later two. `handover done` now claims the file with a hard
 link into `done/` (made once, EEXIST for the rest), with a rename where
 links are not supported.
+
+## Tidy-ups (0.9.42)
+
+A Switch press after a reload sent a `/effort` the session already had:
+the press compared the target with the effort in the module's memory,
+which a reload empties. It now goes by that effort or else the one kept
+in `$.store` (`ss.effort`), as `effortNow` does. The texts no toast can
+show any longer are gone: the level steps for ahead, on pace and over
+(a level toast comes only on a rise to throttle or stop) and the unused
+toast's `UNUSED_STEP` and `unusedText`, which nothing called. And for a
+model whose context window is smaller than the auto-compact setting
+(200k against 750k), Claude Code keeps the value set but measures against
+the window, so the breakdown never showed the setting and `/autocompact`
+ran again at every start. The check now compares with the smaller of the
+setting and the model's window (`context.window` of `$.session.usage`),
+so once set it finds nothing to do.
+
+## Subagents above the session (0.9.42)
+
+The user wants subagents on a higher model or effort than the session
+where the budget has room and the work gains from it. Until now the
+`upward:` line came only while Fable was held, or for a session below
+tier 1, and never named an effort above the ladder's. Now, while the
+weekly meter is ahead or on pace and the per-model meter is too (neither
+out nor held), `budget.mjs` names a subagent above the session: the tier
+1 model one effort step above the higher of the session's effort (its
+tier's) and tier 1's, two steps where the `unused:` line says allowance
+would go unused, at most max; none where the session runs there already.
+The held line stays as it was. Without room the line for a session below
+tier 1 comes only while the week is ahead or on pace; over, at throttle
+or at stop nothing goes up. The route skill sends work a stronger model
+or more effort does better to the subagent named, with its model and
+effort on the Agent call; routine, trivial and bulky work and open-ended
+debugging stay down, and the session's own effort is never raised.
+
+## The agents' rows: step bars, model tags, output (0.9.42)
+
+Each agent's row in "Agents at work" now has its model as a small tag,
+with ↑ or ↓ where it is stronger or weaker than the session's model (by
+the reading's prices; none where they are the same or a price is not
+known), and under it a bar: a segment for each step the agent reported
+(the ones done lit, the one at work half lit, the rest dark), or with no
+steps one thin bar of the time it has run against its estimate
+(`leftOf`), or none. The model left the row's words for the tag.
+
+Under the bar, a small dim box shows what the agent is doing or has just
+produced (the user's word: show a subagent's output where the pane has
+room): its last three lines, each cut at the pane's width. The engine
+hands the module what it needs and nothing is read from a transcript:
+each step's visible text (the `turn.step` response's `answer`, for a
+subagent's loop by `agentId`), each tool call with its result
+(`tool.call`, a line such as "Bash npm test → # pass 448", "Read
+pane.mjs → 737 lines", "Edit readings.mjs → saved"; the call that says a
+step is left out, the bar shows it), and at the end the report it handed
+back (`turn.complete`'s `answer`). A finished subagent's row stays
+`TASK_DONE_FOR` (a minute) with ✓ done, ✗ failed or ■ stopped and the
+first three lines of its report, its markdown marks left out. To keep the
+pane calm only the two agents with the newest output show the box. A
+press on a row still opens the agent's transcript; it does not fold the
+box, since a Button's press gets no `$` to redraw with and the row's
+press is taken. The lines live in the module's memory: a reload starts
+them empty.
+
+The words beside the dial follow the weekly meter's own points over its
+budget line, not the level. Live, the week stood at 23 % against a line
+of 20 % at throttle (the trend projected 144 % at the reset, and Fable was
+18 over), and the pane said "Far over the budget line" (the user's word:
+it is only over by 3). Now on or under the line it says "Within budget",
+over by up to 5 points "Over the budget line · +3", past that "Far over
+the budget line · +8", and the week nearly used "The week is nearly
+used". Their colour keeps its rule (normal up to 5 over); the level, the
+routing and the toasts are as they were.
+
+The large-results texts are gone (the user's word: not needed; the plugin
+offers compacting when the session is large). `/pacing-status` no longer
+says "Large results: ..." or "Largest results: ...", and its Messages row
+gives the plain total without the split into tool results by tool. The
+counting that fed them (`BULKY_TOKENS`, `tokensOfText`, `toolLabel`,
+`bulkyStatus`, `newResults`, `noteResult`, `whatOf`, `RESULTS_TOP`, and
+its part of the `tool.call` hook) went with them. The offers to compact at
+400k and 650k, the pane's Compact button from 300k and the auto-compact
+setting are as they were.
+
+The pane's auto-compact row has a toggle for Claude Code's own
+auto-compact in place of its Auto button (the user's word: an enable
+button makes it clearer): "☐ Let Claude Code decide" beside the value and
+its − and +; pressed, the setting is `auto`, and the row shows only
+"☑ Let Claude Code decide" and the dim note "It compacts near the end of
+the window." Pressed again, it returns to the last token count the
+setting held (kept in `$.store` as `autoCompactLast`, else 750k), saves
+it and runs `/autocompact` with it. With `/pacing autocompact off` the
+row stays hidden, as before.
+
+A press on an agent's row opens its transcript in the terminal only: live
+in the desktop app it gave "the agent's transcript did not open: no main
+view here.", so the desktop draws the row as text, and after an engine
+deny that says it draws no main view the terminal's rows are text too
+until the module loads again.

@@ -123,6 +123,14 @@ rest of the per-model handling, for a plan without such a meter.
 session keeps its model and effort, and the plugin never suggests less
 effort for being a little over.
 
+**Room to spare.** While the weekly meter and Fable's own are ahead or on
+pace, work that a stronger model or more effort does better (design, a
+hard bug with a clear case, a review, the final check of a large change)
+may go to a subagent above the session: the tier 1 model one effort step
+higher, two where allowance would go unused at the reset, up to max.
+Routine and bulky work never goes up, and the session's own effort stays
+as you set it.
+
 **Small work and bulky work.** Trivial work (a grep, a rename, one file
 summarised) stays in the session until throttle: starting a subagent
 costs more on the weekly meter than doing a grep in the session. Bulky
@@ -274,7 +282,13 @@ too, until you type `/pacing-pane`. From the top:
   meter with its own, and the 5-hour window: when it resets, and when it
   would be full first at your pace.
 - **Agents at work**: each running agent as a small robot with its task;
-  a click on one opens its transcript.
+  in the terminal a click on one opens its transcript (the desktop app has no view to open it in). Under the words, its model (↑ or ↓
+  when stronger or weaker than the session's) and a bar: a segment per
+  step it reports, or the time it has run against its estimate. For the
+  two agents with the newest output, a small box shows its last three
+  lines: what it said, or a call and how it came out ("Bash npm test →
+  # pass 448"). A finished agent stays a minute with ✓ done and the first
+  lines of its report.
 - **Context**: how full the session's context is, one figure, and from
   300 000 tokens a **Compact** button. Under it, where Claude Code
   compacts by itself ("Auto-compact at 750k"), with **−** and **+** (50k a
@@ -528,26 +542,22 @@ reports once, each question you ask about its work afterwards is still a
 full-size turn of the large session, and it works alone, starting no
 agents of its own.
 
-**Large tool results.** Bulky reading (logs, test output, many files)
-goes to the reader agent for the same reason: what the agent reads never
-enters the session's context. A tool result of 10 000 tokens or more in
-the session itself is counted, and `/pacing-status` says how many there
-were and their size.
+**Bulky reading.** Bulky reading (logs, test output, many files) goes to
+the reader agent for the same reason: what the agent reads never enters
+the session's context. When the session grows large anyway, the plugin
+offers to compact it (the offer to compact above, the pane's Compact
+button).
 
 **What fills the context.** `/pacing-status` ends with the session's
 context: the total against the window and the point where it compacts by
-itself; the conversation split into tool results (by tool) and the rest;
-the fixed parts (system prompt, tools, memory files, skills); and the
-five largest results, as in
+itself; the conversation's total; and the fixed parts (system prompt,
+tools, memory files, skills), as in
 
     Context: 183k of 1M (18%); it compacts by itself at 967k
-      Messages 160k: tool results about 55k (Read 38k, Bash 12k), the rest about 105k
+      Messages 160k
       System tools 15k · Memory files 4k · System prompt 3k
-    Largest results: Read readings.mjs 30k; Bash node --test 12k
 
 The categories are Claude Code's own estimate, as `/context` shows them.
-The tool results are counted from the last compaction or the plugin's
-last load, so after a reload they start again from nothing.
 
 **When a new session is the only way.** The plugin never offers one: a
 session that cannot be compacted, or your own wish to start afresh, is
@@ -628,7 +638,7 @@ so, as in `Pacing: no reading to show (the last reading is 45 min old).
 | `/pacing reload on`, `/pacing reload off` | turns the new-version row on (the default) or off; off, one toast per version says the same. The plugin runs nothing itself either way |
 | `/pacing notify on`, `/pacing notify off` | turns the toasts about running subagents on (the default) or off: when one starts, when one ends, and every 5 minutes while any runs; the status line and the row above the prompt still show them |
 | `/pacing compact on`, `/pacing compact off` | turns the offer to compact on (the default) or off: a row above the prompt with Compact now from 400 000 tokens, in the warning colour from 650 000, and a warning before the cache of an idle session lapses |
-| `/pacing autocompact 750k`, `/pacing autocompact auto`, `/pacing autocompact off` | where Claude Code compacts a session by itself: pacing sets its `/autocompact` to this at each session start and when the model changes (750k by default; 100k to 1M, as 750000, 750k or 0.75M). auto: Claude Code's own default. off: pacing leaves `/autocompact` alone |
+| `/pacing autocompact 750k`, `/pacing autocompact auto`, `/pacing autocompact off` | where Claude Code compacts a session by itself: pacing sets its `/autocompact` to this at each session start and when the model changes (750k by default; 100k to 1M, as 750000, 750k or 0.75M). auto: Claude Code's own default (the pane's ☐ Let Claude Code decide; pressed again it returns to your last value). off: pacing leaves `/autocompact` alone, and the pane shows no row for it |
 | `/pacing premium opus`, `/pacing premium none` | names the model the plan's per-model meter belongs to (Fable by default), or says the plan has none |
 | `/pacing fallback opus high`, `/pacing fallback none` | the tier that takes the top place while that meter is used up (Opus 5.5 high by default); none lets the remaining tiers move up |
 | `/pacing reader haiku medium`, `/pacing reader ladder` | the model the reader agent reads on (Haiku 5.5 medium by default), or the lowest tier |

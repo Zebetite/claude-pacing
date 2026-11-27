@@ -517,13 +517,32 @@ if (!ladder.length) {
   // No advice to lower the session's effort (the user's word: not just
   // because the week is a little over); at "over" medium work moves down
   // the tiers, and that is all.
+  // Room: the week ahead or on pace, and the per-model meter too (neither
+  // out nor held). Then work a stronger model or more effort does better
+  // may go above the session (the user's word: subagents on higher models
+  // and effort than the session where the budget has room): the top model,
+  // one effort step above the higher of the session's and tier 1's, two
+  // where allowance would go unused, at most max. The session's effort is
+  // its tier's; off the ladder, tier 1's.
+  const calm = l => l === 'ahead' || l === 'on pace';
+  const room = calm(level) && !premAway && (!premLevel || calm(premLevel));
+  const above = () => {
+    const from = Math.max(EFFORTS.indexOf(ladder[0].effort), session && ladder.includes(session) ? EFFORTS.indexOf(session.effort) : -1);
+    const up = { label: ladder[0].label, model: ladder[0].model, effort: EFFORTS[Math.min(EFFORTS.length - 1, from + (unused !== null ? 2 : 1))] };
+    // the session on that model and effort already: nothing above it
+    return session && session.model === up.model && session.effort === up.effort ? null : up;
+  };
+  const up = room && ladder[0] ? above() : null;
   if (premHeld && level !== 'throttle') {
     // what is left of the held meter goes to work that needs it most
     const held = tiers.find(t => t.model === premium);
     console.log('upward: ' + premLabel + ' is kept for judgment work: one contained hard task with a clear deliverable may go to ' + aName(held) + ' subagent; an open debugging hunt may not');
-  } else if (session && ladder.indexOf(session) > 0 && ladder[0].model !== session.model && !premAway) {
+  } else if (up) {
+    console.log('upward: room in the week' + (premLevel ? ' and in ' + premLabel + '\'s meter' : '') + ': work that a stronger model or more effort does better (design, a hard bug with a clear case, a review, the final check of a large change) may go to ' + aName(up) + ' subagent');
+  } else if (session && ladder.indexOf(session) > 0 && ladder[0].model !== session.model && !premAway && calm(level)) {
     console.log('upward: this session runs on ' + name(session) + '; one contained hard task with a clear deliverable may go to ' + aName(ladder[0]) + ' subagent');
-  } else if (sessionModel && !session) {
+  }
+  if (!(premHeld && level !== 'throttle') && sessionModel && !session) {
     console.log('note: the session\'s model "' + opt.session + '" is not on the ladder');
   }
   console.log('next session: ' + name(sessionTier));

@@ -86,11 +86,14 @@ This session's model is the user's to set; the lever is delegation.
   held, list them (`mcp__ccd_session_mgmt__list_sessions`) and offer to
   move those above the recommendation (`set_session_model` /
   `set_session_effort`; the app asks; other sessions only), never unasked.
-- **`upward:` line**: one contained hard task with a clear deliverable may
-  go to the subagent it names; open-ended debugging may not.
+- **`upward:` line**: work that a stronger model or more effort does
+  better goes to the subagent it names, with that model and effort on the
+  Agent call. Routine, trivial and bulky work never goes up, nor
+  open-ended debugging without a clear case.
 - **`unused:` line**: allowance is left over at the reset, and it does not
-  carry over: keep medium work here. Say it once if the user asks about
-  models or effort; never raise the session's effort unasked.
+  carry over: keep medium work here and send judgment work up as the
+  `upward:` line says. Say it once if the user asks about models or
+  effort; never raise the session's effort unasked.
 - **5-hour window**: at 85 % or more, hold heavy work until the printed
   time; if its `5-hour window` line says it fills before the reset, delegate bulky
   work or pause heavy runs.

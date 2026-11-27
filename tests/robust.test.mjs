@@ -149,7 +149,8 @@ describe('odd readings', () => {
     assert.match(dry(s, '--all', '10', '--premium', '30').out, /may go to a Fable 5\.2 high subagent/);
     s.config(['apply', 'set', '1', 'opus', 'xhigh', '+', 'set', '2', 'fable', 'low', '+', 'premium', 'opus']);
     assert.match(dry(s, '--all', '10', '--premium', '30').out, /may go to an Opus 5\.5 xhigh subagent/);
-    assert.match(dry(s, '--all', '10', '--premium', '5', '--session', 'claude-fable-5-2').out, /may go to an Opus 5\.5 xhigh subagent/);
+    // room in both meters: one step above tier 1's xhigh
+    assert.match(dry(s, '--all', '10', '--premium', '5', '--session', 'claude-fable-5-2').out, /may go to an Opus 5\.5 max subagent/);
   }));
 });
 

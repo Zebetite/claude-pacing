@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { paneView } from '../pacing/hooks/pane.mjs';
+import { paneModel } from '../pacing/hooks/readings.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'docs', 'images');
@@ -39,6 +40,9 @@ const t = {
     if (p.alignItems) st.push('align-items:' + p.alignItems);
     if (p.flexShrink != null) st.push('flex-shrink:' + p.flexShrink);
     if (p.flexWrap) st.push('flex-wrap:' + p.flexWrap);
+    if (p.flexGrow != null) st.push('flex-grow:' + p.flexGrow);
+    // a border: 'round' with round corners, 'dashed' broken, any other plain
+    if (p.borderStyle) st.push('border:1px ' + (p.borderStyle === 'dashed' ? 'dashed' : 'solid') + ' ' + (p.borderColor || '#4b5563'), 'border-radius:' + (p.borderStyle === 'round' ? 6 : 2) + 'px', 'padding:4px ' + (p.paddingX || 1) * CELL + 'px');
     return el('<div style="' + st.join(';') + '">' + kids(p.children) + '</div>');
   },
   Text: p => {
@@ -48,6 +52,7 @@ const t = {
     if (p.tabular) st.push('font-variant-numeric:tabular-nums');
     if (p.color) st.push('color:' + (COLOR[p.color] || p.color));
     if (p.dimColor) st.push('color:#9ca3af');
+    if (p.backgroundColor) st.push('background:' + p.backgroundColor, 'border-radius:3px', 'align-self:center', 'white-space:pre');
     if (p.wrap === 'truncate-end') st.push('white-space:nowrap;overflow:hidden;text-overflow:ellipsis');
     return el('<div style="' + st.join(';') + '">' + kids(p.children) + '</div>');
   },
@@ -56,6 +61,10 @@ const t = {
     + p.source.replace('<svg ', '<svg style="display:block;width:100%;height:auto" ') + '</div>'),
 };
 
+// the prices a reading carries, for the agents' model tags (↑ or ↓ against
+// the session's model); the agents' rows as readings.mjs makes them
+const PRICES = { 'claude-fable-5-2': [8], 'claude-opus-5-5': [4], 'claude-sonnet-5-5': [2], 'claude-haiku-5-5': [0.1] };
+const made = (j, session, running) => ({ running: paneModel({ j: { prices: PRICES, ...j }, session, running }).running });
 const base = {
   level: 'ok', levelText: 'Within budget',
   budget: { big: '9h 30m', sub: 'left to use today to stay on budget' },
@@ -65,6 +74,7 @@ const base = {
 };
 const SHOTS = [
   {
+    // Fable held, the session on the fallback tier, agents on several models
     name: 'pane-agents',
     m: {
       ...base,
@@ -73,16 +83,25 @@ const SHOTS = [
         { label: 'Fable 5.2', pct: 83, line: 73.3, loud: true, over: true, note: '10 points over its budget line 73%: held, kept for hard tasks' },
         { label: '5-hour', pct: 46, line: null, five: true, note: 'resets in 2h 10m' },
       ],
-      running: [
-        'reader: reading the test logs · 2m 10s (Haiku 5.5 medium)',
-        'implementer: step 2 of 4, the band row · 4m, about 3m left (Opus 5.5 high)',
-        'side session 1m 30s, Fix the docs build',
-      ],
+      ...made({ all: 55, line: 73.3, premium: 83, premiumHeld: true, premiumLabel: 'Fable 5.2' },
+      { model: 'claude-opus-5-5', effort: 'high' }, [
+        // (the two with the newest output show its box: the implementer and the
+        // researcher that just finished; the reviewer's is older)
+        { id: 'a1', text: 'reviewer: the release notes, step 1 of 3 · 6m', model: 'claude-fable-5-2', effort: 'high', on: 'Fable 5.2 high', bar: { done: 1, total: 3 },
+          out: ['Read pane.mjs → 737 lines'], outAt: 10 },
+        { id: 'a2', text: 'implementer: step 2 of 4, the band row · 4m, about 3m left', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: { done: 2, total: 4 },
+          out: ['Edit readings.mjs → saved', 'The band row now waits for the turn to end.', 'Bash npm test → # pass 448'], outAt: 30 },
+        { id: 'a3', text: 'reader: reading the test logs · 2m 10s, about 1m left', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { frac: 0.65 } },
+        { id: null, text: 'side session 1m 30s, Fix the docs build', model: null, effort: null, on: '', bar: null },
+        { id: 'a4', done: true, text: 'researcher: the hooks API ✓ done · 3m', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: null,
+          out: ['turn.step gives each step\'s text, tool.call each result.', 'turn.complete carries the report as its answer.'], outAt: 20 },
+      ]),
       // a shell in the background, as the pane's last section lists it
       tasks: [{ kind: 'shell', what: 'Run the dev server', state: 'running', time: '12m' }],
     },
   },
   {
+    // within budget, an agent above the session's model
     name: 'pane-within',
     m: {
       ...base,
@@ -92,27 +111,34 @@ const SHOTS = [
         { label: 'Fable 5.2', pct: 44, line: 57.1, loud: true, over: false, note: 'budget line 57%' },
         { label: '5-hour', pct: 18, line: null, five: true, note: 'resets in 3h 40m' },
       ],
-      running: ['verifier: running the test suite · 40s (Haiku 5.5 medium)'],
+      mix: [{ name: 'Opus 5.5 high', share: 58 }, { name: 'Fable 5.2 xhigh', share: 30 }, { name: 'Haiku 5.5 medium', share: 12 }],
+      ...made({ all: 38, line: 57.1, premium: 44, premiumLabel: 'Fable 5.2' },
+      { model: 'claude-opus-5-5', effort: 'high' }, [
+        { id: 'a1', text: 'reviewer: the settings page, step 3 of 5 · 7m', model: 'claude-fable-5-2', effort: 'xhigh', on: 'Fable 5.2 xhigh', bar: { done: 3, total: 5 } },
+        { id: 'a2', text: 'verifier: running the test suite · 40s, about 2m left', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { frac: 0.25 } },
+      ]),
       context: { used: '96k', of: '1M', pct: 10 },
     },
   },
   {
-    // the week itself over its line: the top area in amber, time over
+    // the week itself 4 over its line: time over, the words in their normal
+    // colours (up to 5 over)
     name: 'pane-week-over',
     m: {
       ...base,
-      level: 'over', levelText: 'Over the budget line',
+      level: 'over', levelText: 'Over the budget line · +4',
       budget: { big: '1h 40m', sub: 'over today\'s budget' },
       meters: [
-        { label: 'Weekly', pct: 79, line: 73.3, note: 'budget line 73%' },
+        { label: 'Weekly', pct: 77, line: 73.3, note: 'budget line 73%' },
         { label: 'Fable 5.2', pct: 68, line: 73.3, loud: true, over: false, note: 'budget line 73%' },
         { label: '5-hour', pct: 71, line: null, five: true, note: 'resets in 1h 30m · full in 1h 10m at this pace' },
       ],
-      running: [
-        'researcher: reading the API docs · 1m 20s (Sonnet 5.5 medium)',
-        'implementer: step 1 of 3, the settings page · 2m (Opus 5.5 medium)',
-      ],
-      mix: [{ name: 'Opus 5.5 high', share: 48 }, { name: 'Sonnet 5.5 medium', share: 34 }, { name: 'Haiku 5.5 medium', share: 18 }],
+      ...made({ all: 77, line: 73.3, premium: 68, premiumLabel: 'Fable 5.2', level: 'over', weekLevel: 'over' },
+      { model: 'claude-fable-5-2', effort: 'high' }, [
+        { id: 'a1', text: 'researcher: reading the API docs · 1m 20s, about 2m left', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: { frac: 0.4 } },
+        { id: 'a2', text: 'implementer: step 1 of 3, the settings page · 2m', model: 'claude-opus-5-5', effort: 'medium', on: 'Opus 5.5 medium', bar: { done: 1, total: 3 } },
+      ]),
+      mix: [{ name: 'Fable 5.2 high', share: 48 }, { name: 'Opus 5.5 medium', share: 34 }, { name: 'Sonnet 5.5 medium', share: 18 }],
       context: { used: '312k', of: '1M', pct: 31 },
     },
   },
@@ -131,7 +157,7 @@ const crop = png => {
 };
 fs.mkdirSync(out, { recursive: true });
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pane-images-'));
-const W = 400, H = 1400;
+const W = 400, H = 2200;
 for (const s of SHOTS) {
   const body = paneView(t, s.m, { surface: 'desktop', placement: 'dock', onRefresh: () => {} });
   const html = '<!doctype html><meta charset="utf-8"><body style="margin:0;background:#1f1f1e;color:#e5e7eb;font-family:system-ui,Segoe UI,sans-serif">'

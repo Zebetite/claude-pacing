@@ -4,8 +4,8 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { DIALS, FRAMES, frameSvg, barSvg, overShade, overText, OVER_CALM, OVER_RED, ORANGE, YELLOW, LEVEL_COLORS, barText, robotSvg, reactorSvg, rulerSvg, drawingId, builtCount, buildsDone, MEMO_MAX, phased, phaseOf, DIAL_SIZE, paneView } from './pane.mjs'
-import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, tokensOfText, toolLabel, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, autoCompactOf, autoCompactFailedText } from './readings.mjs'
+import { OUT_FILL, stepsSvg, stepsText, STEPS_MAX, DIALS, FRAMES, frameSvg, barSvg, overShade, overText, OVER_CALM, OVER_RED, ORANGE, YELLOW, LEVEL_COLORS, barText, robotSvg, reactorSvg, rulerSvg, drawingId, builtCount, buildsDone, MEMO_MAX, phased, phaseOf, DIAL_SIZE, paneView, AUTO_COMPACT_OWN_LABEL } from './pane.mjs'
+import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_LAST, AUTO_COMPACT_OWN_NOTE, autoCompactLastOf, autoCompactOf, autoCompactFailedText, stepBarOf, modelArrow, modelIdOf, outLine, actionLine, noteOut, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -1109,7 +1109,7 @@ test('never while a turn runs, never before a person has typed, gone after the u
   expect((await bandText($)).text).toBe(undefined)
 })
 
-test('a large tool result in the main thread: counted in /pacing-status, no toast; subagents and agents\' answers left out', async ($, on) => {
+test('a large tool result in the main thread: no toast, and no line about it in /pacing-status (compacting is what the module offers)', async ($, on) => {
   engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
@@ -1129,17 +1129,15 @@ test('a large tool result in the main thread: counted in /pacing-status, no toas
   await $.tool.call({ tool: 'Read', file_path: 'small', chars: 39000 } as any)
   await $.tool.call({ tool: 'Bash', command: 'x', chars: 80000, agentId: 'ag1' } as any)
   await $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', chars: 80000 } as any)
-  // further large ones are counted too, and none is toasted (the user's word: no messages about tokens used)
+  // further large ones, and none is toasted (the user's word: no messages about tokens used)
   await $.tool.call({ tool: 'mcp__github__get_file_contents', chars: 100000 } as any)
   await clock.advance(15 * 60000)
   await $.tool.call({ tool: 'mcp__github__get_file_contents', chars: 100000 } as any)
   expect(toasts.slice(said)).toEqual([])
+  // no large-results text (the user's word: not needed)
   const status = (await $.command.run({ command: 'pacing-status', args: '' } as any)).text
-  expect(status.split('\n').at(-1)).toBe('Large results: 3 this session, about 62k tokens that every later turn sends again; bulky reads cost less in the reader agent.')
-  expect(BULKY_TOKENS).toBe(10000)
-  expect(tokensOfText('x'.repeat(40000))).toBe(10000)
-  expect(toolLabel('mcp__a__a_very_long_tool_name_indeed')).toBe('a_very_long_tool_na…')
-  expect(bulkyStatus({ count: 0, tokens: 0 })).toBe('')
+  expect(status).not.toContain('Large results')
+  expect(status).not.toContain('Largest results')
 })
 
 // ---- what fills the context, and the pane ----
@@ -1159,29 +1157,17 @@ const BREAKDOWN = {
   autoCompactThreshold: 967000, isAutoCompactEnabled: true, apiUsage: null,
 }
 
-test('what fills the context: the total, the conversation split into tool results and the rest, the fixed parts, the largest results', () => {
-  let r = newResults()
-  r = noteResult(r, 'Read', whatOf({ file_path: 'X:\\pacing\\pacing\\hooks\\readings.mjs' }), 30000)
-  r = noteResult(r, 'Bash', whatOf({ command: 'node --test\nmore' }), 12000)
-  r = noteResult(r, 'Read', whatOf({ file_path: '/a/b/GUIDE.md' }), 8000)
-  r = noteResult(r, 'mcp__github__get_file_contents', whatOf({ path: 'README.md' }), 5000)
-  expect(contextLines(BREAKDOWN, r)).toEqual([
+test('what fills the context: the total, the Messages row\'s total, the fixed parts; no split of tool results', () => {
+  expect(contextLines(BREAKDOWN)).toEqual([
     'Context: 183k of 1M (18%); it compacts by itself at 967k',
-    '  Messages 160k: tool results about 55k (Read 38k, Bash 12k, get_file_contents 5k), the rest about 105k',
+    '  Messages 160k',
     '  System tools 15k · Memory files 4k · System prompt 3k',
-    'Largest results: Read readings.mjs 30k; Bash node --test 12k; Read GUIDE.md 8k; get_file_contents README.md 5k',
   ])
-  // no breakdown from the engine: the results alone; none at all: nothing
-  expect(contextLines(null, r)[0]).toBe('Context: tool results about 55k (Read 38k, Bash 12k, get_file_contents 5k)')
-  expect(contextLines(null, newResults())).toEqual([])
-  // the five largest only; a long command cut
-  for (let i = 1; i <= 7; i++) r = noteResult(r, 'Grep', 'p' + i, 1000 * i)
-  expect(r.top.map(t => t.tokens)).toEqual([30000, 12000, 8000, 7000, 6000])
-  expect(whatOf({ command: 'x'.repeat(40) })).toBe('x'.repeat(29) + '…')
-  expect(RESULTS_TOP).toBe(5)
+  // no breakdown from the engine: nothing
+  expect(contextLines(null)).toEqual([])
 })
 
-test('/pacing-status adds the context; the results start over at a compaction', async ($, on) => {
+test('/pacing-status adds the context: the Messages total, no large results', async ($, on) => {
   engine(on)
   big(on)
   offers(on)
@@ -1189,13 +1175,12 @@ test('/pacing-status adds the context; the results start over at a compaction', 
   on('tool.call', (_: unknown, e: any) => ({ result: {}, text: 'x'.repeat(e.chars || 10) }))
   await $.prompt.submit({ text: 'work on', asUser: true })
   await $.session.measure(measure(10, [], 182700))
-  await $.tool.call({ tool: 'Read', file_path: '/a/big.log', chars: 8000 } as any)
+  await $.tool.call({ tool: 'Read', file_path: '/a/big.log', chars: 80000 } as any)
   const text = (await $.command.run({ command: 'pacing-status', args: '' } as any)).text
-  expect(text).toContain('\nContext: 183k of 1M (18%); it compacts by itself at 967k\n  Messages 160k: tool results about 2k (Read 2k), the rest about 158k\n')
-  expect(text).toContain('Largest results: Read big.log 2k')
-  // compacted: the results go
-  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 's', toolUses: [] }] } as any)
-  expect((await $.command.run({ command: 'pacing-status', args: '' } as any)).text).not.toContain('Largest results')
+  expect(text).toContain('\nContext: 183k of 1M (18%); it compacts by itself at 967k\n  Messages 160k\n')
+  expect(text).not.toContain('tool results about')
+  expect(text).not.toContain('Largest results')
+  expect(text).not.toContain('Large results')
 })
 
 const PANE = {
@@ -2354,6 +2339,30 @@ test('the effort last set is kept across a reload: the new copy offers no switch
   await $.session.measure(measure(10))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   expect(await switchText($)).toBe(undefined)
+})
+
+test('Switch after a reload: the effort kept in the store is already the target, so the press sends no /effort', async ($, on) => {
+  engine(on)
+  on('process.run', () => ({ value: switchReading({ premiumOut: true, recommend: REC_OPUS_HIGH }) }))
+  const clock = mock.clock(on, { now: T0 })
+  // CLAUDE_EFFORT still says medium, as at the session's start
+  const seen = switchEngine(on, { effort: 'medium' })
+  const store = storeEngine(on)
+  on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+  on('command.register', (_: unknown, e: any) => ({ value: { command: e.name } }))
+  on('tool.call', () => ({ result: {} }))
+  // set to high before the reload; the new copy's memory is empty
+  store['switch:local_s1'] = { model: null, effort: 'high' }
+  await start($)
+  await clock.settle()
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-switch' })
+  await clock.advance(1)
+  await ui.unmount()
+  expect(seen.runs).toEqual(['/model claude-opus-5-5'])
 })
 
 // ---- a fresh line at load ----
@@ -3586,8 +3595,7 @@ test('an agent the engine no longer runs at the reload is dropped; without its l
 
 test('every toast leads with the icon of its kind where "Pacing: " stood, and keeps its words after it', async () => {
   expect(ICON).toEqual({ started: '▶️', done: '✅', still: '⏳', worse: '⚠️', stop: '🔴', better: '🟢', switched: '🔁', failed: '❌',
-    waiting: '📦', compacted: '🗜️', pause: '💤', room: '💡', bulky: '🧱' })
-  expect(unusedText(18).startsWith('💡 ')).toBe(true)
+    waiting: '📦', compacted: '🗜️', pause: '💤', room: '💡' })
   const side = { id: 's1', kind: 'session', label: 'Task s1', startedAt: T0 - 35000 } as any
   const texts: [string, string][] = [
     ['▶️', startedText(FIRST, [FIRST])],
@@ -3754,7 +3762,20 @@ test('the pane says the budget as time left today, never in tokens or dollars; p
   // show there (weekLevel; without it, the week's figure against its line)
   expect(paneModel({ j: { ...base, all: 55, line: 73.3, level: 'over', weekLevel: 'ahead', levelBy: 'premium', premium: 80, premiumLabel: 'Fable 5.2' } }).levelText).toBe('Within budget')
   expect(paneModel({ j: { ...base, all: 55, line: 73.3, level: 'over', levelBy: 'premium', premium: 80, premiumLabel: 'Fable 5.2' } }).level).toBe('ok')
-  expect(paneModel({ j: { ...base, all: 76, line: 73.3, level: 'over', weekLevel: 'over' } }).levelText).toBe('Over the budget line')
+  expect(paneModel({ j: { ...base, all: 76, line: 73.3, level: 'over', weekLevel: 'over' } }).levelText).toBe('Over the budget line · +3')
+  // the words follow the week's own points over its line, not a level a
+  // trend or Fable raised (live: 23 against 20 at throttle read "far over")
+  const raised = paneModel({ j: { ...base, all: 23, line: 20, level: 'throttle', weekLevel: 'throttle' } })
+  expect([raised.level, raised.levelText]).toEqual(['throttle', 'Over the budget line · +3'])
+  expect(paneModel({ j: { ...base, all: 28, line: 20, level: 'throttle', weekLevel: 'throttle' } }).levelText).toBe('Far over the budget line · +8')
+  expect(paneModel({ j: { ...base, all: 25.4, line: 20, level: 'throttle', weekLevel: 'throttle' } }).levelText).toBe('Over the budget line · +5')
+  expect(paneModel({ j: { ...base, all: 20.2, line: 20, level: 'over', weekLevel: 'over' } }).levelText).toBe('Over the budget line · +1')
+  expect(paneModel({ j: { ...base, all: 20, line: 20, level: 'over', weekLevel: 'over' } }).levelText).toBe('Within budget')
+  expect(paneModel({ j: { ...base, all: 18, line: 20, level: 'throttle', weekLevel: 'throttle' } }).levelText).toBe('Within budget')
+  expect(paneModel({ j: { ...base, all: 96, line: 80, level: 'stop', weekLevel: 'stop' } }).levelText).toBe('The week is nearly used')
+  // drawn beside the dial, in the normal colour up to 5 over
+  const dot = nodes(paneView(TABLE, raised, { surface: 'desktop' })).find(n => n.type === 'Text' && n.props.children === '● Over the budget line · +3')
+  expect(dot.props.color).toBe('success')
   // the model held by its own meter: the week's words stay; its meter has its
   // line, drawn loud, and says by how much it is over
   const held = paneModel({ j: { ...base, level: 'ahead', weekLevel: 'ahead', all: 55, line: 73.3, premium: 83, premiumHeld: true, premiumLabel: 'Fable 5.2' } })
@@ -4517,7 +4538,7 @@ test('a monitor whose own time limit passed a minute ago with no word leaves the
 
 // ---- an agent's transcript from its row ----
 
-test('a press on an agent\'s row in the pane opens that agent\'s transcript; a refusal is one toast; a side session\'s row is text', async ($, on) => {
+test('a press on an agent\'s row in the terminal\'s pane opens that agent\'s transcript; a refusal is one toast; a side session\'s row is text', async ($, on) => {
   engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
@@ -4540,12 +4561,12 @@ test('a press on an agent\'s row in the pane opens that agent\'s transcript; a r
   await spawn($, 'pacing:reader', 'haiku', true, 'read the logs')
   await $.tool.call({ tool: 'mcp__ccd_session__start_session' } as any)
   await clock.advance(20000)
-  const ui = await $.ui.mount(PANE)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' } as any)
   const buttons = (await ui.findAll({ type: 'Button' })).map((b: any) => b.key ?? b.props?.key)
   // one Button, the subagent's; the side session has none
   expect(buttons.filter((k: string) => k.startsWith('pacing-agent-'))).toEqual(['pacing-agent-ag1'])
   const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
-  expect(texts.filter((s: string) => s.startsWith('side session'))).toEqual(['side session Fix the docs build is running 20s, Fix the docs build'])
+  expect(texts.filter((s: string) => s.includes('side session'))).toEqual(['🤖 side session Fix the docs build is running 20s, Fix the docs build'])
   await ui.press({ key: 'pacing-agent-ag1' })
   expect(views).toEqual([{ agentId: 'ag1' }])
   expect(seen.toasts).toEqual([])
@@ -4557,6 +4578,41 @@ test('a press on an agent\'s row in the pane opens that agent\'s transcript; a r
   expect(seen.toasts).toEqual(['❌ the agent\'s transcript did not open: the tasks list shows none for it.'])
   expect(viewDeniedText(undefined)).toBe('❌ the agent\'s transcript did not open.')
   expect(viewDeniedText('x'.repeat(200))).toHaveLength('❌ the agent\'s transcript did not open: '.length + 80 + 1)
+})
+
+test('the agents\' rows on a desktop are text, no Button; after a "no main view here" the terminal\'s are text too', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = { toasts: [] as string[] }
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag1' }))
+  on('agent.list', () => ({ value: [{ id: 'ag1', status: 'running', description: '', type: 'x' }] }))
+  on('fs.read', () => ({ value: '{}' }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', (_: unknown, e: any) => (seen.toasts.push(e.text), { value: undefined }))
+  on('ui.panes', () => ({ value: [{ id: PANE_ID, title: PANE_TITLE, isShown: true, isFocused: false, isPlaced: true }] }))
+  const views: any[] = []
+  on('ui.view', (_: unknown, e: any) => (views.push(e), { value: { deny: 'no main view here.' } }))
+  await $.session.measure(measure(10))
+  await spawn($, 'pacing:reader', 'haiku', true, 'read the logs')
+  await clock.advance(20000)
+  const agentButtons = async (ui: any) => (await ui.findAll({ type: 'Button' })).map((b: any) => b.key ?? b.props?.key).filter((k: string) => String(k).startsWith('pacing-agent-'))
+  // the desktop: the row as text
+  let ui = await $.ui.mount(PANE)
+  expect(await agentButtons(ui)).toEqual([])
+  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text).filter((t: string) => String(t).includes('read the logs'))).toEqual(['reader is running: read the logs 20s'])
+  await ui.unmount()
+  // the terminal: a Button, until the engine says it draws no main view
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' } as any)
+  expect(await agentButtons(ui)).toEqual(['pacing-agent-ag1'])
+  await ui.press({ key: 'pacing-agent-ag1' })
+  await clock.settle()
+  await ui.unmount()
+  expect(views).toEqual([{ agentId: 'ag1' }])
+  expect(seen.toasts).toEqual(['❌ the agent\'s transcript did not open: no main view here.'])
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal', requestId: 'pacing-2' } as any)
+  expect(await agentButtons(ui)).toEqual([])
+  await ui.unmount()
 })
 
 test('an agent\'s row as it is drawn: the robot beside a Button that holds its words; on the terminal the Button alone; without an id, text as before', () => {
@@ -4767,23 +4823,28 @@ test('a change of level is a short toast: the change and one step, never the who
   expect(text.length).toBeLessThan(130)
   expect(levelStepText({ level: 'throttle', tierNames: { 2: 'Opus 5.5 medium' } })).toBe('Most work goes to Opus 5.5 medium subagents.')
   expect(levelStepText({ level: 'stop', do: 'the week is nearly used; from 100 % the work is charged to extra usage, so go on only with the user\'s word' })).toBe('The week is nearly used; past 100% it is charged to extra usage.')
-  expect(levelStepText({ level: 'ahead' })).toBe('Nearly all work stays on the top model.')
+  // below throttle no toast is due, so no step either
+  expect(levelStepText({ level: 'ahead' })).toBe('')
   expect(levelStepText({ level: 'over', premiumOut: true, premiumLabel: 'Fable 5.2', recommend: { label: 'Opus 5.5', effort: 'high' } })).toBe('Fable 5.2 is out until the reset; the Switch row offers Opus 5.5 high.')
 })
 
 // ---- Claude Code's auto-compact window ----
 
 // the engine beneath for /autocompact: a start, the breakdown with the
-// window Claude Code has (`has`: its source and window), config.json's text,
-// the model, and what ran and was toasted
-const autoEngine = (on: any, opts: { config?: () => string; has?: () => { autocompactSource: string; rawMaxTokens: number } | null; model?: () => string; answer?: () => any; run?: (argv: string[]) => any } = {}) => {
-  const seen = { runs: [] as string[], toasts: [] as string[], scripts: [] as string[][], usage: 0 }
+// window Claude Code has (`has`: its source and window), the model's context
+// window (`window`, 1M unless given), config.json's text, the model, and
+// what ran and was toasted
+const autoEngine = (on: any, opts: { store?: Record<string, unknown>; config?: () => string; has?: () => { autocompactSource: string; rawMaxTokens: number } | null; window?: number; model?: () => string; answer?: () => any; run?: (argv: string[]) => any } = {}) => {
+  const seen = { runs: [] as string[], toasts: [] as string[], scripts: [] as string[][], usage: 0, store: opts.store ?? {} as Record<string, unknown> }
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+  on('store.get', (_: unknown, e: any) => ({ value: seen.store[e.key] }))
+  on('store.set', (_: unknown, e: any) => { seen.store[e.key] = e.value; return { value: undefined } })
+  on('store.delete', (_: unknown, e: any) => { delete seen.store[e.key]; return { value: undefined } })
   on('command.register', (_: unknown, e: any) => ({ value: { command: e.name } }))
   on('session.usage', () => {
     seen.usage++
     const has = opts.has ? opts.has() : { autocompactSource: 'auto', rawMaxTokens: 1000000 }
-    return { value: { startedAt: 0, context: { window: 1000000, tokens: 1000, percent: 0, ...(has ? { breakdown: { ...BREAKDOWN, ...has, maxTokens: has.rawMaxTokens } } : {}) }, rateLimits: [] } }
+    return { value: { startedAt: 0, context: { window: opts.window ?? 1000000, tokens: 1000, percent: 0, ...(has ? { breakdown: { ...BREAKDOWN, ...has, maxTokens: has.rawMaxTokens } } : {}) }, rateLimits: [] } }
   })
   on('session.model', () => ({ value: opts.model ? opts.model() : 'claude-opus-5-5' }))
   on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
@@ -4884,6 +4945,24 @@ test('a new model, or the setting changed in a turn: checked again at that turn\
   expect(seen.runs).toEqual(['/autocompact 750000', '/autocompact 500000', '/model claude-sonnet-5-5', '/autocompact 500000'])
 })
 
+test('a model with a smaller window than the setting: Claude Code measures against the window, and once set the check finds nothing to do', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  // a model with a 200k window; Claude Code keeps 750 000 but shows min(window, value)
+  let has = { autocompactSource: 'auto', rawMaxTokens: 200000 }
+  const seen = autoEngine(on, { has: () => has, window: 200000, model: () => 'claude-sonnet-5-5', answer: () => (has = { autocompactSource: 'settings', rawMaxTokens: 200000 }, { text: '' }) })
+  await start($)
+  await clock.settle()
+  expect(seen.runs).toEqual(['/autocompact 750000'])
+  await $.turn.complete(turn('claude-sonnet-5-5', 1))
+  await clock.settle()
+  // the next session's start: set already
+  await start($)
+  await clock.settle()
+  expect(seen.runs).toEqual(['/autocompact 750000'])
+  expect(seen.toasts).toEqual([])
+})
+
 test('a refused /autocompact at a start is one toast, at most one per load; the session goes on', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
@@ -4899,23 +4978,36 @@ test('a refused /autocompact at a start is one toast, at most one per load; the 
   expect(autoCompactFailedText('auto', '')).toBe('❌ Claude Code\'s auto-compact was not set to its default. /autocompact auto sets it.')
 })
 
-test('the pane\'s auto-compact row: its words, − and + by 50k and Auto; none past the bounds; on the terminal a line of text; nothing when off', () => {
+test('the pane\'s auto-compact row: its words, − and + by 50k and the toggle for Claude Code\'s own; none past the bounds; on the terminal a line of text; nothing when off', () => {
   expect(AUTO_COMPACT_STEP).toBe(50000)
+  expect(AUTO_COMPACT_OWN_LABEL).toBe('Let Claude Code decide')
+  expect(AUTO_COMPACT_OWN_NOTE).toBe('It compacts near the end of the window.')
   expect(paneModel({}).autoCompact).toBe(null)
   expect(paneModel({ autoCompact: 'off' }).autoCompact).toBe(null)
-  expect(paneModel({ autoCompact: 750000 }).autoCompact).toEqual({ text: 'Auto-compact at 750k', less: 700000, more: 800000, auto: true })
-  expect(paneModel({ autoCompact: 'auto' }).autoCompact).toEqual({ text: 'Auto-compact: Claude Code\'s default', less: 700000, more: 800000, auto: false })
-  expect(paneModel({ autoCompact: 100000 }).autoCompact).toEqual({ text: 'Auto-compact at 100k', less: null, more: 150000, auto: true })
-  expect(paneModel({ autoCompact: 1000000 }).autoCompact).toEqual({ text: 'Auto-compact at 1M', less: 950000, more: null, auto: true })
+  expect(paneModel({ autoCompact: 750000 }).autoCompact).toEqual({ text: 'Auto-compact at 750k', own: false, less: 700000, more: 800000 })
+  // Claude Code's own: no − and +, the note, and the count the toggle returns to (the last kept, else the default)
+  expect(paneModel({ autoCompact: 'auto' }).autoCompact).toEqual({ text: 'Auto-compact: Claude Code\'s default', own: true, note: AUTO_COMPACT_OWN_NOTE, back: 750000 })
+  expect(paneModel({ autoCompact: 'auto', autoCompactLast: 600000 }).autoCompact.back).toBe(600000)
+  expect(paneModel({ autoCompact: 'auto', autoCompactLast: 50 }).autoCompact.back).toBe(750000)
+  expect(autoCompactLastOf(undefined)).toBe(750000)
+  expect(paneModel({ autoCompact: 100000 }).autoCompact).toEqual({ text: 'Auto-compact at 100k', own: false, less: null, more: 150000 })
+  expect(paneModel({ autoCompact: 1000000 }).autoCompact).toEqual({ text: 'Auto-compact at 1M', own: false, less: 950000, more: null })
   // off the 50k grid: the next step on it
-  expect(paneModel({ autoCompact: 120000 }).autoCompact).toEqual({ text: 'Auto-compact at 120k', less: 100000, more: 150000, auto: true })
+  expect(paneModel({ autoCompact: 120000 }).autoCompact).toEqual({ text: 'Auto-compact at 120k', own: false, less: 100000, more: 150000 })
   const bd = { totalTokens: 100000, maxTokens: 1000000, percentage: 10, categories: [] }
   const keys = (m: any, surface: string) => nodes(paneView(TABLE, m, { surface })).filter(n => n.type === 'Button').map(n => n.props.key + ': ' + n.props.label)
-  expect(keys(paneModel({ bd, autoCompact: 750000 }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-more: +', 'pacing-pane-autocompact-auto: Auto', 'pacing-pane-refresh: Refresh'])
-  expect(keys(paneModel({ bd, autoCompact: 'auto' }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-more: +', 'pacing-pane-refresh: Refresh'])
-  expect(keys(paneModel({ autoCompact: 1000000 }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-auto: Auto', 'pacing-pane-refresh: Refresh'])
+  expect(keys(paneModel({ bd, autoCompact: 750000 }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-more: +', 'pacing-pane-autocompact-auto: ☐ Let Claude Code decide', 'pacing-pane-refresh: Refresh'])
+  // on: the toggle alone, the value and − and + hidden
+  expect(keys(paneModel({ bd, autoCompact: 'auto' }), 'desktop')).toEqual(['pacing-pane-autocompact-auto: ☑ Let Claude Code decide', 'pacing-pane-refresh: Refresh'])
+  expect(keys(paneModel({ autoCompact: 1000000 }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-auto: ☐ Let Claude Code decide', 'pacing-pane-refresh: Refresh'])
   const words = (m: any, surface: string) => nodes(paneView(TABLE, m, { surface })).filter(n => n.type === 'Text').map(n => n.props.children)
   expect(words(paneModel({ bd, autoCompact: 750000 }), 'desktop')).toContain('Auto-compact at 750k')
+  expect(words(paneModel({ bd, autoCompact: 'auto' }), 'desktop')).toContain('It compacts near the end of the window.')
+  expect(words(paneModel({ bd, autoCompact: 'auto' }), 'desktop').some((w: any) => String(w).startsWith('Auto-compact'))).toBe(false)
+  // the toggle's press: 'auto' when off, the count to return to when on
+  const pressOf = (m: any) => { const got: any[] = []; const b = nodes(paneView(TABLE, m, { surface: 'desktop', onAutoCompact: (v: any) => got.push(v) })).find(n => n.props && n.props.key === 'pacing-pane-autocompact-auto'); b.props.onPress(); return got }
+  expect(pressOf(paneModel({ bd, autoCompact: 750000 }))).toEqual(['auto'])
+  expect(pressOf(paneModel({ bd, autoCompact: 'auto', autoCompactLast: 450000 }))).toEqual([450000])
   // the terminal: no button, the words and the command
   expect(keys(paneModel({ bd, autoCompact: 750000 }), 'terminal')).toEqual(['pacing-pane-refresh: Refresh'])
   expect(words(paneModel({ bd, autoCompact: 750000 }), 'terminal')).toContain('Auto-compact at 750k; /pacing autocompact <tokens>, auto or off changes it.')
@@ -4923,7 +5015,7 @@ test('the pane\'s auto-compact row: its words, − and + by 50k and Auto; none p
   expect(words(paneModel({ bd, autoCompact: 'off' }), 'terminal').some((w: any) => String(w).includes('Auto-compact'))).toBe(false)
 })
 
-test('a press on −, + or Auto in the pane: config.mjs stores it, then /autocompact runs with it, and the row shows it', async ($, on) => {
+test('a press on −, + or the toggle in the pane: config.mjs stores it, then /autocompact runs with it, and the row shows it; off again returns to the last count', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   let config = '{}'
@@ -4953,18 +5045,225 @@ test('a press on −, + or Auto in the pane: config.mjs stores it, then /autocom
   await clock.settle()
   await ui.unmount()
   expect(seen.runs).toEqual(['/autocompact 700000', '/autocompact auto'])
+  // the count left is kept
+  expect(seen.store[AUTO_COMPACT_LAST]).toBe(700000)
   ui = await $.ui.mount(PANE)
-  expect(await texts(ui)).toContain('Auto-compact: Claude Code\'s default')
-  // no Auto at auto; + steps from the default
-  expect((await ui.findAll({ type: 'Button' })).map((b: any) => b.key ?? b.props?.key)).not.toContain('pacing-pane-autocompact-auto')
+  // on: the toggle and the note, no value and no − or +
+  expect(await texts(ui)).toContain('It compacts near the end of the window.')
+  expect((await texts(ui)).some((t: any) => String(t).startsWith('Auto-compact'))).toBe(false)
+  const buttons = (await ui.findAll({ type: 'Button' })).map((b: any) => b.key ?? b.props?.key)
+  expect(buttons).toContain('pacing-pane-autocompact-auto')
+  expect(buttons).not.toContain('pacing-pane-autocompact-less')
+  expect(buttons).not.toContain('pacing-pane-autocompact-more')
+  // off again: back to 700k, saved and run
+  await ui.press({ key: 'pacing-pane-autocompact-auto' })
+  await clock.settle()
+  await ui.unmount()
+  expect(seen.scripts.filter(a => a[2] === 'autocompact').map(a => a[3])).toEqual(['700000', 'auto', '700000'])
+  expect(seen.runs).toEqual(['/autocompact 700000', '/autocompact auto', '/autocompact 700000'])
+  ui = await $.ui.mount(PANE)
+  expect(await texts(ui)).toContain('Auto-compact at 700k')
   await ui.press({ key: 'pacing-pane-autocompact-more' })
   await clock.settle()
   await ui.unmount()
-  expect(seen.runs).toEqual(['/autocompact 700000', '/autocompact auto', '/autocompact 800000'])
+  expect(seen.runs).toEqual(['/autocompact 700000', '/autocompact auto', '/autocompact 700000', '/autocompact 750000'])
   // the turn's end after a press has nothing more to run
   await $.turn.complete(turn('claude-opus-5-5', 1))
   await clock.settle()
-  expect(seen.runs.length).toBe(3)
+  expect(seen.runs.length).toBe(4)
   // a success says nothing
   expect(seen.toasts).toEqual([])
+})
+
+test('toggled off with no count kept: the default, saved and run', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  let config = '{"autoCompact":"auto"}'
+  const seen = autoEngine(on, { config: () => config, has: () => ({ autocompactSource: 'auto', rawMaxTokens: 1000000 }), run: argv => {
+    if (argv[2] !== 'autocompact') return null
+    const v = argv[3]
+    config = JSON.stringify({ autoCompact: v === 'auto' || v === 'off' ? v : Number(v) })
+    return { exitCode: 0, stdout: 'auto-compact window: ...\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+  } })
+  await start($)
+  await clock.settle()
+  expect(seen.runs).toEqual([])
+  let ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'pacing-pane-autocompact-auto' })
+  await clock.settle()
+  await ui.unmount()
+  expect(seen.scripts.filter(a => a[2] === 'autocompact').map(a => a[3])).toEqual(['750000'])
+  expect(seen.runs).toEqual(['/autocompact 750000'])
+  expect(seen.store[AUTO_COMPACT_LAST]).toBe(750000)
+  ui = await $.ui.mount(PANE)
+  const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
+  expect(texts).toContain('Auto-compact at 750k')
+  expect(texts).not.toContain('It compacts near the end of the window.')
+  await ui.unmount()
+})
+
+// ---- the agents' rows in the pane: model tags, step bars, output ----
+
+test('an agent\'s row: its model as a tag, ↑ or ↓ against the session\'s; a bar of its steps, or of its time against the estimate, or none', () => {
+  // the bar's shape
+  expect(stepBarOf({ part: { done: 2, total: 4 }, startedAt: T0 }, T0 + 60000)).toEqual({ done: 2, total: 4 })
+  expect(stepBarOf({ part: { done: 0, total: 3 }, startedAt: T0 }, T0 + 60000)).toEqual({ done: 0, total: 3 })
+  // no steps: the time run against the usual run (10m: 2m 30s run is a quarter)
+  expect(stepBarOf({ startedAt: T0, runs: [600000, 600000, 600000] }, T0 + 150000)).toEqual({ frac: 0.25 })
+  // neither: none
+  expect(stepBarOf({ startedAt: T0 }, T0 + 1000)).toBe(null)
+  expect(stepBarOf({ startedAt: T0, runs: [60000, 60000, 60000] }, T0 + 120000)).toBe(null)
+  // drawn: a segment a step, done lit, the one at work half lit, the rest dark
+  const steps = stepsSvg({ done: 2, total: 4 }, '#a78bfa')
+  expect(steps.split('<path').length - 1).toBe(4)
+  expect(steps.split('fill="#a78bfa"/>').length - 1).toBe(2)
+  expect(steps.split('fill="#a78bfa" fill-opacity="0.4"').length - 1).toBe(1)
+  expect(steps.split('fill="#808080" fill-opacity="0.2"').length - 1).toBe(1)
+  // the time: one thin bar, lit by its share
+  expect(stepsSvg({ frac: 0.25 }, '#a78bfa')).toContain('width="120" height="4" rx="2" fill="#a78bfa"')
+  // past STEPS_MAX steps: the thin bar
+  expect(stepsSvg({ done: 15, total: STEPS_MAX * 2 }, '#a78bfa')).toContain('width="150" height="4"')
+  expect(stepsText({ done: 2, total: 4 })).toBe('▰▰▱▱')
+  expect(stepsText({ frac: 0.5 })).toBe('██████░░░░░░')
+  // the tag: by price against the session's model
+  expect(modelArrow('claude-haiku-5-5', 'claude-opus-5-5[1m]', PRICES)).toBe('↓')
+  expect(modelArrow('haiku', 'claude-opus-5-5', PRICES)).toBe('↓')
+  expect(modelArrow('claude-fable-5-2', 'claude-opus-5-5', PRICES)).toBe('↑')
+  expect(modelArrow('claude-opus-5-5', 'claude-opus-5-5', PRICES)).toBe('')
+  expect(modelArrow('gpt', 'claude-opus-5-5', PRICES)).toBe('')
+  expect(modelIdOf('opus', PRICES)).toBe('claude-opus-5-5')
+  // the rows paneModel makes
+  const m = paneModel({ j: { all: 50, line: 73.3, level: 'ok', prices: PRICES, }, session: { model: 'claude-opus-5-5', effort: 'high' }, running: [
+    { id: 'a1', text: 'reader: logs 2m', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { frac: 0.5 } },
+    { id: 'a2', text: 'implementer: step 2 of 4 4m', model: 'claude-opus-5-5', effort: 'high', on: 'Opus 5.5 high', bar: { done: 2, total: 4 } },
+    { id: null, text: 'side session 1m', model: null, effort: null, on: '', bar: null },
+    'verifier is running 40s',
+  ] as any })
+  expect(m.running).toEqual([
+    { id: 'a1', text: 'reader: logs 2m', tag: '↓ Haiku 5.5 medium', bar: { frac: 0.5 }, out: null },
+    { id: 'a2', text: 'implementer: step 2 of 4 4m', tag: 'Opus 5.5 high', bar: { done: 2, total: 4 }, out: null },
+    { id: null, text: 'side session 1m', tag: '', bar: null, out: null },
+    'verifier is running 40s',
+  ])
+  // no reading: the tag without an arrow
+  expect(paneModel({ running: [{ id: 'a1', text: 'r', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: null }] as any }).running).toEqual([{ id: 'a1', text: 'r', tag: 'Haiku 5.5 medium', bar: null, out: null }])
+  // drawn: the tag and the bar under the words
+  const tree = nodes(paneView(TABLE, m, { surface: 'desktop', onAgent: () => {} }))
+  const tags = tree.filter(n => n.type === 'Text' && n.props.mono && n.props.size === 'caption').map(n => n.props.children)
+  expect(tags).toContain('↓ Haiku 5.5 medium')
+  expect(tags).toContain('Opus 5.5 high')
+  expect(tree.filter(n => n.type === 'Svg' && /^(Step|About)/.test(n.props.alt)).map(n => n.props.alt)).toEqual(['About 50% of its time', 'Step 2 of 4'])
+  // the terminal: the tag after the words, the steps under them
+  const term = nodes(paneView(TABLE, m, { surface: 'terminal', onAgent: () => {} }))
+  expect(term.filter(n => n.type === 'Button' && n.props.plain).map(n => n.props.label)).toEqual(['🤖 reader: logs 2m (↓ Haiku 5.5 medium)', '🤖 implementer: step 2 of 4 4m (Opus 5.5 high)'])
+  expect(term.filter(n => n.type === 'Text').map(n => n.props.children)).toContain('   ▰▰▱▱')
+})
+
+test('an agent\'s output box: its steps\' text and its calls with how they came out, a line each, the last three; a report\'s first lines without their marks', () => {
+  expect(outLine('\n  \nAll   tests pass.\nMore.')).toBe('All tests pass.')
+  expect(outLine('')).toBe('')
+  expect(outLine('x'.repeat(200))).toHaveLength(OUT_CHARS)
+  const ok = (text: string) => ({ result: {}, text })
+  expect(actionLine({ tool: 'Bash', command: 'npm test\nmore' }, ok('TAP\n# pass 448\n\n'))).toBe('Bash npm test → # pass 448')
+  // a runner's closing lines after the result: the result line is taken
+  expect(actionLine({ tool: 'Bash', command: 'npm test' }, ok('# tests 449\n# pass 448\n# fail 0\n# cancelled 0\n# duration_ms 32400'))).toBe('Bash npm test → # fail 0')
+  expect(actionLine({ tool: 'Bash', command: 'ls' }, ok('a.txt\nb.txt'))).toBe('Bash ls → b.txt')
+  expect(actionLine({ tool: 'Read', file_path: 'X:\\pacing\\pacing\\hooks\\pane.mjs' }, ok('a\nb\nc'))).toBe('Read pane.mjs → 3 lines')
+  expect(actionLine({ tool: 'Grep', pattern: 'paneLadder' }, ok(''))).toBe('Grep paneLadder → nothing')
+  expect(actionLine({ tool: 'Edit', file_path: '/a/readings.mjs' }, ok('done'))).toBe('Edit readings.mjs → saved')
+  expect(actionLine({ tool: 'Bash', command: 'npm test' }, { deny: 'no' })).toBe('Bash npm test → refused')
+  expect(actionLine({ tool: 'Bash', command: 'npm test' }, { result: {}, text: 'Error: boom\nat x', isError: true })).toBe('Bash npm test → failed: Error: boom')
+  expect(actionLine({ tool: 'mcp__github__get_file_contents', path: 'README.md' }, ok('x'))).toBe('get_file_contents README.md')
+  // the call that says a step: the bar shows it, no line
+  expect(actionLine({ tool: 'Bash', command: 'node "C:/x/scripts/config.mjs" part 1 3' }, ok('part 1 of 3'))).toBe('')
+  // the last three, one the same as the last not twice
+  let out: string[] = []
+  for (const l of ['a', 'b', 'b', 'c', 'd', '']) out = noteOut(out, l)
+  expect(out).toEqual(['b', 'c', 'd'])
+  expect(OUT_LINES).toBe(3)
+  expect(reportLines('## Report\n\n- First point\n- Second **bold** `code`\n1. Third\nFourth')).toEqual(['Report', 'First point', 'Second bold code'])
+  expect(finishedText({ type: 'pacing:reader', description: 'read the logs' }, 'done', 185000)).toBe('reader: read the logs ✓ done · 3m')
+  expect(finishedText({ type: 'implementer', description: '' }, 'failed', 40000)).toBe('implementer ✗ failed · 40s')
+})
+
+test('the output box shows for the two agents with the newest output alone; drawn as a small dim box under the row, on the terminal as lines', () => {
+  const m = paneModel({ running: [
+    { id: 'a1', text: 'reviewer 6m', model: null, on: '', bar: null, out: ['Read pane.mjs → 737 lines'], outAt: 10 },
+    { id: 'a2', text: 'implementer 4m', model: null, on: '', bar: { done: 2, total: 4 }, out: ['Edit readings.mjs → saved', 'Bash npm test → # pass 448'], outAt: 30 },
+    { id: 'a3', text: 'reader 2m', model: null, on: '', bar: null, out: [], outAt: 0 },
+    { id: 'a4', done: true, text: 'researcher: the hooks API ✓ done · 3m', model: null, on: '', bar: null, out: ['turn.complete carries the report.'], outAt: 20 },
+  ] as any })
+  expect(m.running.map((x: any) => x.out)).toEqual([null, ['Edit readings.mjs → saved', 'Bash npm test → # pass 448'], null, ['turn.complete carries the report.']])
+  expect(m.running[3].done).toBe(true)
+  expect(OUT_SHOWN).toBe(2)
+  const tree = nodes(paneView(TABLE, m, { surface: 'desktop' }))
+  const boxes = tree.filter(n => n.type === 'Box' && n.props.backgroundColor === OUT_FILL)
+  expect(boxes.length).toBe(2)
+  expect(boxes[0].props.children.map((t: any) => [t.props.children, t.props.dimColor, t.props.wrap])).toEqual([['Edit readings.mjs → saved', true, 'truncate-end'], ['Bash npm test → # pass 448', true, 'truncate-end']])
+  const term = nodes(paneView(TABLE, m, { surface: 'terminal' })).filter(n => n.type === 'Text').map(n => n.props.children)
+  expect(term).toContain('   │ Bash npm test → # pass 448')
+  expect(term).toContain('   │ turn.complete carries the report.')
+  expect(term).not.toContain('   │ Read pane.mjs → 737 lines')
+})
+
+test('an agent\'s output in the pane from what the engine hands the module: its calls, its steps\' text, then its report for a minute after it ends', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'ag1' }))
+  let live = true
+  on('agent.list', () => ({ value: live ? [{ id: 'ag1', status: 'running', description: '', type: 'x' }] : [] }))
+  on('fs.read', () => ({ value: '{}' }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [{ id: PANE_ID, title: PANE_TITLE, isShown: true, isFocused: false, isPlaced: true }] }))
+  const answers: Record<string, string> = { 'npm test': 'TAP\n# pass 448\n', 'pane.mjs': 'a\nb\nc' }
+  on('tool.call', (_: unknown, e: any) => ({ result: {}, text: answers[e.command] || answers[String(e.file_path || '').split('/').pop()] || '' }))
+  let say = ''
+  on('turn.step', async function* (_: unknown, e: any) { return { turnId: e.turnId, index: e.index, answer: say, toolUses: [], stopReason: 'end_turn', usage: null } as any })
+  const paneTexts = async () => {
+    const ui = await $.ui.mount(PANE)
+    // (a row's words are its Button's label)
+    const texts = [...(await ui.findAll({ type: 'Text' })).map((t: any) => t.text), ...(await ui.findAll({ type: 'Button' })).map((b: any) => b.label ?? b.props?.label)]
+    await ui.unmount()
+    return texts
+  }
+  await $.session.measure(measure(10))
+  await spawn($, 'pacing:reader', 'haiku', true, 'read the logs')
+  await $.tool.call({ tool: 'Bash', command: 'npm test', agentId: 'ag1' } as any)
+  await $.tool.call({ tool: 'Read', file_path: '/a/pane.mjs', agentId: 'ag1' } as any)
+  await $.tool.call({ tool: 'Bash', command: 'node "/p/scripts/config.mjs" part 1 2', agentId: 'ag1' } as any)
+  say = 'All tests pass.\nMore.'
+  for await (const _ of ($.turn as any).step({ turnId: 't', index: 0, messageCount: 1, model: 'claude-haiku-5-5', agentId: 'ag1' })) { /* drained */ }
+  // the main thread's own step says nothing in the box
+  say = 'the session talks'
+  for await (const _ of ($.turn as any).step({ turnId: 'm', index: 0, messageCount: 1, model: 'claude-fable-5-2' })) { /* drained */ }
+  let texts = await paneTexts()
+  expect(texts).toContain('Bash npm test → # pass 448')
+  expect(texts).toContain('Read pane.mjs → 3 lines')
+  expect(texts).toContain('All tests pass.')
+  expect(texts).not.toContain('the session talks')
+  expect(texts.some((s: string) => s.includes('config.mjs'))).toBe(false)
+  // a fourth line: the oldest goes
+  await $.tool.call({ tool: 'Edit', file_path: '/a/readings.mjs', agentId: 'ag1' } as any)
+  texts = await paneTexts()
+  expect(texts).not.toContain('Bash npm test → # pass 448')
+  expect(texts).toContain('Edit readings.mjs → saved')
+  // it ends: its row stays with how it ended and its report's first lines
+  await clock.advance(60000)
+  await $.turn.complete({ ...turn('claude-haiku-5-5', 0.01, 'ag1'), answer: '## Logs read\n- 3 failures in the band tests\n- all from one timeout\n- the rest pass' })
+  await clock.settle()
+  live = false
+  texts = await paneTexts()
+  expect(texts.some((s: string) => s.startsWith('reader: read the logs ✓ done · '))).toBe(true)
+  expect(texts).toContain('Logs read')
+  expect(texts).toContain('3 failures in the band tests')
+  expect(texts).toContain('all from one timeout')
+  expect(texts).not.toContain('the rest pass')
+  // its minute over: gone
+  await clock.advance(TASK_DONE_FOR)
+  await clock.settle()
+  texts = await paneTexts()
+  expect(texts.some((s: string) => s.startsWith('reader: read the logs'))).toBe(false)
+  expect(texts).not.toContain('Logs read')
 })

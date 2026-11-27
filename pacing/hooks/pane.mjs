@@ -26,6 +26,8 @@ export const SWEEPS = {
 };
 // each section's own accent: its heading and its figures
 export const ACCENTS = { week: '#22d3ee', models: '#a78bfa', agents: '#f472b6', context: '#34d399', tasks: '#60a5fa' };
+// the fill of an agent's output box in Agents at work: darker than the section
+export const OUT_FILL = 'rgba(2,6,23,0.45)';
 const blend = (a, b, k) => {
   const x = parseInt(a.slice(1), 16), y = parseInt(b.slice(1), 16);
   const c = s => Math.round(((x >> s) & 255) + (((y >> s) & 255) - ((x >> s) & 255)) * k);
@@ -300,6 +302,32 @@ export const barText = (segments, cells = 24, marker = null) => {
   return s.join('');
 };
 
+// An agent's progress under its row (readings.mjs stepBarOf): a slanted
+// segment a step, the steps done lit in `color`, the one at work half lit,
+// the rest dark; past STEPS_MAX steps, or with no steps, one thin bar lit by
+// the share done (the time run against the estimate: `frac`).
+export const STEPS_MAX = 24;
+export const stepsSvg = memo('steps', (bar, color = HUD, w = 480) => {
+  const h = 12, slant = 4;
+  let body = '';
+  if (bar.total && bar.total <= STEPS_MAX) {
+    const n = bar.total, gap = 6, sw = (w - slant - gap * (n - 1)) / n;
+    for (let i = 0; i < n; i++) {
+      const fill = i < bar.done ? 'fill="' + color + '"' : i === bar.done ? 'fill="' + color + '" fill-opacity="0.4"' : 'fill="#808080" fill-opacity="0.2"';
+      body += '<path d="M' + num(i * (sw + gap) + slant) + ' 2h' + num(sw) + 'l' + (-slant) + ' 8h' + num(-sw) + 'z" ' + fill + '/>';
+    }
+  } else {
+    const k = bar.total ? bar.done / bar.total : clamp(bar.frac || 0, 0, 1);
+    body = '<rect x="0" y="4" width="' + w + '" height="4" rx="2" fill="#808080" fill-opacity="0.2"/>'
+      + (k > 0 ? '<rect x="0" y="4" width="' + num(Math.max(4, k * w)) + '" height="4" rx="2" fill="' + color + '"/>' : '');
+  }
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">' + body + '</svg>';
+});
+// the same in characters, for a surface without Svg
+export const stepsText = bar => (bar.total && bar.total <= STEPS_MAX
+  ? '▰'.repeat(bar.done) + '▱'.repeat(bar.total - bar.done)
+  : barText([{ pct: 100 * (bar.total ? bar.done / bar.total : clamp(bar.frac || 0, 0, 1)) }], 12));
+
 // ---- other dials for the week ----
 // Each takes what ringSvg takes and draws the same three things another
 // way: how much of the week is used, where the budget line is, the figure.
@@ -573,16 +601,24 @@ export const DIAL_SIZE = 124;
 //   compact 'offer' | 'running' | null: a Compact button in the Context
 //     section (o.onCompact), reading "Compacting…" while one runs; on the
 //     terminal a line of text in its place
-//   autoCompact { text, less, more, auto } | null: Claude Code's auto-compact
-//     window in the Context section, with − (to `less`), + (to `more`) and
-//     Auto where each is given (o.onAutoCompact(value)); on the terminal a
-//     line of text in their place
+//   autoCompact { text, own, less, more, note, back } | null: Claude Code's
+//     auto-compact window in the Context section: the toggle for Claude
+//     Code's own (to 'auto', or while `own` back to `back`), and the words
+//     with − (to `less`) and + (to `more`) where each is given; while
+//     `own`, `note` in their place (o.onAutoCompact(value)); on the
+//     terminal a line of text in place of it all
 //   tasks [{ kind, what, state, time }]: the background tasks, the last
 //     section; state 'running', 'done', 'failed' or 'stopped'
+//   running items may also carry tag (the model, ↑ or ↓ against the
+//     session's), bar (stepBarOf: { done, total } or { frac }), out
+//     (its latest output, or a finished run's report, a few lines: drawn
+//     in a small dim box under the row) and done (a run that ended)
 //   empty (text, when there is no reading)
 // `o`: surface, placement, onRefresh, onAgent(id), onCompact, onAutoCompact(v), dial (a key of
 // DIALS), now (ms: where the animations stand, see phased; absent in a still
 // picture).
+// the toggle's words, after ☐ or ☑
+export const AUTO_COMPACT_OWN_LABEL = 'Let Claude Code decide';
 export const TASK_MARKS = { done: '✓ done', failed: '✗ failed', stopped: '■ stopped' };
 export const paneView = (t, m, o = {}) => {
   const { Box, Text, Button } = t;
@@ -599,7 +635,7 @@ export const paneView = (t, m, o = {}) => {
     ? t.Svg({ source: barSvg(segments, marker, 480, 34, loud), alt })
     : Text({ color: segments[0] ? segments[0].color : undefined, children: barText(segments, 24, loud ? marker : null) }));
   // a section: its drawn upper edge in its accent, then its rows (no box)
-  const tint = hex => { const v = parseInt(hex.slice(1), 16); return 'rgba(' + ((v >> 16) & 255) + ',' + ((v >> 8) & 255) + ',' + (v & 255) + ',' + TINT + ')'; };
+  const tint = (hex, a = TINT) => { const v = parseInt(hex.slice(1), 16); return 'rgba(' + ((v >> 16) & 255) + ',' + ((v >> 8) & 255) + ',' + (v & 255) + ',' + a + ')'; };
   const panel = (kind, children, extra = {}) => {
     const accent = ACCENTS[kind] || HUD;
     if (!hasSvg) return col(children, extra);
@@ -672,11 +708,30 @@ export const paneView = (t, m, o = {}) => {
     // `plain`: no brackets round it on the terminal; a desktop draws its
     // own button for it either way
     const words = (x, lead) => (x && typeof x === 'object' && x.id && o.onAgent
-      ? Button({ key: 'pacing-agent-' + x.id, plain: true, label: lead + x.text, onPress: () => o.onAgent(x.id) })
+      // the words as a Text child, which wraps; a label alone stays on one
+      // line and the narrow pane cut it (seen live in 0.9.41)
+      ? Button({ key: 'pacing-agent-' + x.id, plain: true, label: lead + x.text, onPress: () => o.onAgent(x.id), children: Text({ wrap: 'wrap', children: lead + x.text }) })
       : Text({ children: lead + (x && typeof x === 'object' ? x.text : x) }));
-    sections.push(panel('agents', [head('Agents at work', ACCENTS.agents), ...m.running.map((x, i) => (hasSvg
-      ? row([t.Svg({ source: moving(robotSvg(PALETTE[i % PALETTE.length], i)), alt: 'An agent at work', width: 36, height: 36 }), Box({ flexDirection: 'column', flexShrink: 1, justifyContent: 'center', children: [words(x, '')] })], { columnGap: 1, alignItems: 'center' })
-      : words(x, '🤖 ')))], { rowGap: 1 }));
+    // under the words its model as a tag (↑ or ↓ against the session's),
+    // its step bar and its output box
+    sections.push(panel('agents', [head('Agents at work', ACCENTS.agents), ...m.running.map((x, i) => {
+      const c = PALETTE[i % PALETTE.length];
+      const tag = x && typeof x === 'object' && x.tag ? x.tag : '';
+      const steps = x && typeof x === 'object' && x.bar ? x.bar : null;
+      const out = x && typeof x === 'object' && Array.isArray(x.out) && x.out.length ? x.out : null;
+      if (!hasSvg) {
+        const said = tag ? { ...x, text: x.text + ' (' + tag + ')' } : x;
+        return steps || out ? col([words(said, '🤖 '), steps ? cap('   ' + stepsText(steps)) : null, ...(out || []).map(l => cap('   │ ' + l))]) : words(said, '🤖 ');
+      }
+      return row([t.Svg({ source: moving(robotSvg(c, i)), alt: 'An agent at work', width: 36, height: 36 }), Box({ flexDirection: 'column', flexShrink: 1, flexGrow: 1, justifyContent: 'center', children: [
+        words(x, ''),
+        tag ? Text({ size: 'caption', mono: true, color: c, children: tag }) : null,
+        steps ? t.Svg({ source: stepsSvg(steps, c), alt: steps.total ? 'Step ' + steps.done + ' of ' + steps.total : 'About ' + Math.round(100 * steps.frac) + '% of its time' }) : null,
+        // its latest output, or its report's first lines once done: a small
+        // dim box, each line cut at the pane's width
+        out ? Box({ flexDirection: 'column', paddingX: 1, borderStyle: 'round', borderColor: tint(c, 0.35), backgroundColor: OUT_FILL, children: out.map(l => Text({ size: 'caption', mono: true, dimColor: true, wrap: 'truncate-end', children: l })) }) : null,
+      ].filter(Boolean) })], { columnGap: 1, alignItems: 'center' });
+    })], { rowGap: 1 }));
   }
 
   // the context: how full it is, one figure and one bar; and from a size
@@ -687,16 +742,20 @@ export const paneView = (t, m, o = {}) => {
     : o.surface === 'terminal' ? cap(m.compact === 'running' ? 'Compacting…' : '/compact cuts it.')
     : row([Button({ key: 'pacing-pane-compact', label: m.compact === 'running' ? 'Compacting…' : 'Compact', variant: 'secondary', onPress: o.onCompact || (() => {}) })]);
   // The auto-compact window pacing sets: its words, then − and + (a step
-  // each) and Auto, small. The terminal gets the command, typed there.
+  // each), small, and a toggle for Claude Code's own auto-compact; while
+  // that is on, the toggle and a short note alone. The terminal gets the
+  // command, typed there.
   const ac = m.autoCompact;
   const setTo = v => () => (o.onAutoCompact ? o.onAutoCompact(v) : undefined);
+  const own = ac && Button({ key: 'pacing-pane-autocompact-auto', label: (ac.own ? '☑ ' : '☐ ') + AUTO_COMPACT_OWN_LABEL, variant: 'secondary', onPress: setTo(ac.own ? ac.back : 'auto') });
   const autoCompact = !ac ? null
     : o.surface === 'terminal' ? cap(ac.text + '; /pacing autocompact <tokens>, auto or off changes it.')
+    : ac.own ? row([own, ac.note ? cap(ac.note) : null], { columnGap: 1, alignItems: 'center', flexWrap: 'wrap' })
     : row([
       Text({ size: 'caption', children: ac.text }),
       ac.less != null ? Button({ key: 'pacing-pane-autocompact-less', label: '−', variant: 'secondary', onPress: setTo(ac.less) }) : null,
       ac.more != null ? Button({ key: 'pacing-pane-autocompact-more', label: '+', variant: 'secondary', onPress: setTo(ac.more) }) : null,
-      ac.auto ? Button({ key: 'pacing-pane-autocompact-auto', label: 'Auto', variant: 'secondary', onPress: setTo('auto') }) : null,
+      own,
     ], { columnGap: 1, alignItems: 'center', flexWrap: 'wrap' });
   if (m.context) {
     const c = m.context;
