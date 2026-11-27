@@ -1507,3 +1507,12 @@ in the desktop app it gave "the agent's transcript did not open: no main
 view here.", so the desktop draws the row as text, and after an engine
 deny that says it draws no main view the terminal's rows are text too
 until the module loads again.
+
+## Auto-compact off in the pane (0.9.43)
+
+With `/pacing autocompact off` the pane's Context section no longer drops
+the auto-compact row: it shows one dim caption line, "Auto-compact: pacing
+leaves it alone (/pacing autocompact 750k or auto turns it back on)", with no buttons,
+on the desktop and the terminal alike (the user's word: show a dim line
+when autocompact is off). The `auto` and token-count rows are as they
+were.

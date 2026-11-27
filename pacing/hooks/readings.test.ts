@@ -5,7 +5,7 @@
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
 import { OUT_FILL, stepsSvg, stepsText, STEPS_MAX, DIALS, FRAMES, frameSvg, barSvg, overShade, overText, OVER_CALM, OVER_RED, ORANGE, YELLOW, LEVEL_COLORS, barText, robotSvg, reactorSvg, rulerSvg, drawingId, builtCount, buildsDone, MEMO_MAX, phased, phaseOf, DIAL_SIZE, paneView, AUTO_COMPACT_OWN_LABEL } from './pane.mjs'
-import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_LAST, AUTO_COMPACT_OWN_NOTE, autoCompactLastOf, autoCompactOf, autoCompactFailedText, stepBarOf, modelArrow, modelIdOf, outLine, actionLine, noteOut, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN } from './readings.mjs'
+import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_LAST, AUTO_COMPACT_OWN_NOTE, AUTO_COMPACT_OFF_TEXT, autoCompactLastOf, autoCompactOf, autoCompactFailedText, stepBarOf, modelArrow, modelIdOf, outLine, actionLine, noteOut, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -4978,12 +4978,13 @@ test('a refused /autocompact at a start is one toast, at most one per load; the 
   expect(autoCompactFailedText('auto', '')).toBe('❌ Claude Code\'s auto-compact was not set to its default. /autocompact auto sets it.')
 })
 
-test('the pane\'s auto-compact row: its words, − and + by 50k and the toggle for Claude Code\'s own; none past the bounds; on the terminal a line of text; nothing when off', () => {
+test('the pane\'s auto-compact row: its words, − and + by 50k and the toggle for Claude Code\'s own; none past the bounds; on the terminal a line of text; one dim line when off', () => {
   expect(AUTO_COMPACT_STEP).toBe(50000)
   expect(AUTO_COMPACT_OWN_LABEL).toBe('Let Claude Code decide')
   expect(AUTO_COMPACT_OWN_NOTE).toBe('It compacts near the end of the window.')
   expect(paneModel({}).autoCompact).toBe(null)
-  expect(paneModel({ autoCompact: 'off' }).autoCompact).toBe(null)
+  expect(AUTO_COMPACT_OFF_TEXT).toBe('Auto-compact: pacing leaves it alone (/pacing autocompact 750k or auto turns it back on)')
+  expect(paneModel({ autoCompact: 'off' }).autoCompact).toEqual({ text: AUTO_COMPACT_OFF_TEXT, off: true })
   expect(paneModel({ autoCompact: 750000 }).autoCompact).toEqual({ text: 'Auto-compact at 750k', own: false, less: 700000, more: 800000 })
   // Claude Code's own: no − and +, the note, and the count the toggle returns to (the last kept, else the default)
   expect(paneModel({ autoCompact: 'auto' }).autoCompact).toEqual({ text: 'Auto-compact: Claude Code\'s default', own: true, note: AUTO_COMPACT_OWN_NOTE, back: 750000 })
@@ -5012,7 +5013,12 @@ test('the pane\'s auto-compact row: its words, − and + by 50k and the toggle f
   expect(keys(paneModel({ bd, autoCompact: 750000 }), 'terminal')).toEqual(['pacing-pane-refresh: Refresh'])
   expect(words(paneModel({ bd, autoCompact: 750000 }), 'terminal')).toContain('Auto-compact at 750k; /pacing autocompact <tokens>, auto or off changes it.')
   expect(words(paneModel({ bd, autoCompact: 'auto' }), 'terminal')).toContain('Auto-compact: Claude Code\'s default; /pacing autocompact <tokens>, auto or off changes it.')
-  expect(words(paneModel({ bd, autoCompact: 'off' }), 'terminal').some((w: any) => String(w).includes('Auto-compact'))).toBe(false)
+  // off: one dim line, the same on both surfaces, and no button
+  const texts = (m: any, surface: string) => nodes(paneView(TABLE, m, { surface })).filter(n => n.type === 'Text' && String(n.props.children).includes('Auto-compact'))
+  for (const surface of ['desktop', 'terminal']) {
+    expect(keys(paneModel({ bd, autoCompact: 'off' }), surface)).toEqual(['pacing-pane-refresh: Refresh'])
+    expect(texts(paneModel({ bd, autoCompact: 'off' }), surface).map(n => [n.props.children, n.props.dimColor, n.props.size])).toEqual([[AUTO_COMPACT_OFF_TEXT, true, 'caption']])
+  }
 })
 
 test('a press on −, + or the toggle in the pane: config.mjs stores it, then /autocompact runs with it, and the row shows it; off again returns to the last count', async ($, on) => {

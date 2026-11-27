@@ -601,12 +601,13 @@ export const DIAL_SIZE = 124;
 //   compact 'offer' | 'running' | null: a Compact button in the Context
 //     section (o.onCompact), reading "Compacting…" while one runs; on the
 //     terminal a line of text in its place
-//   autoCompact { text, own, less, more, note, back } | null: Claude Code's
+//   autoCompact { text, own, less, more, note, back, off } | null: Claude Code's
 //     auto-compact window in the Context section: the toggle for Claude
 //     Code's own (to 'auto', or while `own` back to `back`), and the words
 //     with − (to `less`) and + (to `more`) where each is given; while
 //     `own`, `note` in their place (o.onAutoCompact(value)); on the
-//     terminal a line of text in place of it all
+//     terminal a line of text in place of it all; while `off` (pacing
+//     leaves it alone) `text` alone, one dim line, on every surface
 //   tasks [{ kind, what, state, time }]: the background tasks, the last
 //     section; state 'running', 'done', 'failed' or 'stopped'
 //   running items may also carry tag (the model, ↑ or ↓ against the
@@ -744,11 +745,12 @@ export const paneView = (t, m, o = {}) => {
   // The auto-compact window pacing sets: its words, then − and + (a step
   // each), small, and a toggle for Claude Code's own auto-compact; while
   // that is on, the toggle and a short note alone. The terminal gets the
-  // command, typed there.
+  // command, typed there. Left alone ('off'): one dim line, no buttons.
   const ac = m.autoCompact;
   const setTo = v => () => (o.onAutoCompact ? o.onAutoCompact(v) : undefined);
-  const own = ac && Button({ key: 'pacing-pane-autocompact-auto', label: (ac.own ? '☑ ' : '☐ ') + AUTO_COMPACT_OWN_LABEL, variant: 'secondary', onPress: setTo(ac.own ? ac.back : 'auto') });
+  const own = ac && !ac.off && Button({ key: 'pacing-pane-autocompact-auto', label: (ac.own ? '☑ ' : '☐ ') + AUTO_COMPACT_OWN_LABEL, variant: 'secondary', onPress: setTo(ac.own ? ac.back : 'auto') });
   const autoCompact = !ac ? null
+    : ac.off ? cap(ac.text)
     : o.surface === 'terminal' ? cap(ac.text + '; /pacing autocompact <tokens>, auto or off changes it.')
     : ac.own ? row([own, ac.note ? cap(ac.note) : null], { columnGap: 1, alignItems: 'center', flexWrap: 'wrap' })
     : row([

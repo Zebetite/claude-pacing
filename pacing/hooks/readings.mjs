@@ -597,11 +597,14 @@ export const closedByPerson = e => !!e && e.id === PANE_ID && !!e.origin && e.or
 // AUTO_COMPACT_STEP on the step's grid, none past the bounds) and `own`,
 // whether Claude Code's own auto-compact is on ('auto'): then no − and +,
 // a short `note` instead, and `back`, the token count the toggle returns
-// to (`autoCompactLast`, the last one kept, else the default). Nothing for
-// 'off' (pacing leaves /autocompact alone) or none given.
+// to (`autoCompactLast`, the last one kept, else the default). For 'off'
+// (pacing leaves /autocompact alone) one dim line, `off` and its `text`,
+// with no buttons; nothing when none is given.
 export const PANE_COMPACT_AT = 300000;
 // the pane's note under the toggle while Claude Code's own auto-compact is on
 export const AUTO_COMPACT_OWN_NOTE = 'It compacts near the end of the window.';
+// the pane's one line while pacing leaves /autocompact alone ('off')
+export const AUTO_COMPACT_OFF_TEXT = 'Auto-compact: pacing leaves it alone (/pacing autocompact 750k or auto turns it back on)';
 // the 5-hour window's figure from which heavy work waits (budget.mjs says HOLD there too)
 export const FIVE_HOLD = 85;
 // ---- the agents' rows in the pane: model tags, output, step bars ----
@@ -699,7 +702,8 @@ export const stepBarOf = (a, now) => {
 // (`out`, for the OUT_SHOWN agents with the newest output).
 export const paneModel = ({ j = null, mix = [], running = [], bd = null, now = Date.now(), busy = false, failing = false, tasks = [], tokens = null, compacting = false, autoCompact = null, autoCompactLast = null, session = null } = {}) => {
   const m = { level: 'ok', levelText: '', budget: null, meters: [], notes: [], mix, running, context: null, contextNote: '', empty: '', tasks, compact: null, autoCompact: null };
-  if (autoCompact === 'auto') m.autoCompact = { text: autoCompactText(autoCompact), own: true, note: AUTO_COMPACT_OWN_NOTE, back: autoCompactLastOf(autoCompactLast) };
+  if (autoCompact === 'off') m.autoCompact = { text: AUTO_COMPACT_OFF_TEXT, off: true };
+  else if (autoCompact === 'auto') m.autoCompact = { text: autoCompactText(autoCompact), own: true, note: AUTO_COMPACT_OWN_NOTE, back: autoCompactLastOf(autoCompactLast) };
   else if (typeof autoCompact === 'number') {
     const n = autoCompact;
     const less = Math.max(AUTO_COMPACT_MIN, Math.ceil(n / AUTO_COMPACT_STEP) * AUTO_COMPACT_STEP - AUTO_COMPACT_STEP);
