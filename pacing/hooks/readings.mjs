@@ -92,10 +92,10 @@ export const pauseNote = (tokens, idleMs) => (tokens >= PAUSE_SIZE && idleMs >= 
 // A large session pays for its size on every turn: each turn sends the whole
 // history again (at the cache's read price while it is warm, at the write
 // price once it has lapsed). So the module offers to compact, at three levels:
-//   suggest  from 300 000 tokens, once a turn has ended: one calm line in the
+//   suggest  from 400 000 tokens, once a turn has ended: one calm line in the
 //            band above the prompt, with Compact now and Not now. It never
 //            interrupts and stays until answered or the next prompt.
-//   urge     from 500 000 tokens: the same band, plainer words, the cost, and
+//   urge     from 650 000 tokens: the same band, plainer words, the cost, and
 //            the warning colour.
 //   now      a session of 300 000 tokens or more left idle: the same band in
 //            the warning colour, 10 minutes before the cache lapses and again
@@ -112,7 +112,7 @@ export const pauseNote = (tokens, idleMs) => (tokens >= PAUSE_SIZE && idleMs >= 
 // Once per level; again only after the session grew by a further 250 000
 // tokens (it was 100 000 until 0.9.29: a row every 100 000 tokens and at
 // every pause came too often). So between two compactions the size is
-// offered at 300 000, 500 000 and 750 000. A pause is told once per such
+// offered at 400 000, 650 000 and 900 000. A pause is told once per such
 // step too, as the row or as the notice at the next prompt, whichever comes:
 // a second pause at about the same size is not told again (pauseDue).
 // Never while a turn runs, never in a
@@ -120,8 +120,8 @@ export const pauseNote = (tokens, idleMs) => (tokens >= PAUSE_SIZE && idleMs >= 
 // another session drives has nobody to ask). `/pacing compact off` turns the
 // offers off; the pause notice then shows as it did before them. An engine
 // without the band, the timers or $.session.compact keeps the notice too.
-export const SUGGEST_AT = 300000;
-export const URGE_AT = 500000;
+export const SUGGEST_AT = 400000;
+export const URGE_AT = 650000;
 export const OFFER_STEP = 250000;
 export const COMPACT_INSTRUCTIONS = 'Keep what this session must not lose: the goal; the decisions made and why; '
   + 'the open items, in order; the files and commands that matter; what was tried and ruled out.';
@@ -293,13 +293,20 @@ async function limitsNow($) {
 // `five`), where it gave any. `spend` ({ total, sent }: the session's dollars
 // so far and as far as a reading took them) hands budget.mjs the dollars
 // since, and counts them sent once a reading ran.
-async function runReading($, week, five, session, spend = null) {
+async function runReading($, week, five, session, spend = null, health = null) {
   const total = spend ? spend.total : 0;
   const spent = spend ? total - spend.sent : 0;
   const run = async argv => {
-    const r = await $.process.run(argv, { timeoutMs: 20000 });
-    const j = r.exitCode === 0 ? JSON.parse(r.stdout.trim().split('\n').pop()) : null;
-    if (j && spend) spend.sent = total;
+    let r, j = null;
+    try { r = await $.process.run(argv, { timeoutMs: 20000 }); } catch (err) { readingFailed(health, err && err.message); throw err; }
+    if (r.exitCode !== 0) {
+      // budget.mjs refuses a reset that has passed. The engine holds the last
+      // response's windows, so between the weekly reset and the next response
+      // the one it names has: there is nothing to read then, and nothing failed
+      const why = lastLineOf(r.stderr) || lastLineOf(r.stdout);
+      if (!RESET_PASSED.test(why)) readingFailed(health, why);
+    } else { try { j = JSON.parse(r.stdout.trim().split('\n').pop()); } catch (err) { readingFailed(health, 'its answer could not be read'); throw err; } }
+    if (j) { readingCame(health); if (spend) spend.sent = total; }
     return j;
   };
   const plain = () => (week && week.resetsAt
@@ -312,6 +319,63 @@ async function runReading($, week, five, session, spend = null) {
     j = await run(readingArgv($.plugin.root, m.all, m.reset, own ? m.five : five && five.percentUsed, own ? m.fiveReset : five && five.resetsAt, false, m, session, spent));
   } catch { /* the plain one */ }
   return j || plain();
+}
+// How the readings go, in `health` ({ fails, why, told }): a run of budget.mjs
+// that failed (an exit code, a timeout, an answer that does not parse) is
+// counted, and one that answers starts the count over. A reading that fails
+// leaves the status line as it was, and it gave no sign of that: a broken
+// budget.mjs or state file froze the line on figures days old. After
+// FAIL_SAY failures in a row the line leads with a mark (staleLine), the
+// pane says so, and one toast names /pacing-doctor.
+export const FAIL_SAY = 3;
+const RESET_PASSED = /^no reading was taken: --reset \S+ has passed/;
+const lastLineOf = text => (typeof text === 'string' ? (text.trim().split('\n').pop() || '').trim() : '');
+function readingFailed(health, why) {
+  if (!health) return;
+  health.fails++;
+  const w = typeof why === 'string' ? why.replace(/\s+/g, ' ').trim() : '';
+  health.why = w.length > 80 ? w.slice(0, 79) + '…' : w;
+}
+function readingCame(health) { if (health) { health.fails = 0; health.why = ''; health.told = false; } }
+export const readingsFail = health => !!health && health.fails >= FAIL_SAY;
+export const failedText = (n, why) => ICON.failed + ' pacing could not take a reading, ' + n + ' tries in a row' + (why ? ' (' + why.replace(/[.\s]+$/, '') + ')' : '')
+  + ': the status line shows older figures. /pacing-doctor says what is wrong.';
+export const FAILED_NOTE = 'The readings fail: these figures are older. /pacing-doctor says what is wrong.';
+// the line with a mark in front while the readings fail, where it has room
+export const staleLine = (text, max = LINE_MAX) => {
+  for (const lead of ['⚠️ old figures · ', '⚠️ ']) if ((lead + text).length <= max) return lead + text;
+  return text;
+};
+function sayFailing($, health) {
+  if (!readingsFail(health) || health.told) return;
+  health.told = true;
+  try { $.ui.toast(failedText(health.fails, health.why), { timeoutMs: TOAST_LONG }); } catch { /* an engine without toasts */ }
+}
+// One reading at a time, taken in one place. `rd` is the session's own
+// ({ running, health, spend, un, session(), held(), hold(j), setLast(v) }).
+// The flag is set and cleared here alone: this was written out five times,
+// the copies had drifted, and one cleared a flag another had set, so two
+// readings ran at once and handed budget.mjs the same dollars twice. Answers
+// the reading taken in (the level and what goes unused said, `last` set), or
+// null: one runs already, or none came. Never throws. `lastFirst` counts the
+// try as the last reading before it runs (a measure's: a failed one is not
+// tried again until the meter moves or MIN_GAP passes).
+async function takeReading($, rd, { at, week, five, lastFirst = false } = {}) {
+  if (rd.running) return null;
+  rd.running = true;
+  try {
+    if (week === undefined) ({ week, five } = await limitsNow($));
+    const pct = week && week.resetsAt ? week.percentUsed : null;
+    if (lastFirst) rd.setLast({ pct, at });
+    const j = await runReading($, week, five, rd.session(), rd.spend, rd.health);
+    if (j) {
+      rd.setLast({ pct: pct !== null ? pct : j.all, at });
+      sayLevel($, rd.held(), j);
+      sayUnused($, j, rd.un).catch(() => { /* a convenience */ });
+      rd.hold(j);
+    }
+    return j;
+  } catch { return null; } finally { rd.running = false; sayFailing($, rd.health); }
 }
 // What goes unused at the reset (budget.mjs's `unused`, points of the week
 // the trend leaves at "ahead"): one toast per week and step of UNUSED_STEP
@@ -335,20 +399,17 @@ async function sayUnused($, j, un) {
 }
 // A large tool result in the main thread stays in the session: every later
 // turn sends it again (from the cache, but it counts), and it brings the
-// compaction nearer. One toast per BULKY_EVERY at most, naming the tool and
-// the size; /pacing-status counts them. Subagents' results are left out:
+// compaction nearer. /pacing-status counts them; no toast (the user's word:
+// no messages about tokens used). Subagents' results are left out:
 // only their answer reaches the session. Tokens are estimated from the text
 // the model reads, 4 characters a token.
 export const BULKY_TOKENS = 10000;
-export const BULKY_EVERY = 15 * 60000;
 export const tokensOfText = text => (typeof text === 'string' ? Math.round(text.length / 4) : 0);
 export const toolLabel = tool => {
   const name = String(tool || 'tool');
   const short = name.startsWith('mcp__') ? name.split('__').pop() : name;
   return short.length > 20 ? short.slice(0, 19) + '…' : short;
 };
-export const bulkyText = (tool, tokens) => ICON.bulky + ' that ' + toolLabel(tool) + ' result was about ' + kText(tokens)
-  + ' tokens; every later turn sends it again. Bulky reads cost less in the reader agent.';
 export const bulkyStatus = b => (b && b.count ? '\nLarge results: ' + b.count + ' this session, about ' + kText(b.tokens)
   + ' tokens that every later turn sends again; bulky reads cost less in the reader agent.' : '');
 const kText = n => (n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1000 ? Math.round(n / 1000) + 'k' : String(Math.round(n)));
@@ -435,7 +496,7 @@ export const closedByPerson = e => !!e && e.id === PANE_ID && !!e.origin && e.or
 // The budget is said as time alone, never in tokens or dollars: "9h 30m" and
 // "left to use today to stay on budget"; past the line, "40m" and "over
 // today's budget". Without a pace there is no time: the points of the week.
-export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky = null, now = Date.now(), busy = false } = {}) => {
+export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky = null, now = Date.now(), busy = false, failing = false } = {}) => {
   const m = { level: 'ok', levelText: '', budget: null, meters: [], notes: [], mix, running, context: null, contextNote: '', empty: '' };
   if (j) {
     // The top area is the week alone (the user's word: do not mix the weekly
@@ -477,6 +538,8 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky =
     if (typeof j.unused === 'number') m.notes.push('At this pace about ' + j.unused + '% of the week goes unused at the reset; it does not carry over.');
   // a reading on its way (at load, or Refresh): said so, not "none"
   } else m.empty = busy ? 'Reading the meters…' : 'No reading yet in this session: /pacing usage takes one.';
+  // the readings fail: the figures above are older than they look
+  if (failing) m.notes.unshift(FAILED_NOTE);
   const b = bulkyStatus(bulky);
   if (b) m.notes.push(b.replace(/^\n/, ''));
   if (bd && typeof bd.totalTokens === 'number') {
@@ -1548,6 +1611,35 @@ async function noteLoaded($, version) {
     if (was !== version) await $.store.set(key, version);
   } catch { /* the row stays in the others, as before */ }
 }
+// The store's keys under a session's id (the version it loaded as, the model
+// and effort last set, its running agents): nothing deleted them, so the
+// store gained one or more per session for good. An ending session's go
+// (session.end). Those left by sessions before that, once a day at a load:
+// a `version:` key naming another version than this copy's is a session
+// that ended or runs older code (should it reload after all, the other
+// sessions keep their row for that one time).
+export const PRUNED = 'prunedAt';
+export const PRUNE_EVERY = 24 * 3600000;
+const SESSION_KEYS = ['version:', 'switch:', 'agents:'];
+async function dropKeys($, id) {
+  if (!id) return;
+  for (const k of SESSION_KEYS) { try { await $.store.delete(k + id); } catch { /* no store */ } }
+}
+async function pruneKeys($, version) {
+  try {
+    const now = await $.clock.now();
+    const at = await $.store.get(PRUNED);
+    if (typeof at === 'number' && now - at < PRUNE_EVERY) return;
+    const keys = await $.store.keys();
+    const own = 'version:' + (await $.session.id());
+    for (const key of keys) {
+      if (!key.startsWith('version:') || key === own) continue;
+      const v = await $.store.get(key);
+      if (typeof v === 'string' && v !== version) await $.store.delete(key);
+    }
+    await $.store.set(PRUNED, now);
+  } catch { /* an engine without keys(): they stay */ }
+}
 async function reloadedElsewhere($, version) { try { return (await $.store.get(RELOADED)) === version; } catch { return false; } }
 // one look at the version on disk; `rl` is the copy's memory (see register).
 // Never throws: a look is a convenience, and the next one tries again.
@@ -1558,7 +1650,7 @@ async function look($, rl) {
     const disk = await versionOnDisk($);
     if (!disk) return;
     // this copy's first look: what it was loaded as
-    if (rl.loaded === null) { rl.loaded = disk; await noteLoaded($, disk); return; }
+    if (rl.loaded === null) { rl.loaded = disk; await noteLoaded($, disk); await pruneKeys($, disk); return; }
     // the row up, and the person reloaded into that version in another session
     if (rl.row && rl.row === disk && await reloadedElsewhere($, disk)) { rl.row = null; redraw($); return; }
     if (disk === rl.loaded || disk === rl.acted || !rl.typed()) return;
@@ -1592,7 +1684,7 @@ export const register = on => {
   // what was said of the allowance going unused (sayUnused)
   const un = { said: null };
   // the large results this session (see BULKY_TOKENS)
-  const bulky = { count: 0, tokens: 0, saidAt: -Infinity };
+  const bulky = { count: 0, tokens: 0 };
   // the context lines for /pacing-status and the pane: a fresh breakdown
   // where the engine gave one, else the last
   const ctxText = bd => {
@@ -1610,8 +1702,14 @@ export const register = on => {
   // the newest shared reading (see "the newest shared reading"): its timer,
   // and what takeShared reads and writes
   let sharedTimer = null;
-  const sh = { held: () => reading, take: j => { hold({ ...reading, ...j }); }, lineNow: now => lineNow(now) };
-  let running = false;
+  // (a newer reading another session wrote is fresh figures: the mark goes)
+  const sh = { held: () => reading, take: j => { hold({ ...reading, ...j }); rd.health.fails = 0; }, lineNow: now => lineNow(now) };
+  // what takeReading reads and writes: whether a reading runs now, and how
+  // the readings go (see FAIL_SAY)
+  const rd = { running: false, loadFlight: null, health: { fails: 0, why: '', told: false }, spend, un,
+    session: () => sessionModel, held: () => reading, hold: j => hold(j), setLast: v => { last = v; } };
+  // the status line with the mark in front while the readings fail
+  const marked = text => (text && readingsFail(rd.health) ? staleLine(text, st.max) : text);
   // the reading at load on its way (the pane says so)
   let loading = false;
   // for the warning after a pause: when the main thread's last turn ended (a
@@ -1648,6 +1746,9 @@ export const register = on => {
   let paneDrawn = false;
   let offered = {};
   let attended = false;
+  // a /clear or a resume gave the process a new session id: what is kept in
+  // the store under the id is written again at the next prompt
+  let rekey = false;
   // the pause's timers, and the pause (its last turn's end) a drawn now row spoke for
   let timers = [];
   let nowFor = null;
@@ -1677,7 +1778,7 @@ export const register = on => {
   // the status line as it stands, with the agents when any run
   const lineNow = now => {
     const list = runningAgents();
-    if (reading) return lineOf(liveLeft(reading, spend.total - liveFrom), sessionModel, tokens, agentTokens, now, false, list, st.max);
+    if (reading) return marked(lineOf(liveLeft(reading, spend.total - liveFrom), sessionModel, tokens, agentTokens, now, false, list, st.max));
     return list.length ? agentPart(list, now, st.max) : undefined;
   };
   const st = { agents, timer: null, settledAt: 0, polledAt: 0, watchUntil: 0, progressAt: 0, host: null, children: 0, quiet: false, watchSince: 0, max: LINE_MAX, surfaces: null,
@@ -1746,11 +1847,6 @@ export const register = on => {
       if (n >= BULKY_TOKENS) {
         bulky.count += 1;
         bulky.tokens += n;
-        const now = await $.clock.now();
-        if (now - bulky.saidAt >= BULKY_EVERY && (await noticesOn($))) {
-          bulky.saidAt = now;
-          $.ui.toast(bulkyText(e.tool, n), { timeoutMs: TOAST_LONG });
-        }
       }
     } catch { /* not counted */ }
     const toSession = e.tool === 'mcp__ccd_session__start_session' || e.tool === 'mcp__ccd_session_mgmt__send_message'
@@ -1995,13 +2091,45 @@ export const register = on => {
       contextTokens = r.tokensAfter || null;
       try {
         const live = await liveAgents($);
-        for (const id of [...agents.keys()]) if (!live || !live.has(id)) agents.delete(id);
+        // (side sessions are not in the engine's list: they stay, or the
+        // next poll took each for a new one and said it started again)
+        for (const [id, a] of [...agents]) if (a.kind !== 'session' && (!live || !live.has(id))) agents.delete(id);
+        keepAgents($, agents);
         if (!agents.size) stopTick();
         $.ui.status(lineNow(await $.clock.now()));
       } catch { /* the line is redrawn at the next measure */ }
       redraw($);
     }
     return r;
+  });
+
+  // The session ends. A /clear or a resume goes on in this process under a
+  // new session id, and no session.start fires for it: what the module held
+  // of the old conversation (its size, its pause, the offers, each model's
+  // share) carried into the new one, so an empty conversation was told it
+  // held 400k tokens and had sat idle. That memory starts over here; the
+  // reading, the agents at work and the model set stay, they are the
+  // account's and the process's. The dollars not yet handed to budget.mjs
+  // go with it: a reading's worth at most. And the store's keys under the
+  // ending session's id are deleted (dropKeys).
+  on('session.end', async ($, e, next) => {
+    try {
+      if (e.reason === 'clear' || e.reason === 'resume') {
+        lastTurnAt = null; contextTokens = null; warnedFor = null; nowFor = null; askedFor = null; askedAt = 0;
+        forget();
+        clearTimers();
+        sw = null;
+        switchSeen.clear();
+        bulky.count = 0; bulky.tokens = 0;
+        for (const k of Object.keys(tokens)) delete tokens[k];
+        for (const k of Object.keys(agentTokens)) delete agentTokens[k];
+        spend.total = 0; spend.sent = 0; liveFrom = 0;
+        rekey = true;
+        redraw($);
+      }
+      await dropKeys($, e.sessionId);
+    } catch { /* an ending session is never held */ }
+    return next(e);
   });
 
   // a surface attached or detached: the room for the line asked again
@@ -2074,10 +2202,15 @@ export const register = on => {
         ({ week, five } = await limitsNow($));
         known = !!(week && week.resetsAt);
       } finally { loading = false; }
-      if (running) { redraw($); return; }
-      running = true;
+      if (rd.running) { redraw($); return; }
+      // (its own way to a reading: a dry run where none can be logged, and
+      // neither the level nor what goes unused is said at a load)
+      rd.running = true;
+      // a measure that comes meanwhile waits for this one, then decides
+      let freed = () => {};
+      rd.loadFlight = new Promise(r => { freed = r; });
       try {
-        let j = await runReading($, week, five, sessionModel, spend);
+        let j = await runReading($, week, five, sessionModel, spend, rd.health);
         const logged = !!j;
         if (!j && !known) {
           const st = await storedReading($);
@@ -2095,7 +2228,15 @@ export const register = on => {
           // after a reload, the pane drawn first and never again)
           redraw($);
         }
-      } finally { running = false; redraw($); }
+      } finally {
+        rd.running = false;
+        rd.loadFlight = null;
+        freed();
+        redraw($);
+        // the side sessions' first poll came before the reading named this
+        // session (no host): asked again, still without toasts
+        if (st.quiet) { try { await pollSessions($, st, now); } catch { /* at the next turn's end */ } }
+      }
     })().catch(() => { /* a failure draws nothing new */ });
     // the side sessions already working (a reload mid-work): in the line, no toast
     // the subagents a reload found at work, with what was known of them (see
@@ -2156,7 +2297,7 @@ export const register = on => {
       mix: j ? tierMix(tokens, j.tierOf || {}, j.prices || {}, agentTokens, j.agentTierOf).map(x => ({ name: tierName(j, x.tier), share: x.share })) : [],
       running: runningAgents().map(a => (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { task: TASK_MAX, time: 1, est: 1, step: 1 })
         + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.kind === 'session' && a.description ? ', ' + a.description : '')),
-      bd: ctxNow, bulky, now, busy: running || loading,
+      bd: ctxNow, bulky, now, busy: rd.running || loading, failing: readingsFail(rd.health),
     });
   };
   // a person's close keeps it closed in later sessions; a plugin's own, or an
@@ -2188,22 +2329,14 @@ export const register = on => {
       const bd = await breakdownNow($);
       if (bd) ctxNow = bd;
       redraw($);
-      if (running) return;
+      if (rd.running) return;
       let at;
       try { at = await $.clock.now(); } catch { at = Date.now(); }
       if (first && last && at - last.at < PANE_FRESH) return;
-      running = true;
-      try {
-        const { week, five } = await limitsNow($);
-        const j = await runReading($, week, five, sessionModel, spend);
-        if (j) {
-          last = { pct: week && week.resetsAt ? week.percentUsed : j.all, at };
-          sayLevel($, reading, j);
-          hold(j);
-          $.ui.status(lineNow(at));
-          redraw($);
-        }
-      } catch { /* the last reading stands */ } finally { running = false; }
+      // (a reading that failed redraws too: the mark and the pane's note)
+      await takeReading($, rd, { at });
+      try { $.ui.status(lineNow(at)); } catch { /* the next measure draws it */ }
+      redraw($);
     });
     // the first draw since it opened: fresh figures, once
     if (!paneDrawn) { paneDrawn = true; refreshPane(true); }
@@ -2213,23 +2346,16 @@ export const register = on => {
     const show = text => ({ text, isTextDisplayOnly: true });
     try {
       let out = await scriptOut($, 'budget.mjs', ['last']);
-      if (measureWhy(out) && !running) {
-        running = true;
+      if (measureWhy(out) && !rd.running) {
         try {
           let now;
           try { now = await $.clock.now(); } catch { now = Date.now(); }
-          const { week, five } = await limitsNow($);
-          const j = await runReading($, week, five, sessionModel, spend);
-          if (j) {
-            last = { pct: week && week.resetsAt ? week.percentUsed : j.all, at: now };
-            sayLevel($, reading, j);
-            sayUnused($, j, un).catch(() => { /* a convenience */ });
-            hold(j);
+          if (await takeReading($, rd, { at: now })) {
             $.ui.status(lineNow(now));
             redraw($);
             out = await scriptOut($, 'budget.mjs', ['last']);
           }
-        } catch { /* the reason stands */ } finally { running = false; }
+        } catch { /* the reason stands */ }
       }
       if (out === null) return show('Pacing: the report could not be made. `/pacing usage` asks the session for it.');
       const why = measureWhy(out);
@@ -2279,8 +2405,17 @@ export const register = on => {
       // slash command (/compact, a handover) is the user acting on it already
       const typed = !e.turnId && !e.isMeta && !e.command && !String(e.text || '').trimStart().startsWith('/')
         && !unattended(e.origin);
-      // a person in front of the session: the offers are theirs to answer
-      if (!e.turnId && !e.isMeta) attended = !unattended(e.origin);
+      // a person in front of the session: the offers are theirs to answer.
+      // Once one has typed it stays so: a notification's prompt (a background
+      // agent done, while they are away) turned it off, and the row before
+      // the cache lapses, made for that hour away, never came.
+      if (!e.turnId && !e.isMeta && !unattended(e.origin)) attended = true;
+      if (rekey) {
+        rekey = false;
+        if (rl.loaded) noteLoaded($, rl.loaded);
+        keepSwitch($, ss);
+        keepAgents($, agents);
+      }
       // the user compacting or handing over already: the band's offer is answered
       const cmd = e.command ? e.command.name + ' ' + (e.command.args || '') : String(e.text || '').trimStart();
       if (offer && /^\/?(compact\b|pacing handover\b)/.test(cmd)) {
@@ -2380,22 +2515,16 @@ export const register = on => {
             const line = await recordAgent($, a, u, ss);
             if (line) fresh.set(roleFor(a.type), line);
           }
-          if (running || (last && now - last.at < AGENT_GAP)) return;
-          running = true;
-          try {
-            const { week, five } = await limitsNow($);
-            const j = await runReading($, week, five, sessionModel, spend);
-            if (j) {
-              last = { pct: week && week.resetsAt ? week.percentUsed : j.all, at: now };
-              sayLevel($, reading, j);
-              sayUnused($, j, un).catch(() => { /* a convenience */ });
-              hold(j);
-              $.ui.status(lineNow(now));
-              redraw($);
-            }
-          } finally { running = false; }
+          if (rd.running || (last && now - last.at < AGENT_GAP)) return;
+          if (await takeReading($, rd, { at: now })) {
+            $.ui.status(lineNow(now));
+            redraw($);
+          }
         })().catch(() => { /* a record and a reading are conveniences */ });
-        if ((await noticesOn($)) && !(await paneShown($, st))) $.ui.toast(doneText(a, now - a.startedAt, spent, runningAgents()), { timeoutMs: TOAST_LONG });
+        // the toast's count is the agent's size where the refresh saw one: the
+        // run's usage is every request summed, many times that
+        const size = typeof a.tokens === 'number' && a.tokens > 0 ? a.tokens : spent;
+        if ((await noticesOn($)) && !(await paneShown($, st))) $.ui.toast(doneText(a, now - a.startedAt, size, runningAgents()), { timeoutMs: TOAST_LONG });
         // a run that ended by itself is the type's history for the estimate
         if (!e.isAborted) {
           try {
@@ -2424,7 +2553,7 @@ export const register = on => {
       } catch { /* the count is settled at the next refresh */ }
     }
     // the turn's tokens are in: the line shows them now, not at the next turn
-    if (!e.agentId && !running) {
+    if (!e.agentId && !rd.running) {
       try { if (reading || agents.size) $.ui.status(lineNow(lastTurnAt ?? Date.now())); } catch { /* never disturbs the turn */ }
     }
     // a natural break: the main thread's turn ended. A session on another
@@ -2505,24 +2634,19 @@ export const register = on => {
     const limits = e.rateLimits || [];
     const week = limits.find(r => r.kind === 'seven_day');
     // no weekly window: an API key, not a subscription, or no response yet
-    if (!week || !week.resetsAt || running) return result;
+    // (a reading that runs already serves; the one at load is waited for,
+    // since it may have had no meters to read yet)
+    if (!week || !week.resetsAt || (rd.running && !rd.loadFlight)) return result;
     // the engine's clock, which a test can set; the system's where there is none
     let now;
     try { now = await $.clock.now(); } catch { now = Date.now(); }
+    if (rd.loadFlight) { try { await rd.loadFlight; } catch { /* it draws nothing */ } }
+    if (rd.running) return result;
     const due = !last || Math.abs(week.percentUsed - last.pct) >= 1 || now - last.at >= MIN_GAP;
     try {
-      if (due) {
-        running = true;
-        last = { pct: week.percentUsed, at: now };
-        // every meter where the app's usage tool answers, else these two windows
-        const j = await runReading($, week, limits.find(r => r.kind === 'five_hour'), sessionModel, spend);
-        if (j) {
-          sayLevel($, reading, j);
-          sayUnused($, j, un).catch(() => { /* a convenience */ });
-          hold(j);
-          redraw($);
-        }
-      }
+      // every meter where the app's usage tool answers, else these two windows
+      // (a failed one redraws too: the pane's note)
+      if (due && ((await takeReading($, rd, { at: now, week, five: limits.find(r => r.kind === 'five_hour'), lastFirst: true })) || readingsFail(rd.health))) redraw($);
       // the tier shares move every turn: the line is redrawn even when no
       // new reading was due
       if (reading) {
@@ -2538,13 +2662,11 @@ export const register = on => {
           } catch { /* not known yet */ }
         }
         await learnSurfaces($, st);
-        $.ui.status(lineOf(liveLeft(reading, spend.total - liveFrom), model, tokens, agentTokens, now, false, runningAgents(), st.max));
+        $.ui.status(marked(lineOf(liveLeft(reading, spend.total - liveFrom), model, tokens, agentTokens, now, false, runningAgents(), st.max)));
       }
     } catch {
       // a reading is a convenience: a missing node, a timeout or a bad line
       // must never disturb the session
-    } finally {
-      running = false;
     }
     return result;
   });

@@ -109,8 +109,11 @@ describe('the ladder', () => {
   test('an older primary/fallback config becomes a ladder', withHome(s => {
     s.writeConfig({ primary: { model: 'opus', label: 'Opus 4', effort: 'high' }, fallback: { model: 'sonnet', label: 'Sonnet 4', effort: 'low' }, lastDayWeight: 1.5, installed: 'x' });
     assert.match(s.config([]).out, /^tier 1 {2}Opus 5.5 high/m);
+    // shown as a ladder; written as one by the first command that changes a setting
+    assert.equal(cfgOf(s).tiers, undefined);
+    s.config(['weight', '2']);
     const c = cfgOf(s);
-    assert.equal(c.tiers.length, 2);
+    assert.deepEqual(c.tiers.map(t => t.label + ' ' + t.effort), ['Opus 5.5 high', 'Sonnet 5.5 low']);
     assert.equal(c.primary, undefined);
   }));
   test('version reads the manifest; where names the data folder', withHome(s => {
@@ -141,6 +144,112 @@ describe('init', () => {
     assert.equal(cfgOf(s).lastDayWeight, 2);
     assert.ok(s.exists('log.jsonl'));
     assert.ok(fs.existsSync(path.join(legacy, 'config.json')));
+  }));
+  test('takes over only what the data folder lacks: readings the plugin logged before its first run stay', withHome(s => {
+    const legacy = path.join(s.home, '.claude', 'skills', 'pacing');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'config.json'), JSON.stringify({ tiers: [{ model: 'opus', effort: 'max' }, { model: 'sonnet', effort: 'low' }], lastDayWeight: 2, installed: '2025-06-01' }));
+    fs.writeFileSync(path.join(legacy, 'log.jsonl'), '{"t":"2026-01-01T00:00:00Z","all":1}\n');
+    fs.writeFileSync(path.join(legacy, 'state.json'), '{"t":"2026-01-01T00:00:00Z","all":1}\n');
+    fs.writeFileSync(path.join(legacy, 'BRIEF.local.md'), 'the old rules\n');
+    // the plugin took readings with no config.json yet
+    const log = '{"t":"2026-11-13T12:00:00Z","all":10}\n{"t":"2026-11-13T13:00:00Z","all":11}\n', state = '{"t":"2026-11-13T13:00:00Z","all":11}\n';
+    s.write('log.jsonl', log);
+    s.write('state.json', state);
+    const r = s.config(['init']);
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.match(r.out, /^migrated config\.json, BRIEF\.local\.md from .*: the earlier standalone skill's files were taken over \(the originals are still there\)\.$/m);
+    assert.deepEqual([s.read('log.jsonl'), s.read('state.json'), s.read('BRIEF.local.md')], [log, state, 'the old rules\n']);
+    assert.equal(cfgOf(s).lastDayWeight, 2);
+    assert.doesNotMatch(r.out, /BRIEF\.local\.md created/);
+  }));
+  test('with every file there already but the config, nothing is taken over and nothing is said of it', withHome(s => {
+    const legacy = path.join(s.home, '.claude', 'skills', 'pacing');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'log.jsonl'), 'old\n');
+    s.write('log.jsonl', 'new\n');
+    const r = s.config(['init']);
+    assert.doesNotMatch(r.out, /migrated/);
+    assert.match(r.out, /^created: pacing is set up in /m);
+    assert.equal(s.read('log.jsonl'), 'new\n');
+  }));
+});
+
+describe('a config.json that needs a repair', () => {
+  // as an older installed copy reads a file a newer one wrote: a tier on a
+  // model it does not know
+  const NEWER = { tiers: [{ model: 'mythos', label: 'Mythos 1', effort: 'high' }, { model: 'opus', label: 'Opus 5.5', effort: 'medium' }, { model: 'sonnet', label: 'Sonnet 5.5', effort: 'low' }],
+    lastDayWeight: 1.5, installed: '2026-01-01' };
+  test('commands that read or record leave the file as it is, and say what they found', withHome(s => {
+    const text = JSON.stringify(NEWER, null, 2) + '\n';
+    s.write('config.json', text);
+    const note = /^config\.json: 1 tier without a known model and effort: dropped$/m;
+    for (const cmd of [['show'], [], ['json'], ['init'], ['agent', 'reader', 'a1', 'haiku', 'medium', '40000'], ['note', 'reader', 'a fact'], ['notes'], ['agents'], ['handover'],
+      ['apply', 'agent', 'reader', 'a2', 'haiku', 'medium', '1k', '+', 'note', 'reader', 'another fact']]) {
+      const r = s.config(cmd);
+      assert.equal(r.code, 0, cmd.join(' ') + ': ' + r.out + r.err);
+      assert.equal(s.read('config.json'), text, cmd.join(' '));
+    }
+    // shown from the tiers that stand, with the note each time
+    const shown = s.config(['show']).out;
+    assert.match(shown, /^tier 1 {2}Opus 5\.5 medium/m);
+    assert.match(shown, note);
+    assert.match(s.config(['show']).out, note);
+    // with only one known tier left, the defaults are shown and the file still keeps the user's
+    const one = JSON.stringify({ ...NEWER, tiers: NEWER.tiers.slice(0, 2) }, null, 2) + '\n';
+    s.write('config.json', one);
+    assert.match(s.config(['agent', 'reader', 'a3', 'haiku', 'medium', '1k']).out, /fewer than two tiers: the default ladder is used/);
+    assert.equal(s.read('config.json'), one);
+  }));
+  test('a command that changes a setting writes the repair with its change; then nothing is left to say', withHome(s => {
+    s.writeConfig({ ...NEWER, lastDayWeight: 0 });
+    const r = s.config(['next', 'off']);
+    assert.equal(r.code, 0, r.out);
+    assert.match(r.out, /^config\.json: 1 tier without a known model and effort: dropped; the last-day weight is not a number from 1 to 3: the default is used$/m);
+    const c = cfgOf(s);
+    assert.deepEqual([c.tiers.map(t => t.model), c.lastDayWeight, c.setNextModel], [['opus', 'sonnet'], 1.5, false]);
+    assert.doesNotMatch(s.config(['show']).out, /^config\.json:/m);
+  }));
+});
+
+describe('apply and the flags of its commands', () => {
+  const slug = p => p.split(/[^A-Za-z0-9._ -]+/).filter(Boolean).join('-');
+  const facts = (s, role, project = s.project) => fs.readFileSync(s.file('notes', slug(project), role + '.md'), 'utf8').split(/\r?\n/).filter(l => l.startsWith('- ')).map(l => l.replace(/^- | \(\d{4}-\d{2}-\d{2}\)$/g, ''));
+  const runs = (s, project) => { const f = s.file('agents', slug(project) + '.jsonl'); return fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split('\n').map(l => JSON.parse(l).id) : []; };
+  const other = s => { const o = path.join(s.home, 'other'); fs.mkdirSync(path.join(o, '.git'), { recursive: true }); return o; };
+  test('a note\'s --replace puts the fact in the stale line\'s place, and stays with its own note', withHome(s => {
+    s.config(['note', 'reader', 'Build with make all.']);
+    s.config(['note', 'reader', 'Lint with eslint.']);
+    const r = s.config(['apply', 'note', 'reader', '--replace', 'make all', 'Build with npm run build.', '+', 'note', 'reader', 'Tests live in tests/.', '+', 'agent', 'reader', 'a1', 'haiku', 'medium', '14000']);
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.match(r.out, /^replaced in .*reader\.md \(2 lines\)\nnoted in .*reader\.md \(3 lines\)\nrecorded: reader a1, task 1, 14k tokens$/m);
+    assert.deepEqual(facts(s, 'reader'), ['Build with npm run build.', 'Lint with eslint.', 'Tests live in tests/.']);
+    // a refusal of the replace stops the run, as any refused command does
+    const bad = s.config(['apply', 'note', 'reader', '--replace', 'gradle', 'z', '+', 'note', 'reader', 'never added']);
+    assert.equal(bad.code, 1);
+    assert.match(bad.out, /no line holds "gradle"/);
+    assert.equal(facts(s, 'reader').length, 3);
+  }));
+  test('--project reaches the command it is given with, and every command of the run that names none', withHome(s => {
+    const o = other(s);
+    const r = s.config(['apply', 'agent', 'reader', 'a1', 'haiku', 'medium', '14000', '--project', o]);
+    assert.equal(r.code, 0, r.out + r.err);
+    assert.deepEqual([runs(s, o), runs(s, s.project)], [['a1'], []]);
+    // one --project for the run, on its last command
+    const all = s.config(['apply', 'agent', 'verifier', 'b2', 'haiku', 'medium', '9000', '+', 'note', 'verifier', 'a fact there', '+', 'weight', '2', '+', 'agent', 'reader', 'a3', 'haiku', 'medium', '1k', '--project', o]);
+    assert.equal(all.code, 0, all.out + all.err);
+    assert.deepEqual([runs(s, o), runs(s, s.project)], [['a1', 'b2', 'a3'], []]);
+    assert.deepEqual(facts(s, 'verifier', o), ['a fact there']);
+    assert.equal(cfgOf(s).lastDayWeight, 2);
+    assert.equal(all.out.match(/^tier 1 /gm).length, 1);
+    // before `apply`, and a command that names its own
+    const mixed = s.config(['--project', o, 'apply', 'agent', 'reader', 'a4', 'haiku', 'medium', '1k', '+', 'agent', 'reader', 'h1', 'haiku', 'medium', '1k', '--project', s.project], { cwd: s.home });
+    assert.equal(mixed.code, 0, mixed.out + mixed.err);
+    assert.deepEqual([runs(s, o), runs(s, s.project)], [['a1', 'b2', 'a3', 'a4'], ['h1']]);
+    // only the flags: no command
+    const none = s.config(['apply', '--project', o]);
+    assert.equal(none.code, 1);
+    assert.match(none.out, /^apply takes .*; not --project /);
   }));
 });
 

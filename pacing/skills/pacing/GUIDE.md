@@ -139,7 +139,10 @@ words, with how this session's own use splits over the ladder's models
 (`🟡Fable 5.2 high 80%`), subagents included.<!-- /help --> The budget and
 the usage always show whole, in the desktop app too, whose footer has room
 for about 70 characters in a normal window (a narrow window cuts the line
-sooner). The split is an estimate: each
+sooner). When three readings in a row fail (a damaged file in the data
+folder, Node missing), the line leads with `⚠️ old figures`, the pane
+says so, and one toast names `/pacing-doctor`: the figures shown are the
+last that came in. The split is an estimate: each
 model's tokens priced at its API rates, which is how the weekly meter
 weighs the models too. The tiers are those in force at the reading:
 while Fable's meter is out or held, the fallback (Opus 5.5 high) is tier
@@ -245,7 +248,7 @@ was verified and how, what is open, any decision it needs), so you never
 open an agent's transcript or another session to learn it. A decision an
 agent needs is asked there and passed on to the same agent. The plugin
 keeps that one session affordable: the offer to compact (below), whole
-tasks to one agent from 500 000 tokens, and role agents it keeps and
+tasks to one agent from 650 000 tokens, and role agents it keeps and
 re-uses, so their reading never enters the session's context. For work
 in several parts, an agent sends the session a short update when each
 part is done, and the session passes it on to you at once: the texts you
@@ -262,11 +265,11 @@ window, since a window can be large or small:
 
 | size | what the skill advises |
 |---|---|
-| under 300 000 tokens | nothing |
-| from 300 000 | compact the conversation at the next natural break (`/compact`), then go on in this session, whatever the next task is: the work stays and every later turn re-sends less. A task unrelated to the session's work is a reason to compact first, not to leave |
-| from 500 000 | compact first if that has not been done; a next task with a clear outcome goes whole to one fresh agent, without asking you, and its outcome comes back here. A new session is never offered: the session names one only when it cannot be compacted or you ask for one, and writes a handover then |
+| under 400 000 tokens | nothing |
+| from 400 000 | compact the conversation at the next natural break (`/compact`), then go on in this session, whatever the next task is: the work stays and every later turn re-sends less. A task unrelated to the session's work is a reason to compact first, not to leave |
+| from 650 000 | compact first if that has not been done; a next task with a clear outcome goes whole to one fresh agent, without asking you, and its outcome comes back here. A new session is never offered: the session names one only when it cannot be compacted or you ask for one, and writes a handover then |
 
-**A whole task to one agent.** From 500 000 tokens every step the
+**A whole task to one agent.** From 650 000 tokens every step the
 session takes itself costs a turn of its full size. So the session
 writes a brief like a handover (the goal, where things stand, the
 decisions, the files and commands, what was ruled out, and what done
@@ -291,12 +294,12 @@ lets no plugin compact while a prompt waits to be sent. So the plugin
 warns earlier instead (below). An hour is assumed for the cache's
 lifetime, since Claude Code does not tell a plugin.
 
-**An offer to compact.** When a turn ends in a session of 300 000
+**An offer to compact.** When a turn ends in a session of 400 000
 tokens or more, a row above the prompt says how large it is, with
-**Compact now** and **Not now**. From 500 000 tokens the row says what
+**Compact now** and **Not now**. From 650 000 tokens the row says what
 each turn sends again, in the warning colour. It never interrupts, and
 comes again only after the session has grown by another 250 000 tokens:
-at 300 000, 500 000 and 750 000 between two compactions.
+at 400 000, 650 000 and 900 000 between two compactions.
 Left idle, the row turns to the warning colour 10 minutes before the
 cache lapses, and again once it has: compacting then costs less than the
 next turn storing it all again. A pause is warned of once per size too:
@@ -340,10 +343,8 @@ a calm switch. `/pacing switch off` turns it off.
 
 Bulky reading (logs, test output, many files) goes to the reader agent
 for the same reason: what the agent reads never enters the session's
-context. When one tool result in the session itself is 10 000 tokens or
-more, a toast names the tool and the size (`🧱 that Read result was about
-12k tokens; every later turn sends it again. ...`), at most once per 15
-minutes, and `/pacing-status` counts them for the session.
+context. A tool result in the session itself of 10 000 tokens or more
+is counted, and `/pacing-status` says how many there were and their size.
 
 **What fills the context.** `/pacing-status` ends with the session's
 context: the total against the window and where it compacts by itself,

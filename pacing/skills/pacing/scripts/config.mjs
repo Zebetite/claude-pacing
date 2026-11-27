@@ -128,11 +128,13 @@ const read = () => {
     return null;
   }
   if (found.problems.length) configNotes = ['config.json: ' + found.problems.join('; ')];
-  // a repair, or an older config's primary/fallback pair made a ladder, is
-  // written back, on the file as it is at that moment
-  if (textOf(found.c) !== text) {
-    try { updateFile(file, t => { try { return t === null ? null : textOf(settingsOf(t).c); } catch { return null; } }); } catch { /* the next command repairs it */ }
-  }
+  // A repair, or an older config's primary/fallback pair made a ladder,
+  // stands in memory only: a command that reads or records (show, and the
+  // agent record after every agent task) writes nothing back. It did, and
+  // an older installed copy, which does not know a newer model or effort,
+  // would so take a tier the user set out of the file, and with fewer than
+  // two left write the defaults. A command that changes a setting writes the
+  // repair with its change (mutate).
   return found.c;
 };
 // Every setting is made on the file as it is when it is written, so a
@@ -199,6 +201,8 @@ const tierNo = (c, a) => { const n = Number(a); if (!(Number.isInteger(n) && n >
 //      the next one would have to find again goes here, a line per fact. ----
 const ROLES = ['reader', 'implementer', 'verifier', 'researcher'];
 const argv = process.argv.slice(2);
+// the words as they were given: `apply` hands each of its commands its own
+const given = [...argv];
 const projectAt = argv.indexOf('--project');
 const projectArg = projectAt >= 0 ? argv.splice(projectAt, 2)[1] : null;
 const replaceAt = argv.indexOf('--replace');
@@ -265,7 +269,7 @@ const modelText = r => (MODELS[r.model] ? MODELS[r.model].label : r.model) + ' '
 
 const [cmd, a, b, d] = argv;
 // an agent's start-up and its progress lines need no settings, and must not
-// write a repaired config.json or add a note about it to their answer
+// add a note about config.json to their answer
 let cfg = cmd === 'start' || cmd === 'part' ? null : read();
 process.on('exit', () => { for (const n of configNotes) console.log(n); });
 // Several commands in one run. Every tool call a session makes re-reads its
@@ -273,23 +277,33 @@ process.on('exit', () => { for (const n of configNotes) console.log(n); });
 // records after a batch of tasks, is one call this way and not eight.
 if (cmd === 'apply') {
   const APPLY = ['set', 'add', 'remove', 'weight', 'next', 'compact', 'notify', 'switch', 'reload', 'premium', 'fallback', 'reader', 'verifier', 'agent', 'note'];
+  // The commands are cut from the words as given, not from argv, which has
+  // lost --project and --replace by now: a note's --replace stays with its
+  // note (without it the note was added and the stale line left), and a
+  // --project stays with its command. One named anywhere in the run counts
+  // for every command that names none (the first, where several are named).
   const groups = [];
   let cur = [];
-  for (const w of argv.slice(1)) { if (w === '+') { if (cur.length) groups.push(cur); cur = []; } else cur.push(w); }
+  const from = given.indexOf('apply');
+  for (const w of given.slice(from + 1)) { if (w === '+') { if (cur.length) groups.push(cur); cur = []; } else cur.push(w); }
   if (cur.length) groups.push(cur);
   if (!groups.length) fail('apply <command> + <command> + ...   (' + APPLY.join(', ') + ')');
-  const unknown = groups.find(g => !APPLY.includes(g[0]));
-  if (unknown) fail('apply takes ' + APPLY.join(', ') + '; not ' + unknown[0]);
+  const projectOf = g => { const i = g.indexOf('--project'); return i >= 0 && g[i + 1] !== undefined ? g[i + 1] : null; };
+  // a command's own words, its flags aside
+  const bare = g => { const c = [...g]; for (const f of ['--project', '--replace']) { const i = c.indexOf(f); if (i >= 0) c.splice(i, 2); } return c; };
+  const unknown = groups.find(g => !APPLY.includes(bare(g)[0]));
+  if (unknown) fail('apply takes ' + APPLY.join(', ') + '; not ' + (bare(unknown)[0] || unknown.join(' ')));
+  const shared = [given.slice(0, from), ...groups].map(projectOf).find(Boolean) || null;
   let settings = false;
   for (const g of groups) {
-    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...g], { encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url), ...g, ...(shared && !g.includes('--project') ? ['--project', shared] : [])], { encoding: 'utf8' });
     if (r.status !== 0) {
       console.log(g.join(' ') + ': ' + (r.stdout + r.stderr).trim());
       fail('stopped there: the commands before it were applied, the ones after it were not');
     }
     // an agent record or a note answers in a line of its own; a setting shows
     // the whole config, once at the end
-    if (g[0] === 'agent' || g[0] === 'note') process.stdout.write(r.stdout);
+    if (['agent', 'note'].includes(bare(g)[0])) process.stdout.write(r.stdout);
     else settings = true;
   }
   configNotes = [];
@@ -523,9 +537,17 @@ switch (cmd || 'show') {
     } else {
       // a machine that ran the standalone skill keeps its ladder, readings and
       // rules. Each line is a sentence the session passes on as it stands.
-      const legacy = ['config.json', 'log.jsonl', 'state.json', 'BRIEF.local.md'].filter(f => fs.existsSync(path.join(legacyDir, f)));
+      // Each file only where the data folder has none: the readings logged
+      // here since (the plugin's, with no config.json yet) are never written
+      // over by the older ones. The exclusive flag: of two first runs at
+      // once, one copies it.
+      const legacy = ['config.json', 'log.jsonl', 'state.json', 'BRIEF.local.md'].filter(f => {
+        try { fs.copyFileSync(path.join(legacyDir, f), path.join(dataDir, f), fs.constants.COPYFILE_EXCL); return true; } catch (e) {
+          if (e.code === 'ENOENT' || e.code === 'EEXIST') return false;
+          throw e;
+        }
+      });
       if (legacy.length) {
-        for (const f of legacy) fs.copyFileSync(path.join(legacyDir, f), path.join(dataDir, f));
         console.log('migrated ' + legacy.join(', ') + ' from ' + legacyDir + ': the earlier standalone skill\'s files were taken over (the originals are still there).');
         cfg = read();
       }

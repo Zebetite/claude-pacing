@@ -75,8 +75,8 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   Each leaves notes per project for the next agent of its role.
 - **Handover between sessions.** A session that has grown long writes
   what the next one needs; the next session's start line names the file.
-  From 300 000 tokens the skill suggests compacting at a natural break,
-  and a prompt sent after an hour's pause in such a session gets one
+  From 400 000 tokens the skill suggests compacting at a natural break,
+  and a prompt sent after an hour's pause in a session of 300 000 or more gets one
   toast that the cache has lapsed.
 - **A start line in every new session** with the last reading and the
   recommended model, which can also become the default for new sessions.

@@ -72,9 +72,9 @@ This session's model is the user's to set; the lever is delegation.
 - Trivial work stays here until throttle (a start costs more than a
   grep); bulky work goes to the lowest tier at every level.
 - **Context line**, in tokens. All work stays in this session. From
-  300 000: suggest `/compact` at the next natural break, then go on here,
+  400 000: suggest `/compact` at the next natural break, then go on here,
   whatever the next task is; an unrelated task is a reason to compact
-  first, not to leave. From 500 000: compact first if not yet done; a
+  first, not to leave. From 650 000: compact first if not yet done; a
   next task with a clear outcome goes whole to one fresh agent, unasked,
   at the model the line names (`pacing:implementer` for a specified
   change, else general-purpose with the `start` brief), briefed with

@@ -80,7 +80,7 @@ Weekly 44 % used, budget line 41 %: over by 3; one step less effort would save m
 Weekly 58 % used, budget line 41 %, reaches 100 % Wednesday: throttle. This session hands work to Opus 5.5 high subagents.
 Fable's meter at 100 %: Fable is out until Thursday's reset.
 Weekly 96 %: stop. Extra usage is on (12.40 of 50.00 EUR this month): going on is charged; your call.
-Context 340k tokens: compacting (/compact) at the next natural break makes every later turn cheaper; then we go on here, whatever the next task is.
+Context 440k tokens: compacting (/compact) at the next natural break makes every later turn cheaper; then we go on here, whatever the next task is.
 Fixed overhead 70k tokens on every turn, 40k of it MCP tools: switching off connectors you do not need saves up to 40k a turn.
 ```
 

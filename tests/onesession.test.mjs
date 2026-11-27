@@ -44,7 +44,7 @@ for (const [name, text] of Object.entries(texts)) {
 test('the report offers no new session but as the last resort, at any size', () => {
   const sb = sandbox();
   try {
-    for (const tokens of ['300000', '500000', '900000']) {
+    for (const tokens of ['400000', '650000', '900000']) {
       const out = sb.budget(['--all', '10', '--reset', '2026-11-19T12:00:00Z', '--now', '2026-11-13T12:00:00Z', '--dry', '--context-tokens', tokens]).out;
       for (const re of FORBIDDEN) assert.doesNotMatch(out, re, tokens);
       for (const s of sentencesNaming(out)) assert.ok(ALLOWED.some(re => re.test(s)), tokens + ': ' + s);

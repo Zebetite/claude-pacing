@@ -209,7 +209,9 @@ describe('where an automatic reading shows', () => {
   test('the start line says it was automatic', () => {
     const s = sandbox();
     try {
-      auto(s, 10, new Date().toISOString().replace(/T.*/, 'T00:00:01.000Z'));
+      // taken today, in a week that runs by the clock (a reset that has passed is refused)
+      const today = new Date().toISOString().replace(/T.*/, 'T00:00:01.000Z');
+      auto(s, 10, today, ['--reset', new Date(Date.parse(today) + 3 * 86400000).toISOString()]);
       const state = JSON.parse(s.read('state.json'));
       // the hook judges the age by the clock: move the reading to now
       state.t = new Date().toISOString();

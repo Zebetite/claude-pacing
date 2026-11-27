@@ -16,15 +16,15 @@ const whole = out => (out.match(/without asking \((.*?)\)/) || [])[1];
 describe('a whole task never goes to a model whose meter is full or held', () => {
   test('the per-model meter on the fallback\'s model (premium opus), Opus out', withHome(s => {
     s.config(['premium', 'opus']);
-    const out = dry(s, '--all', '10', '--premium', '100', '--context-tokens', '600000').out;
+    const out = dry(s, '--all', '10', '--premium', '100', '--context-tokens', '700000').out;
     assert.equal(whole(out), 'judgment on Fable 5.2 high, medium on Sonnet 5.5 medium, routine on Sonnet 5.5 medium');
   }));
   test('the fallback set to the per-model meter\'s model, that model out or held', withHome(s => {
     s.config(['fallback', 'fable', 'high']);
-    assert.match(whole(dry(s, '--all', '10', '--premium', '100', '--context-tokens', '600000').out), /^judgment on Opus 5\.5 medium,/);
-    assert.match(whole(dry(s, '--all', '10', '--premium', '30', '--context-tokens', '600000').out), /^judgment on Opus 5\.5 medium,/);
+    assert.match(whole(dry(s, '--all', '10', '--premium', '100', '--context-tokens', '700000').out), /^judgment on Opus 5\.5 medium,/);
+    assert.match(whole(dry(s, '--all', '10', '--premium', '30', '--context-tokens', '700000').out), /^judgment on Opus 5\.5 medium,/);
     // while that model is neither, the fallback stands
-    assert.match(whole(dry(s, '--all', '10', '--premium', '5', '--context-tokens', '600000').out), /^judgment on Fable 5\.2 high,/);
+    assert.match(whole(dry(s, '--all', '10', '--premium', '5', '--context-tokens', '700000').out), /^judgment on Fable 5\.2 high,/);
   }));
 });
 
@@ -102,14 +102,18 @@ describe('a damaged or hand-edited config.json', () => {
       assert.match(r.out, /^config\.json: it does not hold settings: the defaults are used$/m);
     }
   }));
-  test('config.mjs repairs the file, says what it found, and shows no undefined', withHome(s => {
+  test('config.mjs says what it found and shows no undefined; the repair is written by the next change of a setting', withHome(s => {
     s.writeConfig({ ...ok, tiers: [{ model: 'fable' }, { model: 'opus' }], lastDayWeight: 0 });
     const r = s.config(['show']);
     assert.equal(r.code, 0, r.err);
     assert.match(r.out, /^tier 1 {2}Fable 5\.2 high/m);
     assert.match(r.out, /^config\.json: 2 tiers without a known model and effort: dropped; fewer than two tiers: the default ladder is used; the last-day weight is not a number from 1 to 3: the default is used$/m);
     assert.doesNotMatch(r.out, /undefined/);
-    // written back: the next run has nothing to say
+    // a command that only reads leaves the file: the next one says it again
+    assert.match(s.config(['show']).out, /^config\.json: 2 tiers without/m);
+    assert.equal(JSON.parse(s.read('config.json')).lastDayWeight, 0);
+    // written with a change: then nothing is left to say
+    s.config(['weight', '2']);
     assert.doesNotMatch(s.config(['show']).out, /^config\.json:/m);
     assert.equal(JSON.parse(s.read('config.json')).tiers.length, 3);
   }));
@@ -172,9 +176,9 @@ describe('fewer calls, fewer lines', () => {
   }));
   test('--brief keeps what advises: the 5-hour hold, the context line, the MCP note, a held model', withHome(s => {
     s.config(['init']);
-    const brief = dry(s, '--all', '10', '--premium', '30', '--five', '90', '--five-reset', '2026-11-13T15:00:00Z', '--context-tokens', '340000',
+    const brief = dry(s, '--all', '10', '--premium', '30', '--five', '90', '--five-reset', '2026-11-13T15:00:00Z', '--context-tokens', '440000',
       '--categories', 'Messages=90000,System tools=25000,MCP tools=40000', '--brief').out;
-    for (const re of [/^5-hour window 90 %.*-> HOLD heavy work/m, /^context 340k tokens -> suggest compacting/m, /^fixed overhead .* -> MCP tools are 40k of it/m,
+    for (const re of [/^5-hour window 90 %.*-> HOLD heavy work/m, /^context 440k tokens -> suggest compacting/m, /^fixed overhead .* -> MCP tools are 40k of it/m,
       /^Weekly used .* Fable 5\.2 held$/m, /^do: Fable 5\.2's meter is at throttle: this session belongs on Opus 5\.5 high now, and Fable 5\.2 is kept for judgment work; the Switch row offers it/m, /^upward: /m, /^route: judgment, medium, routine, trivial -> Opus 5\.5 high \(the session\)/m]) assert.match(brief, re);
     // and leaves out what only describes
     assert.doesNotMatch(brief, /^(day \d|allowance today|spend rate|trend:|tier {2}model)/m);
@@ -255,7 +259,7 @@ describe('the settings a setup can choose, in bulk', () => {
       const a = s.config(['apply', ...cmds.flatMap((c, i) => (i ? ['+', ...c] : c))]);
       assert.equal(a.code, 0, a.out);
       for (const [all, prem] of [[10, 2], [10, 30], [22, 100], [96, 50]]) {
-        const r = dry(s, '--all', String(all), '--premium', String(prem), '--context-tokens', '600000', '--session', 'claude-opus-5-5');
+        const r = dry(s, '--all', String(all), '--premium', String(prem), '--context-tokens', '700000', '--session', 'claude-opus-5-5');
         assert.equal(r.code, 0, r.err);
         assert.equal(r.err, '');
         assert.doesNotMatch(r.out, /undefined|\bNaN\b|\bnull\b/);

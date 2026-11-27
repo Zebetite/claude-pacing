@@ -163,25 +163,25 @@ describe('the premium meter', () => {
 describe('the context line', () => {
   const now = '2026-11-13T12:00:00Z';
   const ctx = (...f) => dry(now, 10, ...f).out.split(/\r?\n/).find(l => l.startsWith('context ')) || '';
-  test('by tokens: nothing under 300 000', () => assert.equal(ctx('--context-tokens', '299999'), 'context 300k tokens'));
+  test('by tokens: nothing under 400 000', () => assert.equal(ctx('--context-tokens', '399999'), 'context 400k tokens'));
   // all work stays in this session: compact and go on, never leave for a new one
-  test('by tokens: from 300 000 compact at a natural break and go on here, whatever the next task is', () => {
-    const l = ctx('--context-tokens', '300000');
+  test('by tokens: from 400 000 compact at a natural break and go on here, whatever the next task is', () => {
+    const l = ctx('--context-tokens', '400000');
     assert.match(l, /-> suggest compacting the conversation at the next natural break \(\/compact\), then go on here, whatever the next task is/);
     assert.match(l, /an unrelated task is a reason to compact first, not to leave$/);
     assert.doesNotMatch(l, /new session/);
   });
-  test('by tokens: from 500 000 compact first, the next task whole to one agent, its outcome given here', () => {
-    const l = ctx('--context-tokens', '500000');
+  test('by tokens: from 650 000 compact first, the next task whole to one agent, its outcome given here', () => {
+    const l = ctx('--context-tokens', '650000');
     assert.match(l, /-> this session is the expensive part now: compact first if not yet done \(\/compact\)\. A next task with a clear outcome goes WHOLE to one fresh agent, without asking/);
     assert.match(l, /read only its report and give the user the outcome here\./);
   });
-  test('by tokens: from 500 000 a new session is never offered, only named as the last resort', () => {
-    const l = ctx('--context-tokens', '500000');
+  test('by tokens: from 650 000 a new session is never offered, only named as the last resort', () => {
+    const l = ctx('--context-tokens', '650000');
     assert.match(l, /Never offer a new session: name one only when the session cannot be compacted or the user asks, with a handover \(\/pacing handover\)$/);
   });
   test('the whole-task agent: never below tier 2, judgment on the fallback', () => {
-    const whole = all => (dry(now, all, '--context-tokens', '520000').out.match(/without asking \((.*?)\)/) || [])[1];
+    const whole = all => (dry(now, all, '--context-tokens', '700000').out.match(/without asking \((.*?)\)/) || [])[1];
     // ahead: every class routes to tier 1, but a whole task goes no lower than tier 2 and judgment to the fallback
     assert.equal(whole(10), 'judgment on Opus 5.5 high, medium on Opus 5.5 medium, routine on Opus 5.5 medium');
     assert.equal(whole(30), 'judgment on Opus 5.5 high, medium on Opus 5.5 medium, routine on Opus 5.5 medium');
@@ -194,16 +194,16 @@ describe('the context line', () => {
   test('tokens win over the percentage', () => {
     assert.equal(ctx('--context', '60', '--context-tokens', '100000'), 'context 100k tokens (60 % of the window)');
   });
-  test('by percentage alone: 30 % and 50 %', () => {
-    assert.equal(ctx('--context', '29'), 'context 29 % of the window');
-    assert.match(ctx('--context', '30'), /then go on here/);
-    assert.match(ctx('--context', '50'), /expensive part now/);
+  test('by percentage alone: 40 % and 65 %', () => {
+    assert.equal(ctx('--context', '39'), 'context 39 % of the window');
+    assert.match(ctx('--context', '40'), /then go on here/);
+    assert.match(ctx('--context', '65'), /expensive part now/);
   });
   test('the context bar names the advice', () => {
     const bars = c => block(dry(now, 10, '--context', '40', '--context-tokens', c).out).find(l => l.startsWith('Context'));
-    assert.match(bars('320000'), / {2}compact \(\/compact\) at a break$/);
-    assert.match(bars('520000'), / {2}next task whole to an agent$/);
-    for (const c of ['320000', '520000']) assert.ok(bars(c).length <= 68, bars(c));
+    assert.match(bars('420000'), / {2}compact \(\/compact\) at a break$/);
+    assert.match(bars('700000'), / {2}next task whole to an agent$/);
+    for (const c of ['420000', '700000']) assert.ok(bars(c).length <= 68, bars(c));
   });
   test('a token count that is not a number is refused', () => {
     const r = dry(now, 10, '--context-tokens', 'lots');
@@ -298,8 +298,65 @@ describe('a reading that is not dry', () => {
   test('--dry writes nothing', () => {
     const s = sandbox();
     try {
-      s.budget(['--all', '30', '--reset', RESET, '--dry']);
+      assert.equal(s.budget(['--all', '30', '--reset', RESET, '--now', '2026-11-13T12:00:00Z', '--dry']).code, 0);
       assert.ok(!s.exists('log.jsonl') && !s.exists('state.json') && !s.exists('../settings.json'));
+    } finally { s.cleanup(); }
+  });
+  test('a state.json that cannot be written does not stop the reading: it is logged, the settings follow and the hooks module gets its line', () => {
+    const s = sandbox();
+    try {
+      // a folder in the file's place: every write of it fails
+      fs.mkdirSync(s.file('state.json'), { recursive: true });
+      const r = s.budget(['--all', '30', '--reset', RESET, '--now', '2026-11-13T12:00:00Z']);
+      assert.equal(r.code, 0, r.out + r.err);
+      assert.equal(r.err, '');
+      assert.match(r.out, /^settings\.json: the terminal CLI now defaults to Opus 5\.5 medium/m);
+      assert.deepEqual([JSON.parse(s.read('../settings.json')).model, s.read('log.jsonl').trim().split('\n').length], ['opus', 1]);
+      const h = s.budget(['--all', '32', '--reset', RESET, '--now', '2026-11-13T12:10:00Z', '--source', 'hook']);
+      assert.equal(h.code, 0, h.out + h.err);
+      const j = JSON.parse(h.out.trim());
+      assert.deepEqual([j.all, j.level, j.logged], [32, 'throttle', true]);
+      assert.equal(s.read('log.jsonl').trim().split('\n').length, 2);
+      assert.equal(JSON.parse(s.read('line.json')).all, 32);
+    } finally { s.cleanup(); }
+  });
+  test('a reset that has passed, or lies more than 7 days ahead, is refused: one line, and nothing is logged or set', () => {
+    const s = sandbox();
+    try {
+      const now = '2026-11-13T12:00:00.000Z';
+      const settings = JSON.stringify({ theme: 'dark', model: 'fable', effortLevel: 'high' });
+      const preset = JSON.stringify({ byAccount: { a: { builtIns: { local: { settings: { modelId: 'claude-fable-5-2', effort: 'high' } } } } } });
+      const kept = () => ['log.jsonl', 'state.json', 'rate.json', 'line.json', 'scan.json', '../settings.json', '../../AppData/Local/Claude-Data/acct/ccd-session-presets.json']
+        .map(f => (s.exists(f) ? s.read(f) : null));
+      const cases = [
+        // a week that ended an hour ago, and one that ends now
+        ['2026-11-13T11:00:00.000Z', 'no reading was taken: --reset 2026-11-13T11:00:00.000Z has passed (now ' + now + ')'],
+        [now, 'no reading was taken: --reset ' + now + ' has passed (now ' + now + ')'],
+        // 8 days ahead: the line would be 0 %, and 6 % used "throttle"
+        ['2026-11-21T12:00:00.000Z', 'no reading was taken: --reset 2026-11-21T12:00:00.000Z is over 7 days ahead (now ' + now + ')'],
+        ['2026-11-20T13:00:01.000Z', 'no reading was taken: --reset 2026-11-20T13:00:01.000Z is over 7 days ahead (now ' + now + ')'],
+      ];
+      // with nothing there, and with a reading before it: the files stay as they are
+      for (const before of [false, true]) {
+        if (before) {
+          s.write('../settings.json', settings);
+          s.write('../../AppData/Local/Claude-Data/acct/ccd-session-presets.json', preset);
+          assert.equal(s.budget(['--all', '10', '--reset', RESET, '--now', '2026-11-13T11:50:00.000Z', '--source', 'hook']).code, 0);
+        }
+        const was = kept();
+        for (const [reset, line] of cases) for (const more of [[], ['--source', 'hook'], ['--dry'], ['--brief']]) {
+          const r = s.budget(['--all', '6', '--premium', '3', '--reset', reset, '--now', now, '--session', 'claude-fable-5-2', ...more], { env: { CLAUDE_CODE_SESSION_ID: 'sess-1' } });
+          assert.equal(r.code, 1, reset + ' ' + more.join(' '));
+          assert.equal(r.out.trim(), line);
+          assert.equal(r.err, '');
+          assert.deepEqual(kept(), was, reset + ' ' + more.join(' '));
+          assert.ok(!s.exists('sessions'), 'no mark of the session either');
+        }
+      }
+      // the reset time jitters: 7 days and an hour ahead is still this week's
+      const edge = s.budget(['--all', '6', '--reset', '2026-11-20T13:00:00.000Z', '--now', now, '--dry']);
+      assert.equal(edge.code, 0, edge.out);
+      assert.equal(levelOf(edge.out), 'on pace');
     } finally { s.cleanup(); }
   });
 });
@@ -314,6 +371,32 @@ describe('arguments', () => {
     const r = sb.budget(['--all', '10']);
     assert.equal(r.code, 1);
     assert.match(r.out, /^usage: node budget.mjs/);
+  });
+  test('a word that is no command is named, before the usage', () => {
+    for (const args of [['foo'], ['status', '--all', '10', '--reset', RESET, '--now', '2026-11-13T12:00:00Z', '--dry']]) {
+      const r = sb.budget(args);
+      assert.equal(r.code, 1);
+      assert.match(r.out, new RegExp('^unknown command "' + args[0] + '"\\r?\\nusage: node budget\\.mjs'));
+    }
+  });
+  test('log and week take a whole number above 0, or none', () => {
+    const s = sandbox();
+    try {
+      for (let i = 1; i <= 6; i++) s.budget(['--all', String(i), '--reset', RESET, '--now', '2026-11-13T1' + i + ':00:00Z']);
+      const rows = out => out.trim().split(/\r?\n/);
+      assert.equal(rows(s.budget(['log']).out).length, 6);
+      assert.equal(rows(s.budget(['log', '2']).out).length, 2);
+      assert.match(rows(s.budget(['log', '1']).out)[0], /all {5}6 %/);
+      for (const n of ['-5', '0', '1.5', 'five', '']) {
+        const l = s.budget(['log', n]);
+        assert.equal(l.code, 1, n);
+        assert.equal(l.out.trim(), 'log [n]: n is a whole number above 0 (the last n readings), not "' + n + '"');
+        const w = s.budget(['week', n]);
+        assert.equal(w.code, 1, n);
+        assert.equal(w.out.trim(), 'week [n]: n is a whole number above 0 (the last n weeks), not "' + n + '"');
+      }
+      assert.equal(s.budget(['week', '3']).code, 0);
+    } finally { s.cleanup(); }
   });
   test('a meter the plan lacks is -', () => {
     const r = dry('2026-11-13T12:00:00Z', 10, '--premium', '-', '--five', '-');

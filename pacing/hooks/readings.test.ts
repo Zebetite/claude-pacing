@@ -5,7 +5,7 @@
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
 import { DIALS, FRAMES, frameSvg, barSvg, barText } from './pane.mjs'
-import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, tokensOfText, toolLabel, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -898,7 +898,7 @@ test('Compact now in the desktop app: the direct call is refused, so /compact ru
   on('prompt.fill', (_: unknown, e: any) => (fills.push(e.text), { isFilled: true }))
   on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
   await $.prompt.submit({ text: 'work on', asUser: true })
-  await $.session.measure(measure(10, [], 320000))
+  await $.session.measure(measure(10, [], 420000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const said = toasts.length
   const ui = await $.ui.mount(BAND)
@@ -939,7 +939,7 @@ test('Compact now that starts right away: no toast that it waits, only that it c
   on('prompt.fill', () => ({ isFilled: true }))
   on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
   await $.prompt.submit({ text: 'work on', asUser: true })
-  await $.session.measure(measure(10, [], 320000))
+  await $.session.measure(measure(10, [], 420000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const said = toasts.length
   const ui = await $.ui.mount(BAND)
@@ -970,7 +970,7 @@ test('Compact now that the engine refuses both ways: its own reason in the toast
   on('prompt.fill', (_: unknown, e: any) => (fills.push(e.text), { isFilled: true }))
   on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
   await $.prompt.submit({ text: 'work on', asUser: true })
-  await $.session.measure(measure(10, [], 320000))
+  await $.session.measure(measure(10, [], 420000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
   await ui.press({ key: 'pacing-compact' })
@@ -986,38 +986,38 @@ test('Compact now that the engine refuses both ways: its own reason in the toast
   expect(compactFailedText('x'.repeat(200), true)).toHaveLength('❌ the compaction did not start: '.length + 120 + '. /compact is in the box: press Enter to send it.'.length)
 })
 
-test('suggest: from 300 000 tokens, a calm row with Compact now; it compacts with the instructions and says the sizes', async ($, on) => {
+test('suggest: from 400 000 tokens, a calm row with Compact now; it compacts with the instructions and says the sizes', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   big(on)
-  const seen = offers(on, { compacted: { tokensBefore: 320000, tokensAfter: 38000 } })
+  const seen = offers(on, { compacted: { tokensBefore: 420000, tokensAfter: 38000 } })
 
   await $.prompt.submit({ text: 'work on', asUser: true })
-  await $.session.measure(measure(10, [], 320000))
+  await $.session.measure(measure(10, [], 420000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
   const text = (await ui.find({ type: 'Text', text: /session is/ }))?.text
-  expect(text).toBe('🗜️ This session is 320k tokens. Compacting now makes every later turn cheaper.')
-  expect(text).toBe('🗜️ ' + offerText('suggest', 320000))
+  expect(text).toBe('🗜️ This session is 420k tokens. Compacting now makes every later turn cheaper.')
+  expect(text).toBe('🗜️ ' + offerText('suggest', 420000))
   await ui.press({ key: 'pacing-compact' })
   await clock.advance(1)
   expect(seen.compacts).toEqual([COMPACT_INSTRUCTIONS])
   expect(COMPACT_INSTRUCTIONS).toContain('the goal; the decisions made and why; the open items, in order; the files and commands that matter; what was tried and ruled out')
-  expect(seen.toasts).toEqual(['🗜️ compacted from 320k to 38k tokens.'])
+  expect(seen.toasts).toEqual(['🗜️ compacted from 420k to 38k tokens.'])
   await ui.unmount()
   // the row is gone after the press
   expect((await bandText($)).text).toBe(undefined)
 })
 
-test('urge: from 500 000 tokens, plainer words with what each turn sends again', async ($, on) => {
+test('urge: from 650 000 tokens, plainer words with what each turn sends again', async ($, on) => {
   engine(on)
   big(on)
   offers(on)
   await $.prompt.submit({ text: 'work on', asUser: true })
-  await $.session.measure(measure(10, [], 540000))
+  await $.session.measure(measure(10, [], 700000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const { text } = await bandText($)
-  expect(text).toBe('🗜️ This session is 540k tokens, and every turn sends all 540k again. Compact now to cut that.')
+  expect(text).toBe('🗜️ This session is 700k tokens, and every turn sends all 700k again. Compact now to cut that.')
 })
 
 test('once per level: Not now holds until the session grows by 250 000 more; a new level comes at once', async ($, on) => {
@@ -1025,33 +1025,33 @@ test('once per level: Not now holds until the session grows by 250 000 more; a n
   big(on)
   const seen = offers(on)
   await $.prompt.submit({ text: 'work on', asUser: true })
-  await $.session.measure(measure(10, [], 320000))
+  await $.session.measure(measure(10, [], 420000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const first = await $.ui.mount(BAND)
-  expect((await first.find({ type: 'Text', text: /session is/ }))?.text).toContain('320k')
+  expect((await first.find({ type: 'Text', text: /session is/ }))?.text).toContain('420k')
   await first.press({ key: 'pacing-not-now' })
   await first.unmount()
   expect(seen.compacts).toEqual([])
 
-  for (const size of [330000, 425000, 495000]) {
+  for (const size of [430000, 525000, 645000]) {
     await $.session.measure(measure(10, [], size))
     await $.turn.complete(turn('claude-fable-5-2', 1))
     expect((await bandText($)).text).toBe(undefined)
   }
-  await $.session.measure(measure(10, [], 505000))
+  await $.session.measure(measure(10, [], 655000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect((await bandText($)).text).toContain('every turn sends all 505k again')
+  expect((await bandText($)).text).toContain('every turn sends all 655k again')
   // the user's next prompt answers it: gone, and not back until 250 000 on
   await $.prompt.submit({ text: 'go on', asUser: true })
   expect((await bandText($)).text).toBe(undefined)
-  for (const size of [610000, 750000]) {
+  for (const size of [760000, 900000]) {
     await $.session.measure(measure(10, [], size))
     await $.turn.complete(turn('claude-fable-5-2', 1))
     expect((await bandText($)).text).toBe(undefined)
   }
-  await $.session.measure(measure(10, [], 760000))
+  await $.session.measure(measure(10, [], 910000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect((await bandText($)).text).toContain('every turn sends all 760k again')
+  expect((await bandText($)).text).toContain('every turn sends all 910k again')
 })
 
 test('now: a pause is warned of once per size; the next pause at about the same size brings no row and no notice', async ($, on) => {
@@ -1085,7 +1085,7 @@ test('never while a turn runs, never before a person has typed, gone after the u
   offers(on)
   // a side session another session drives: its prompt is a peer's
   await $.prompt.submit({ text: 'do the task', origin: { kind: 'peer' } } as any)
-  await $.session.measure(measure(10, [], 350000))
+  await $.session.measure(measure(10, [], 450000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   expect((await bandText($)).text).toBe(undefined)
   // a subagent's turn is no break of the session's
@@ -1096,13 +1096,13 @@ test('never while a turn runs, never before a person has typed, gone after the u
   const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, isWorking: true } })
   expect(await ui.find({ type: 'Text', text: /session is/ })).toBeFalsy()
   await ui.unmount()
-  expect((await bandText($)).text).toContain('350k')
+  expect((await bandText($)).text).toContain('450k')
   // the user compacts by hand: the row goes, and the offers start over
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'all of it', toolUses: [] }] } as any)
   expect((await bandText($)).text).toBe(undefined)
 })
 
-test('a large tool result in the main thread: one toast per 15 minutes naming the tool and size, counted in /pacing-status; subagents and agents\' answers left out', async ($, on) => {
+test('a large tool result in the main thread: counted in /pacing-status, no toast; subagents and agents\' answers left out', async ($, on) => {
   engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
@@ -1117,24 +1117,22 @@ test('a large tool result in the main thread: one toast per 15 minutes naming th
   const said = toasts.length
   // 12 000 tokens, 4 characters a token
   await $.tool.call({ tool: 'Read', file_path: 'big.log', chars: 48000 } as any)
-  expect(toasts.slice(said)).toEqual(['🧱 that Read result was about 12k tokens; every later turn sends it again. Bulky reads cost less in the reader agent.'])
+  expect(toasts.slice(said)).toEqual([])
   // small, a subagent's, an agent's answer: nothing
   await $.tool.call({ tool: 'Read', file_path: 'small', chars: 39000 } as any)
   await $.tool.call({ tool: 'Bash', command: 'x', chars: 80000, agentId: 'ag1' } as any)
   await $.tool.call({ tool: 'Agent', description: 'd', prompt: 'p', chars: 80000 } as any)
-  // a second large one within 15 minutes is counted, not toasted
+  // further large ones are counted too, and none is toasted (the user's word: no messages about tokens used)
   await $.tool.call({ tool: 'mcp__github__get_file_contents', chars: 100000 } as any)
-  expect(toasts.length).toBe(said + 1)
-  await clock.advance(BULKY_EVERY)
+  await clock.advance(15 * 60000)
   await $.tool.call({ tool: 'mcp__github__get_file_contents', chars: 100000 } as any)
-  expect(toasts.at(-1)).toBe('🧱 that get_file_contents result was about 25k tokens; every later turn sends it again. Bulky reads cost less in the reader agent.')
+  expect(toasts.slice(said)).toEqual([])
   const status = (await $.command.run({ command: 'pacing-status', args: '' } as any)).text
   expect(status.split('\n').at(-1)).toBe('Large results: 3 this session, about 62k tokens that every later turn sends again; bulky reads cost less in the reader agent.')
   expect(BULKY_TOKENS).toBe(10000)
   expect(tokensOfText('x'.repeat(40000))).toBe(10000)
   expect(toolLabel('mcp__a__a_very_long_tool_name_indeed')).toBe('a_very_long_tool_na…')
   expect(bulkyStatus({ count: 0, tokens: 0 })).toBe('')
-  expect(bulkyText('Read', 1250000).length).toBeLessThanOrEqual(120)
 })
 
 // ---- what fills the context, and the pane ----
@@ -1348,19 +1346,19 @@ test('a compaction pacing does not hear: the context falling by half between two
   big(on)
   offers(on)
   await $.prompt.submit({ text: 'work on', asUser: true })
-  await $.session.measure(measure(10, [], 350000))
+  await $.session.measure(measure(10, [], 450000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect((await bandText($)).text).toContain('350k')
+  expect((await bandText($)).text).toContain('450k')
   // no session.compact reaches pacing; the next measure is small
   await $.session.measure(measure(10, [], 40000))
   expect((await bandText($)).text).toBe(undefined)
-  // grown again to 350k: offered again, as after a compaction it heard
-  await $.session.measure(measure(10, [], 350000))
+  // grown again to 450k: offered again, as after a compaction it heard
+  await $.session.measure(measure(10, [], 450000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect((await bandText($)).text).toContain('350k')
+  expect((await bandText($)).text).toContain('450k')
   // a drop that is no compaction: the row stays
-  await $.session.measure(measure(10, [], 320000))
-  expect((await bandText($)).text).toContain('350k')
+  await $.session.measure(measure(10, [], 420000))
+  expect((await bandText($)).text).toContain('450k')
   expect(COMPACT_DROP).toBe(50000)
   expect(compactedBetween(350000, 40000)).toBe(true)
   expect(compactedBetween(90000, 40000)).toBe(true)
@@ -1608,14 +1606,14 @@ test('a background agent after the turn ended: a row above the prompt, under the
   on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
 
   await $.prompt.submit({ text: 'work on', asUser: true })
-  await $.session.measure(measure(10, [], 320000))
+  await $.session.measure(measure(10, [], 420000))
   await spawn($, 'pacing:researcher', 'sonnet', true)
   await clock.advance(2 * 60000)
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
   const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
   await ui.unmount()
-  expect(texts).toEqual(['🗜️ This session is 320k tokens. Compacting now makes every later turn cheaper.', 'In the background: ⏳ researcher is running: a task 2m'])
+  expect(texts).toEqual(['🗜️ This session is 420k tokens. Compacting now makes every later turn cheaper.', 'In the background: ⏳ researcher is running: a task 2m'])
   // while a turn runs, neither shows
   const busy = await $.ui.mount({ ...BAND, props: { ...BAND.props, isWorking: true } })
   expect(await busy.find({ type: 'Text' })).toBeFalsy()
@@ -2245,7 +2243,7 @@ test('one row at a time: a model that is out before the offer to compact, the of
   const clock = mock.clock(on, { now: T0 })
   switchEngine(on)
   await $.prompt.submit({ text: 'work on', asUser: true })
-  await $.session.measure(measure(10, [], 320000))
+  await $.session.measure(measure(10, [], 420000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   expect(await switchText($)).toMatch(/^🔴 Fable 5\.2 is out until the reset/)
   // a calm one waits behind the offer to compact
@@ -2253,7 +2251,7 @@ test('one row at a time: a model that is out before the offer to compact, the of
   await clock.advance(31 * 60000)
   await $.session.measure(measure(10, [], 330000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(await switchText($)).toBe('🗜️ This session is 320k tokens. Compacting now makes every later turn cheaper.')
+  expect(await switchText($)).toBe('🗜️ This session is 420k tokens. Compacting now makes every later turn cheaper.')
 })
 
 test('off, a session nobody typed in, or a reading without a recommendation: no switch row', async ($, on) => {
@@ -3796,4 +3794,158 @@ test('every section has a frame of its own, above and below, in its accent', () 
     seen.add(svg)
   }
   expect(seen.size).toBe(8)
+})
+
+// ---- the review's defects (0.9.38) ----
+
+test('readings that keep failing: after three in a row one toast names /pacing-doctor, the line leads with a mark and the pane says so; a good one clears it', async ($, on) => {
+  const status = engine(on)
+  const toasts: string[] = []
+  let fail = false
+  on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('process.run', () => ({ value: fail ? { ...answer('ahead', 10), exitCode: 1, stdout: '', stderr: 'node:internal\nSyntaxError: bad state.json\n' } : answer('ahead', 10) }))
+  await $.session.measure(measure(10))
+  const plain = 'Budget: 10% · usage: Weekly 10% Fable 40%'
+  expect(status.at(-1)).toBe(plain)
+  fail = true
+  await $.session.measure(measure(11))
+  await $.session.measure(measure(12))
+  // two failures: nothing said yet, the line as it was
+  expect(toasts).toEqual([])
+  expect(status.at(-1)).toBe(plain)
+  await $.session.measure(measure(13))
+  expect(FAIL_SAY).toBe(3)
+  expect(toasts).toEqual(['❌ pacing could not take a reading, 3 tries in a row (SyntaxError: bad state.json): the status line shows older figures. /pacing-doctor says what is wrong.'])
+  expect(toasts[0]).toBe(failedText(3, 'SyntaxError: bad state.json'))
+  expect(status.at(-1)).toBe('⚠️ old figures · ' + plain)
+  // a fourth failure: no second toast
+  await $.session.measure(measure(14))
+  expect(toasts.length).toBe(1)
+  fail = false
+  await $.session.measure(measure(15))
+  expect(status.at(-1)).toBe(plain)
+  // the mark gives way where the line has no room, and the pane's note leads
+  expect(staleLine('x'.repeat(60), 70)).toBe('⚠️ ' + 'x'.repeat(60))
+  expect(staleLine('x'.repeat(70), 70)).toBe('x'.repeat(70))
+  expect(paneModel({ failing: true }).notes[0]).toBe(FAILED_NOTE)
+  expect(paneModel({}).notes).toEqual([])
+})
+
+test('one reading at a time: while an agent\'s end has a reading in flight, a measure that is due starts no second one', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  agentEngine(on, { list: () => [{ id: 'ag1', status: 'running' }] })
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000, tokens: 1000, percent: 0 }, rateLimits: [{ kind: 'seven_day', percentUsed: 10, resetsAt: RESET }] } }))
+  let runs = 0, held = false
+  let open = () => {}
+  const gate = new Promise<void>(r => { open = r })
+  on('process.run', async (_: unknown, e: any) => {
+    if (!e.argv.some((a: string) => String(a).endsWith('budget.mjs'))) return { value: { exitCode: 0, stdout: '', stderr: '' } }
+    runs++
+    if (held) await gate
+    return { value: answer('ahead', 10) }
+  })
+  await $.session.measure(measure(10))
+  expect(runs).toBe(1)
+  await spawn($, 'pacing:reader')
+  await clock.advance(AGENT_GAP + 1000)
+  held = true
+  // the agent ends: its reading starts and waits on budget.mjs
+  await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
+  await new Promise(r => setTimeout(r, 50))
+  expect(runs).toBe(2)
+  // the meter moved a point meanwhile: due, and it runs none beside the first
+  await $.session.measure(measure(11))
+  await $.session.measure(measure(12))
+  expect(runs).toBe(2)
+  open()
+  await new Promise(r => setTimeout(r, 50))
+  held = false
+  // the first is in: the next due one runs
+  await $.session.measure(measure(13))
+  expect(runs).toBe(3)
+})
+
+test('a /clear starts the conversation\'s memory over: the offer goes, no pause notice for the old size, and the ending session\'s keys leave the store', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = offers(on)
+  const store: Record<string, unknown> = { 'version:s1': '0.9.10', 'switch:s1': { effort: 'high' }, 'agents:s1': [{ id: 'x' }], 'version:s2': '0.9.10' }
+  on('store.get', (_: unknown, e: any) => ({ value: store[e.key] }))
+  on('store.set', (_: unknown, e: any) => { store[e.key] = e.value; return { value: undefined } })
+  on('store.delete', (_: unknown, e: any) => { delete store[e.key]; return { value: undefined } })
+  on('session.end', (_: unknown, e: any) => ({ sessionId: e.sessionId }))
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 420000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect((await bandText($)).text).toContain('420k')
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as any)
+  expect((await bandText($)).text).toBe(undefined)
+  expect(Object.keys(store).filter(k => k.endsWith(':s1'))).toEqual([])
+  expect(store['version:s2']).toBe('0.9.10')
+  // two hours on, the first prompt of the new conversation: nothing of 420k tokens idle
+  await clock.advance(2 * 3600000)
+  expect((await bandText($)).text).toBe(undefined)
+  const said = seen.toasts.length
+  await $.prompt.submit({ text: 'something new', asUser: true })
+  expect(seen.toasts.slice(said)).toEqual([])
+})
+
+test('a session that ends for good deletes its keys and keeps its memory (a reload may follow in another)', async ($, on) => {
+  engine(on)
+  big(on)
+  offers(on)
+  const store: Record<string, unknown> = { 'version:s1': '0.9.10', 'switch:s1': { effort: 'high' }, 'unused': { week: 'w', step: 10 } }
+  on('store.get', (_: unknown, e: any) => ({ value: store[e.key] }))
+  on('store.set', (_: unknown, e: any) => { store[e.key] = e.value; return { value: undefined } })
+  on('store.delete', (_: unknown, e: any) => { delete store[e.key]; return { value: undefined } })
+  on('session.end', (_: unknown, e: any) => ({ sessionId: e.sessionId }))
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's1', resume: {} } as any)
+  expect(store).toEqual({ 'unused': { week: 'w', step: 10 } })
+})
+
+test('a notification\'s prompt while the person is away does not end "someone is here": the offer comes at that turn\'s end', async ($, on) => {
+  engine(on)
+  big(on)
+  offers(on)
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 200000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect((await bandText($)).text).toBe(undefined)
+  // a background agent is done: its notification starts a turn nobody typed
+  await $.prompt.submit({ text: 'an agent is done', origin: { kind: 'task-notification' } } as any)
+  await $.session.measure(measure(10, [], 420000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  expect((await bandText($)).text).toContain('420k')
+})
+
+test('at a load, once a day: the version keys other sessions left under older versions are deleted; this session\'s and the current version\'s stay', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  const seen = reloadEngine(on, { store: { 'version:local_s1': '0.9.10', 'version:old1': '0.9.3', 'version:old2': '0.9.9', 'version:other': '0.9.10', 'switch:old1': { effort: 'high' }, agentRuns: {} } })
+  on('store.keys', () => ({ value: Object.keys(seen.store) }))
+  await start($)
+  await clock.settle()
+  expect(Object.keys(seen.store).filter(k => k.startsWith('version:')).sort()).toEqual(['version:local_s1', 'version:other'])
+  expect(seen.store['switch:old1']).toEqual({ effort: 'high' })
+  expect(seen.store[PRUNED]).toBe(T0)
+})
+
+test('a reset that has passed is no failure: between the weekly reset and the next response there is nothing to read, and nothing is said', async ($, on) => {
+  const status = engine(on)
+  const toasts: string[] = []
+  let passed = false
+  on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('process.run', () => ({ value: passed
+    ? { ...answer('ahead', 10), exitCode: 1, stdout: 'no reading was taken: --reset 2026-11-19T12:00:00.000Z has passed (now 2026-11-19T12:03:00.000Z)\n' }
+    : answer('ahead', 10) }))
+  await $.session.measure(measure(10))
+  const plain = status.at(-1)
+  passed = true
+  for (const pct of [11, 12, 13, 14]) await $.session.measure(measure(pct))
+  expect(toasts).toEqual([])
+  expect(status.at(-1)).toBe(plain)
 })

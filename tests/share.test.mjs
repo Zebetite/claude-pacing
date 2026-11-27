@@ -103,8 +103,8 @@ describe('where the marks come from', () => {
     assert.deepEqual(marks(s)['reader-of-meters'], { since: Date.parse('2026-11-13T12:00:00.000Z'), t: Date.parse('2026-11-13T12:20:00.000Z'), live: true });
   }));
   test('--dry, and a run that is told no session id, leave no mark', withHome(s => {
-    s.budget(['--all', '10', '--reset', RESET, '--dry'], as('x'));
-    s.budget(['--all', '10', '--reset', RESET]);
+    assert.equal(s.budget(['--all', '10', '--reset', RESET, '--now', '2026-11-13T12:00:00.000Z', '--dry'], as('x')).code, 0);
+    assert.equal(s.budget(['--all', '10', '--reset', RESET, '--now', '2026-11-13T12:00:00.000Z']).code, 0);
     assert.ok(!fs.existsSync(path.join(s.data, 'sessions')));
   }));
   test('the plugin runs the hook at a session\'s end too, to take the mark off', () => {

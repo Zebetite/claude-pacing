@@ -56,6 +56,12 @@ describe('budget.mjs last', () => {
       assert.equal(last(s, at(45)).out.trim(), 'measure: the week is nearly used, and extra usage is only in a full reading');
       reading(s, 90, '2026-11-19T11:50:00.000Z', ['--premium', '2']);
       assert.equal(last(s, '2026-11-19T12:05:00.000Z').out.trim(), 'measure: the week has reset since the last reading');
+      // a state an earlier version wrote from a reset no week can have
+      const st = JSON.parse(s.read('state.json'));
+      s.write('state.json', JSON.stringify({ ...st, t: at(0), all: 6, level: 'throttle', reset: '2026-11-21T12:00:00.000Z' }));
+      const r = last(s, at(5));
+      assert.equal(r.code, 0);
+      assert.equal(r.out.trim(), 'measure: the last reading\'s reset is more than 7 days ahead');
     } finally { s.cleanup(); }
   });
   test('an automatic reading serves, its per-model figure carried while fresh enough', () => {

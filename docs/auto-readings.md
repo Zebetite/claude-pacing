@@ -1251,3 +1251,76 @@ without an answer, so it came every time. Now the module's hook on
 (`compactWaited`), and the toast waits `COMPACT_RUN_WAIT` (4 s): it shows
 only while the session is busy and the command really waits. The switch's
 toast is as it was. Not tried live.
+
+## The review's defects, and quieter offers (0.9.38)
+
+Three readers went over the plugin (the hooks module, the scripts, what a
+person reads) and their findings were checked against the code. What was
+fixed:
+
+**One reading at a time, in one place.** "Take a reading and apply it" was
+written out five times in `readings.mjs` (the load, a measure, an agent's
+end, the pane's Refresh, `/pacing-usage`), each setting and clearing the
+`running` flag by hand; the copies had drifted, and a measure's `finally`
+cleared a flag another reading had set, so two could run at once and hand
+`budget.mjs` the same dollars twice. Now `takeReading($, rd, …)` sets and
+clears `rd.running` alone, and the four plain copies call it. The load
+keeps its own way (a dry run where nothing can be logged) and a measure
+that comes while it is in flight waits for it (`rd.loadFlight`), then
+decides.
+
+**Readings that fail are said.** A failed run of `budget.mjs` left the
+status line as it was, with no sign. `rd.health` counts failures in a row
+(an exit code, a timeout, an answer that does not parse); at `FAIL_SAY`
+(3) the line leads with `⚠️ old figures`, the pane's first note says so,
+and one toast names `/pacing-doctor` with the script's last line. A
+reading that comes clears it. A reset that has passed (below) is not
+counted: the engine holds the last response's windows, so that is what it
+names between the weekly reset and the next response.
+
+**A /clear or a resume starts over.** No `session.start` fires for one;
+the process goes on under a new session id. The module now hooks
+`session.end`: for `clear` and `resume` the conversation's memory (its
+size, the pause, the offers, the switch seen, each model's tokens) starts
+over, and what is kept in the store under the session's id is written
+again at the next prompt. For every ending the session's own keys
+(`version:`, `switch:`, `agents:`) are deleted, and once a day at a load
+the `version:` keys other sessions left under older versions go too
+(`pruneKeys`): the store had gained one per session for good.
+
+**Smaller ones in the module.** Someone having typed stays so
+(`attended`): a notification's prompt turned it off, and the row before
+the cache lapses never came for the hour away it was made for. A
+compaction keeps the side sessions in the line (they are not in the
+engine's list, and the next poll announced each again). The "done"
+toast's count is the agent's size where the refresh saw one, not the
+run's usage summed. The side sessions' first poll is asked again once the
+load's reading has named the session.
+
+**The scripts** (an implementer agent; 21 new node tests). `withLock`
+checks its wait and sleeps on every round, and a folder that refuses the
+lock file is an error after ten tries (it spun at full CPU for good);
+a stale lock is taken over by a rename, and the wait (15 s) outlasts the
+stale age (10 s). The `state.json` write is in a try like the others. A
+reading whose `--reset` has passed or lies over 7 days ahead is refused
+before anything is drawn, logged or set (it drew a 100 % or a 0 % line
+and moved the settings by it). The pass over the transcripts at every
+automatic reading goes on from a checkpoint per file (`scan.json`)
+instead of reading each whole: about a second down to 45 ms here.
+`apply` keeps `--project` and `--replace`; `init` copies a legacy file
+only where none is; `config.mjs` no longer writes a repaired config back
+from commands that only read or record; `log -5`, `week -1` and an
+unknown command are answered in words.
+
+**The user's words, too.** The offers to compact start at 400 000 tokens
+and urge from 650 000 (they were 300 000 and 500 000: "seems early and
+will message people very fast"), in the module, `budget.mjs`'s context
+line, the route skill and the guide; the notice after a pause stays at
+300 000. The toast after a large tool result is gone ("don't need
+messages about tokens used"); `/pacing-status` still counts them.
+
+Not done: the model price table (its cache-read prices are 2.5 %, 5 % and
+10 % of input by model, not checked against the price list),
+`CLAUDE_CONFIG_DIR` and the app's preset per account, splitting
+`budget.mjs`, the docs' first screen. Not tried live: a /clear, a failing
+reading, and the notification case.

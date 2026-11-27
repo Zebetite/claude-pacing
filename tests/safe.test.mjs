@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { sandbox, scripts, RESET } from './helpers.mjs';
 
-const { atomicWrite, updateFile, updateJson, withLock } = await import(pathToFileURL(path.join(scripts, 'safe.mjs')).href);
+const { atomicWrite, updateFile, updateJson, withLock, LOCK_WAIT_MS, LOCK_STALE_MS } = await import(pathToFileURL(path.join(scripts, 'safe.mjs')).href);
 
 // run the commands side by side; resolves with each one's exit code and output
 const together = (s, script, cmds, env = {}) => Promise.all(cmds.map(args => new Promise(resolve => {
@@ -149,11 +149,105 @@ describe('the helper itself', () => {
       const old = new Date(Date.now() - 60000);
       fs.utimesSync(f + '.lock', old, old);
       assert.equal(updateFile(f, () => 'b'), 'b');
-      assert.ok(!fs.existsSync(f + '.lock'));
+      assert.deepEqual(fs.readdirSync(path.dirname(f)), ['file.json'], 'no lock, and no renamed stale lock');
       // a fresh lock that nobody releases
       fs.writeFileSync(f + '.lock', '');
       assert.throws(() => withLock(f, () => 1, { waitMs: 150 }), /another process holds its lock/);
       fs.unlinkSync(f + '.lock');
+    } finally { s.cleanup(); }
+  });
+  test('the wait outlasts the stale age: a writer that meets the lock of a process just killed waits, takes it over and writes', () => {
+    const { s, f } = tmp();
+    try {
+      assert.ok(LOCK_WAIT_MS > LOCK_STALE_MS, 'by default too: ' + LOCK_WAIT_MS + ' against ' + LOCK_STALE_MS);
+      atomicWrite(f, 'a');
+      fs.writeFileSync(f + '.lock', '');
+      const t0 = Date.now();
+      assert.equal(updateFile(f, () => 'b', { waitMs: 3000, staleMs: 300 }), 'b');
+      assert.ok(Date.now() - t0 >= 250, 'not before it was stale: ' + (Date.now() - t0) + ' ms');
+      assert.deepEqual(fs.readdirSync(path.dirname(f)), ['file.json']);
+    } finally { s.cleanup(); }
+  });
+  // one call of the fs module answered by `fake` while fn runs (safe.mjs
+  // calls them on the same module object); fake returns undefined to let the
+  // real one answer
+  const stubbed = (name, fake, fn) => {
+    const real = fs[name];
+    fs[name] = (...a) => { const r = fake(...a); return r === undefined ? real(...a) : r; };
+    try { return fn(); } finally { fs[name] = real; }
+  };
+  const refuse = code => { throw Object.assign(new Error(code + ': refused'), { code }); };
+  const isLock = p => String(p).endsWith('.lock');
+  test('a folder that refuses the lock file is an error after a few tries, never a spin: no lock was in the way', () => {
+    const { s, f } = tmp();
+    try {
+      for (const code of ['EACCES', 'EPERM']) {
+        const t0 = Date.now();
+        let ran = false, tries = 0;
+        assert.throws(() => stubbed('openSync', p => { if (isLock(p)) { tries++; refuse(code); } }, () => withLock(f, () => { ran = true; }, { waitMs: 5000 })),
+          new RegExp('^Error: could not write file\\.json: its folder cannot be written \\(.*[\\\\/]x, ' + code + '\\)$'));
+        assert.equal(ran, false);
+        assert.equal(tries, 10);
+        assert.ok(Date.now() - t0 < 2500, 'well within the wait: ' + (Date.now() - t0) + ' ms');
+      }
+      // one refusal while a lock just deleted is still open elsewhere is waited out
+      let once = 0;
+      assert.equal(stubbed('openSync', p => { if (isLock(p) && !once++) refuse('EPERM'); }, () => withLock(f, () => 7, { waitMs: 5000 })), 7);
+      assert.ok(!fs.existsSync(f + '.lock'));
+    } finally { s.cleanup(); }
+  });
+  test('a lock that can be neither looked at nor taken over is waited for, then reported: every round checks the wait', () => {
+    const { s, f } = tmp();
+    try {
+      // refused, and the look at the lock is refused too
+      let t0 = Date.now();
+      assert.throws(() => stubbed('openSync', p => { if (isLock(p)) refuse('EACCES'); },
+        () => stubbed('statSync', p => { if (isLock(p)) refuse('EPERM'); }, () => withLock(f, () => 1, { waitMs: 200 }))), /another process holds its lock/);
+      assert.ok(Date.now() - t0 < 2500, (Date.now() - t0) + ' ms');
+      // a stale lock that will not move
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f + '.lock', '');
+      const old = new Date(Date.now() - 60000);
+      fs.utimesSync(f + '.lock', old, old);
+      t0 = Date.now();
+      assert.throws(() => stubbed('renameSync', p => { if (isLock(p)) refuse('EPERM'); }, () => withLock(f, () => 1, { waitMs: 200 })), /another process holds its lock/);
+      assert.ok(Date.now() - t0 < 2500, (Date.now() - t0) + ' ms');
+      assert.ok(fs.existsSync(f + '.lock'));
+    } finally { s.cleanup(); }
+  });
+  test('a takeover never removes a fresh lock: one that replaced the stale lock between the look and the takeover is put back', () => {
+    const { s, f } = tmp();
+    try {
+      // another process took the stale lock over a moment ago: this one still
+      // sees the old age at its first look
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f + '.lock', 'theirs');
+      let looks = 0;
+      const real = fs.statSync;
+      assert.throws(() => stubbed('statSync', p => { if (isLock(p) && !looks++) return { ...real(p), mtimeMs: Date.now() - 60000 }; },
+        () => withLock(f, () => 1, { waitMs: 200 })), /another process holds its lock/);
+      assert.ok(looks > 1);
+      assert.equal(fs.readFileSync(f + '.lock', 'utf8'), 'theirs');
+      assert.deepEqual(fs.readdirSync(path.dirname(f)), ['file.json.lock'], 'nothing left beside it');
+    } finally { s.cleanup(); }
+  });
+  test('many processes finding one stale lock at once: one takes it over at a time, and every change is kept', async () => {
+    const { s, f } = tmp();
+    try {
+      atomicWrite(f, JSON.stringify({ n: 0 }));
+      fs.writeFileSync(f + '.lock', '');
+      const old = new Date(Date.now() - 60000);
+      fs.utimesSync(f + '.lock', old, old);
+      const code = 'const { updateJson } = await import(process.argv[1]); updateJson(process.argv[2], v => ({ n: v.n + 1 }), { tries: 40 });';
+      const done = await Promise.all(Array.from({ length: 12 }, () => new Promise(resolve => {
+        const p = spawn(process.execPath, ['--input-type=module', '-e', code, pathToFileURL(path.join(scripts, 'safe.mjs')).href, f], { env: { ...s.env, ...GAP } });
+        let out = '';
+        p.stderr.on('data', d => { out += d; });
+        p.on('exit', c => resolve({ code: c, out }));
+      })));
+      for (const d of done) assert.equal(d.code, 0, d.out);
+      assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).n, 12);
+      assert.deepEqual(fs.readdirSync(path.dirname(f)), ['file.json'], 'no lock, no renamed stale lock, no temporary file');
     } finally { s.cleanup(); }
   });
   test('atomicWrite waits out another process that has the file open (Windows refuses the rename meanwhile), and leaves no temporary file', async () => {

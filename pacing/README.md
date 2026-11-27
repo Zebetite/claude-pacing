@@ -85,6 +85,7 @@ folder, which an update replaces:
 | `config.json` | the ladder, the last-day weight, the per-model meter and its fallback, the reader's model, the next-session switch and the other settings (`compact`, `notify`, `switch`, `reload`) |
 | `log.jsonl`, `state.json` | the readings, and the last one for the hook |
 | `line.json` | the newest reading's account-wide part (meters, budget line, what is left, the rate), which every session's status line takes in |
+| `rate.json`, `scan.json` | what a point of the weekly meter costs, as learned from the week's sessions, and where the last pass over each session's transcript left off, so the next one reads only what was added |
 | `BRIEF.local.md` | the user's own rules for subagents (never part of the plugin) |
 | `notes/<project>/<role>.md` | what each role agent learned about a project, a line per fact, for the next agent of that role |
 | `agents/<project>.jsonl` | each task a role agent finished: role, agent id, model, effort, tokens |
@@ -100,8 +101,10 @@ when to change the model menu by hand.
 
 If `~/.claude/skills/pacing` is still installed next to the plugin, both
 load (`/pacing` and `/pacing:pacing`) and two session-start hooks fire.
-Once the plugin works: `node ~/.claude/skills/pacing/scripts/config.mjs
-hook off` removes the old hook line from `settings.json`, then delete that
+Once the plugin works, take the old hook out: in `~/.claude/settings.json`,
+remove the `SessionStart` entry that mentions `skills/pacing` (an old copy
+that has the command does it with `node
+~/.claude/skills/pacing/scripts/config.mjs hook off`). Then delete that
 folder.
 
 ## Remove

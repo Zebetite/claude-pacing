@@ -35,26 +35,61 @@ export const atomicWrite = (file, text) => {
   }
 };
 
+// A stale lock is taken over by renaming it to a name of this process's own,
+// then deleting that: of several processes that see the same stale lock, one
+// rename wins and the others find it gone. What was renamed is looked at once
+// more, since a plain delete could remove the fresh lock of the process that
+// took over a moment before (it saw the stale one, deleted it and made its
+// own, between this process's look and its delete): a fresh one is put back
+// under its name, and waited for like any living holder's. Should its
+// holder let go in that very moment, the lock put back has none, and is
+// taken over in its turn once it is stale.
+const takeOver = (lock, staleMs) => {
+  const mine = lock + '.' + process.pid + '.' + Math.random().toString(36).slice(2, 8) + '.stale';
+  try { fs.renameSync(lock, mine); } catch { return; /* another process took it over, or it is busy: the next round sees */ }
+  let fresh = false;
+  try { fresh = Date.now() - fs.statSync(mine).mtimeMs <= staleMs; } catch { /* gone: nothing to put back */ }
+  if (fresh) { try { fs.renameSync(mine, lock); return; } catch { /* cannot go back: removed below, not left lying */ } }
+  try { fs.unlinkSync(mine); } catch { /* nothing to clean */ }
+};
+// how many tries in a row may be refused with no lock file in the way before
+// the folder counts as one that cannot be written: Windows refuses for a
+// moment too while a lock just deleted is still open elsewhere
+const REFUSALS = 10;
+
 // A lock file beside the target, created with the exclusive flag: only one
 // process gets it. Held for a check and a rename, a few milliseconds. One
 // older than `staleMs` was left by a process that died: it is taken over.
-// `waitMs` is how long to wait for a living holder before giving up.
-export const withLock = (file, fn, { waitMs = 5000, staleMs = 10000 } = {}) => {
+// `waitMs` is how long to wait for a living holder before giving up. It
+// outlasts the stale age: with a shorter wait, every writer in the seconds
+// after a process was killed inside a write gave up before the lock it left
+// could be taken over. 10 s is far beyond any living holder (atomicWrite
+// itself gives up on a busy file within 2 s), and 15 s leaves a script the
+// hooks module runs (20 s) time to write after a takeover.
+// Every round of the loop checks the wait and sleeps: none may spin.
+export const LOCK_WAIT_MS = 15000, LOCK_STALE_MS = 10000;
+export const withLock = (file, fn, { waitMs = LOCK_WAIT_MS, staleMs = LOCK_STALE_MS } = {}) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const lock = file + '.lock';
   const until = Date.now() + waitMs;
+  let refused = 0;
   for (;;) {
+    let err;
     try {
       fs.closeSync(fs.openSync(lock, 'wx'));
       break;
-    } catch (e) {
-      if (e.code !== 'EEXIST' && !BUSY.includes(e.code)) throw e;
-      let age = 0;
-      try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch { continue; /* gone meanwhile: try again at once */ }
-      if (age > staleMs) { try { fs.unlinkSync(lock); } catch { /* another process took it over */ } continue; }
-      if (Date.now() > until) throw new Error('could not write ' + path.basename(file) + ': another process holds its lock (' + lock + '); try again');
-      sleep(10 + Math.random() * 25);
-    }
+    } catch (e) { err = e; }
+    if (err.code !== 'EEXIST' && !BUSY.includes(err.code)) throw err;
+    // null: no lock file there (gone meanwhile, or never made)
+    let age = null;
+    try { age = Date.now() - fs.statSync(lock).mtimeMs; } catch (e) { if (e.code !== 'ENOENT') age = 0; }
+    // refused, and no lock is in the way: the folder itself refuses the file
+    if (age === null && err.code !== 'EEXIST') {
+      if (++refused >= REFUSALS) throw new Error('could not write ' + path.basename(file) + ': its folder cannot be written (' + path.dirname(file) + ', ' + err.code + ')');
+    } else refused = 0;
+    if (age !== null && age > staleMs) takeOver(lock, staleMs);
+    if (Date.now() > until) throw new Error('could not write ' + path.basename(file) + ': another process holds its lock (' + lock + '); try again');
+    sleep(10 + Math.random() * 25);
   }
   held.add(lock);
   try { return fn(); } finally { held.delete(lock); try { fs.unlinkSync(lock); } catch { /* taken over as stale: its new holder removes it */ } }

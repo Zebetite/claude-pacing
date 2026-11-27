@@ -8,7 +8,8 @@
 // --fable is the old name of the flag and still accepted).
 //   node budget.mjs log [n]        the last n readings (20)
 //   node budget.mjs week [n]       the last n weeks in sum (2): last use, time by level, the line
-// The week is 7 days ending at --reset; the last 24 h weigh config.lastDayWeight
+// The week is 7 days ending at --reset (one that has passed, or lies over 7
+// days ahead, is refused: no reading); the last 24 h weigh config.lastDayWeight
 // (1.5 by default), the rest 1. The line is a step at local midnight: the whole
 // of the current calendar day's allowance counts as available from its start.
 // --dry: compute only (no log entry, no state.json, no rate.json, no settings.json change).
@@ -134,8 +135,15 @@ const crossedText = s => (!s.peak ? 'no budget line logged'
   : s.over.length ? 'budget line crossed on ' + s.over.length + ' of ' + s.readings + ' readings (peak ' + r1(s.peak.d) + ' points over, ' + stamp(s.peak.e.t) + ')'
     : r1(-s.peak.d) === 0 ? 'budget line never crossed (touched it)' : 'budget line never crossed (closest ' + r1(-s.peak.d) + ' points under)');
 
+// `log [n]`, `week [n]`: the count as given, or the default. One that is not a
+// whole number above 0 is refused: -5 cut the first five off, not the last.
+const countArg = (what, usual) => {
+  if (argv[1] === undefined) return usual;
+  if (!/^\d+$/.test(argv[1]) || Number(argv[1]) < 1) { console.log(argv[0] + ' [n]: n is a whole number above 0 (the last n ' + what + '), not "' + argv[1] + '"'); process.exit(1); }
+  return Number(argv[1]);
+};
 if (argv[0] === 'week') {
-  const n = Number(argv[1]) || 2;
+  const n = countArg('weeks', 2);
   const weeks = weeksOf(readLog()).slice(-n).reverse();
   if (!weeks.length) { console.log('no readings yet'); process.exit(0); }
   const nowMs = Date.now();
@@ -149,7 +157,7 @@ if (argv[0] === 'week') {
 }
 
 if (argv[0] === 'log') {
-  const rows = readLog().slice(-(Number(argv[1]) || 20));
+  const rows = readLog().slice(-countArg('readings', 20));
   if (!rows.length) { console.log('no readings yet'); process.exit(0); }
   for (const e of rows) {
     // a per-model figure an automatic reading carried over is marked with how
@@ -183,6 +191,8 @@ if (argv[0] === 'last') {
     : age < 0 ? 'the last reading is dated after now'
       : age > FRESH ? 'the last reading is ' + mins(age) + ' old'
       : Date.parse(s.reset) <= at.getTime() ? 'the week has reset since the last reading'
+      // a state written before such a reset was refused (below)
+      : Date.parse(s.reset) - at.getTime() > 7 * DAY + HOUR ? 'the last reading\'s reset is more than 7 days ahead'
         : s.level === 'stop' ? 'the week is nearly used, and extra usage is only in a full reading'
           : null;
   if (why) { console.log('measure: ' + why); process.exit(0); }
@@ -213,6 +223,9 @@ const usage = () => {
   console.log('       a meter the plan does not have: pass - for its percent');
   process.exit(1);
 };
+// a first word that is no flag was meant as a command (last, log and week
+// were taken above): named, not answered with the usage alone
+if (argv[0] !== undefined && !argv[0].startsWith('--')) { console.log('unknown command "' + argv[0] + '"'); usage(); }
 // a mistyped flag must not pass as "no such meter"
 if (unknown.length) { console.log('unknown option ' + unknown.join(' ')); usage(); }
 if (opt.all === undefined || !opt.reset) usage();
@@ -275,6 +288,15 @@ const now = opt.now ? new Date(opt.now) : new Date();
 const bad = [used, prem, five, context, contextTokens].some(v => v !== null && (Number.isNaN(v) || v < 0))
   || Number.isNaN(reset.getTime()) || Number.isNaN(now.getTime()) || (fiveReset && Number.isNaN(fiveReset.getTime()));
 if (bad) { console.log('bad input: percents must be numbers from 0, dates ISO 8601'); process.exit(1); }
+// The week is the 7 days that end at --reset. A reset that has passed drew a
+// line of 100 %, and one further ahead a line of 0 % ("throttle" at 6 % used,
+// "day -1 of 8"), and a reading for the skill then moved settings.json and
+// the app's preset by it. Refused here, before a line is drawn, a reading is
+// logged or a setting is written; the hour is the jitter of the API's reset
+// time. One line, its start short enough for the hooks module's toast about
+// failing readings, which shows 80 characters of it.
+const resetWhy = reset <= now ? 'has passed' : reset - now > 7 * DAY + HOUR ? 'is over 7 days ahead' : null;
+if (resetWhy) { console.log('no reading was taken: --reset ' + opt.reset + ' ' + resetWhy + ' (now ' + now.toISOString() + ')'); process.exit(1); }
 // an automatic reading answers the hooks module, not a person: the report's
 // lines are kept here, and one JSON line goes out at the end
 const said = [];
@@ -476,11 +498,11 @@ const bar = (pct, marker) => {
 // window: the whole history is sent again on every turn, and stored again
 // after a pause. From CTX_ADVISE a task unrelated to the session's work is
 // better started fresh; from CTX_URGE the session says so before the next
-// task. A reading with the percentage alone falls back to 30 % and 50 %, the
+// task. A reading with the percentage alone falls back to 40 % and 65 %, the
 // same sizes in a window of a million tokens.
-const CTX_ADVISE = 300000, CTX_URGE = 500000;
+const CTX_ADVISE = 400000, CTX_URGE = 650000;
 const ctxLevel = contextTokens !== null ? (contextTokens >= CTX_URGE ? 2 : contextTokens >= CTX_ADVISE ? 1 : 0)
-  : context !== null ? (context >= 50 ? 2 : context >= 30 ? 1 : 0) : 0;
+  : context !== null ? (context >= 65 ? 2 : context >= 40 ? 1 : 0) : 0;
 const barRow = (label, pct, note, marker) => pct === null ? null
   : label.padEnd(11) + bar(pct, marker) + String(Math.round(pct) + ' %').padStart(6) + (note ? (note.startsWith('/') ? ' ' : '  ') + note : '');
 // "2d 16h" until the weekly reset
@@ -774,9 +796,11 @@ if (!opt.dry) {
       ...(auto ? { source: 'hook' } : {}), ...(fullAuto ? { full: true } : {}), ...(premFrom ? { premiumAt: premFrom.at } : {}) };
     fs.appendFileSync(logFile, JSON.stringify(entry) + '\n');
     // swapped in whole (safe.mjs), and never over a newer reading that
-    // another session wrote meanwhile
+    // another session wrote meanwhile. A write that fails (its lock held, the
+    // file changing under it) leaves the state of the reading before: this
+    // one is in the log, and goes on to its settings and its answer.
     const state = { ...entry, delta: r1(delta), next: sessionTier, trend: trend && !trend.short ? { rate: r1(trend.rate), projected: r1(trend.projected) } : null };
-    updateJson(stateFile, cur => (cur && Date.parse(cur.t) > now.getTime() ? null : state));
+    try { updateJson(stateFile, cur => (cur && Date.parse(cur.t) > now.getTime() ? null : state)); } catch { /* the next reading writes it */ }
     logged = true;
   }
   // only a reading the session takes on purpose changes what new sessions
@@ -1063,7 +1087,10 @@ if (auto) {
     let since = at;
     for (let i = weekLog.length - 1; i >= 0 && weekLog[i].all >= used; i--) since = Math.min(since, Date.parse(weekLog[i].t));
     try {
-      const w = weekSpend({ since: Math.min(since, at - PACE_MS), until: at, marks: [since, at - PACE_MS] });
+      // this pass runs at every reading: it goes on in each transcript from
+      // where the pass before found the window's first line (scan.json,
+      // estimate.mjs), not from the file's start
+      const w = weekSpend({ since: Math.min(since, at - PACE_MS), until: at, marks: [since, at - PACE_MS], cache: path.join(dataDir, 'scan.json') });
       if (rate !== null && rate > 0 && at > since) sinceUsd = Math.min(rate, w.after[0].usd);
       const h = w.after[1];
       if (h.usd >= PACE_MIN_USD && h.first !== null && at - h.first >= PACE_MIN_SPAN) {
