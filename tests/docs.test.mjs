@@ -56,10 +56,11 @@ test('budget.mjs\'s flags in SKILL.md\'s Measure command are all known to the sc
 
 // a plain `usage` loads only the pacing skill; delegating work loads the
 // route skill too, once per session; the descriptions go out on every turn
-// of every session. The limits are the sizes of 0.9.12 and a small margin,
-// so that later edits cannot grow them back unnoticed.
+// of every session. The limits are the sizes of 0.9.12 and a small margin
+// (the route description since its cut to 175 characters), so that later
+// edits cannot grow them back unnoticed.
 const bodyOf = t => t.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '');
-const LIMITS = { pacingWords: 960, routeWords: 1100, pacingChars: 300, routeChars: 340 };
+const LIMITS = { pacingWords: 960, routeWords: 1100, pacingChars: 300, routeChars: 200 };
 test('each skill body stays lean: pacing ' + LIMITS.pacingWords + ' words, route ' + LIMITS.routeWords + ' at most', () => {
   assert.ok(words(bodyOf(skill)) <= LIMITS.pacingWords, 'pacing: ' + words(bodyOf(skill)) + ' words');
   assert.ok(words(bodyOf(route)) <= LIMITS.routeWords, 'route: ' + words(bodyOf(route)) + ' words');
@@ -135,16 +136,17 @@ test('the plugin description fits the library: 500 characters at most, the same 
   assert.equal(market.plugins.find(p => p.name === 'pacing').description, manifest.description);
 });
 
-// The session tools refuse the calling session, and where the hooks module
-// runs its Switch row offers the change: the session asks nothing about its
-// own model or effort, and gives steps only where no module runs.
+// The session tools refuse the calling session, and the plugin moves work to
+// subagents itself: the session suggests no switch and no less effort. Only
+// a per-model model out, or held far over its line, is said: where the hooks
+// module runs its Switch row offers it, and steps only where no module runs.
 test('a switch of this session is offered by the Switch row; steps only without the hooks module', () => {
   const r = route.replace(/\s+/g, ' '), p = skill.replace(/\s+/g, ' ');
-  assert.match(r, /\*\*Over\*\* \(`effort:` line\): one step less effort here saves most\. Where the hooks module runs \(a pacing status line shows\), its Switch row offers it: say nothing\. Without it \(as in a terminal\), say it once, in one line, before medium work leaves \(`\/effort <level>` or the model menu\)\. Never ask: this session cannot change its own model or effort\./);
+  assert.match(r, /\*\*Over\*\*: medium work goes to subagents too; say nothing about it\. Never suggest less effort for being over the line\./);
   const over = r.slice(r.indexOf('**Over**'), r.indexOf('**Other sessions**'));
   assert.doesNotMatch(over, /set_session|new sessions default/);
   assert.match(r, /`set_session_effort`; the app asks; other sessions only\)/);
-  assert.match(p, /\*\*This session's model or effort\*\*: it cannot change them itself\. Where the hooks module runs \(a pacing status line shows\), its Switch row above the prompt is the only offer: give no steps and ask nothing; name the fact in a few words, as above\. Without it \(as in a terminal\), the line starts "switch the session to <model> <effort>", in the model menu's words\./);
+  assert.match(p, /\*\*This session's model or effort\*\*: the plugin handles them by handing work to subagents on the right models; never suggest a switch or less effort\. Only when the per-model meter's model is out, or held 20 points or more over its line, name the fact in a few words, as above: where the hooks module runs \(a pacing status line shows\), its Switch row is the offer, so give no steps and ask nothing; without it \(as in a terminal\), the line starts "switch the session to <model> <effort>", in the model menu's words\./);
   assert.doesNotMatch(p, /first reply starts with one short line telling the user to switch/);
   // the report's examples name facts, never steps
   const examples = skill.slice(skill.indexOf('## 2. Report')).split('```')[1];

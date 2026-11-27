@@ -28,108 +28,44 @@
 // settings.json or the app's preset; it is not logged when the last reading
 // is under 30 min old and nothing moved; and it prints one JSON line for the
 // module, not the report.
-// The config, the log and the state live in ~/.claude/pacing, outside the
-// plugin folder, which an update replaces.
+// The config, the log and the state live in ~/.claude/pacing (paths.mjs:
+// under CLAUDE_CONFIG_DIR where that is set), outside the plugin folder,
+// which an update replaces. A refusal (bad input, a reset no week can have)
+// is one line on standard output and exit code 1, as in every script here.
+// The arithmetic is line.mjs's (the line, the level, the hold, the routing,
+// the rate's rule): this file reads the arguments and the files, calls it,
+// prints the report and writes what a reading leaves behind.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { MODELS, EFFORTS, relabel, checkConfig } from './models.mjs';
-import { loadConfig, projectRoot, markSession } from './paths.mjs';
+import { MODELS, EFFORTS, checkConfig, modelOf, meterLabel } from './models.mjs';
+import { dataDir, settingsFile, logFile, readLog, loadConfig, projectRoot, markSession, appDataDir, subdirs, presetTargets } from './paths.mjs';
 import { updateFile, updateJson } from './safe.mjs';
 import { weekSpend } from './estimate.mjs';
+import { DAY, HOUR, r1, inForce, pace, carriedPremium, premiumSince, fiveTrendOf, weeksOf, summarise, CLASSES, HOLD_RELEASE, TREND_MIN_H,
+  RATE_V, rateNext, rateOf, estimateOk, paceOk, tierMaps, dateOf, badDateText } from './line.mjs';
 
-const dataDir = path.join(os.homedir(), '.claude', 'pacing');
 fs.mkdirSync(dataDir, { recursive: true });
-const cfgFile = path.join(dataDir, 'config.json');
-const logFile = path.join(dataDir, 'log.jsonl');
 const stateFile = path.join(dataDir, 'state.json');
 const rateFile = path.join(dataDir, 'rate.json');
-const settingsFile = path.join(os.homedir(), '.claude', 'settings.json');
 
 // a missing file is a first run (the defaults); a damaged one or a value no
 // command writes gives a note in the report, never a crash
 const loaded = loadConfig(checkConfig);
-const cfg = loaded.cfg || {};
-let tiers = cfg.tiers || null;
-if (!tiers) {
-  tiers = [
-    { model: 'fable', label: MODELS.fable.label, effort: 'high' },
-    { model: 'opus', label: MODELS.opus.label, effort: 'medium' },
-    { model: 'sonnet', label: MODELS.sonnet.label, effort: 'medium' },
-  ];
-}
-tiers = tiers.map(relabel);
-// when the premium model's meter is full, this tier takes its place at the
-// top (Opus 5.5 high by default): the session keeps a strong model for
-// judgment while routine work stays on the cheaper tier 2
-const fallback = cfg.fallback === undefined ? { model: 'opus', effort: 'high' } : cfg.fallback;
-const fallbackTier = fallback && MODELS[fallback.model] ? { model: fallback.model, label: MODELS[fallback.model].label, effort: fallback.effort } : null;
-// the reader agent (pacing:reader) reads at a model of its own, Haiku 5.5
-// medium by default: finding and summing up asks less than the work the
-// lowest tier is chosen for. 'ladder' makes it follow the lowest tier.
-const readerCfg = cfg.reader === undefined ? { model: 'haiku', effort: 'medium' } : cfg.reader;
-// the verifier (pacing:verifier) runs plain test runs at a model of its own,
-// Haiku 5.5 medium by default: running a suite and quoting what failed asks
-// little judgment. A check with acceptance points to judge stays on the
-// lowest tier. 'ladder' makes every run follow the lowest tier.
-const verifierCfg = cfg.verifier === undefined ? { model: 'haiku', effort: 'medium' } : cfg.verifier;
-const lastDayWeight = cfg.lastDayWeight || 1.5;
-const setNextModel = cfg.setNextModel !== false;
-// the per-model weekly meter: which ladder model it belongs to (fable unless
-// config.premium says otherwise; null when the plan has no such meter)
-const premium = cfg.premium === undefined ? 'fable' : cfg.premium;
-const premLabel = premium && MODELS[premium] ? MODELS[premium].label : null;
-const labelOf = m => (m && MODELS[m] ? MODELS[m].label : 'Fable');
+// the settings in force: the config's own, and the default for each it lacks
+// (line.mjs inForce, models.mjs defaults)
+const settings = inForce(loaded.cfg);
+const { tiers, fallbackTier, readerCfg, verifierCfg, setNextModel, premium, premLabel } = settings;
 const name = t => t.label + ' ' + t.effort;
 // "a Fable 5.2 high", "an Opus 5.5 high"
 const aName = t => (/^[AEIOU]/.test(t.label) ? 'an ' : 'a ') + name(t);
-const r1 = n => Math.round(n * 10) / 10;
-const DAY = 24 * 60 * 60 * 1000;
-const HOUR = 60 * 60 * 1000;
 // "40 min", "15 h": an age
 const mins = ms => (ms >= 2 * HOUR ? Math.round(ms / HOUR) + ' h' : Math.round(ms / 60000) + ' min');
+// a date argument that is missing or no date is refused in one line
+const badDate = (flag, v) => { console.log(badDateText(flag, v)); process.exit(1); };
 
 // ---- arguments ----
 const argv = process.argv.slice(2);
-// a line that does not parse (a cut-off write, a stray edit) or is no reading
-// (no time, no figure) is skipped, not fatal
-const isReading = e => !!e && typeof e === 'object' && !Array.isArray(e) && !Number.isNaN(Date.parse(e.t)) && typeof e.all === 'number';
-const readLog = () => fs.existsSync(logFile)
-  ? fs.readFileSync(logFile, 'utf8').split('\n').filter(Boolean).flatMap(l => { try { const e = JSON.parse(l); return isReading(e) ? [e] : []; } catch { return []; } })
-  : [];
-
-// ---- the week in sum: the readings of one week (the same reset, within an
-//      hour: the API's reset time jitters) give the last use, the share of
-//      the time spent at each level, and whether the meter crossed the line.
-//      A reading's level holds until the next reading, the last one's until
-//      the reset (or now, for the week still running). ----
-const weeksOf = entries => {
-  const weeks = [];
-  for (const e of entries) {
-    if (!e.reset || !e.t) continue;
-    const r = Date.parse(e.reset);
-    let w = weeks.find(x => Math.abs(x.reset - r) <= HOUR);
-    if (!w) { w = { reset: r, entries: [] }; weeks.push(w); }
-    w.entries.push(e);
-  }
-  for (const w of weeks) w.entries.sort((a, b) => Date.parse(a.t) - Date.parse(b.t));
-  return weeks.sort((a, b) => a.reset - b.reset);
-};
-const SUM_LEVELS = ['ahead', 'on pace', 'over', 'throttle', 'stop'];
-const summarise = (w, until) => {
-  const es = w.entries, last = es[es.length - 1];
-  const time = {};
-  es.forEach((e, i) => {
-    const end = i + 1 < es.length ? Date.parse(es[i + 1].t) : Math.min(w.reset, until);
-    time[e.level] = (time[e.level] || 0) + Math.max(0, end - Date.parse(e.t));
-  });
-  const total = Object.values(time).reduce((a, b) => a + b, 0);
-  const shares = SUM_LEVELS.filter(l => time[l] > 0).map(l => l + ' ' + Math.round(100 * time[l] / total) + ' %');
-  const gaps = es.filter(e => e.line != null).map(e => ({ e, d: e.all - e.line }));
-  const over = gaps.filter(g => g.d > 0);
-  const peak = gaps.reduce((m, g) => (!m || g.d > m.d ? g : m), null);
-  return { last, readings: es.length, shares, over, peak };
-};
+// the week in sum (line.mjs weeksOf, summarise), in words
 const stamp = t => new Date(t).toLocaleString('sv-SE').slice(0, 16);
 const crossedText = s => (!s.peak ? 'no budget line logged'
   : s.over.length ? 'budget line crossed on ' + s.over.length + ' of ' + s.readings + ' readings (peak ' + r1(s.peak.d) + ' points over, ' + stamp(s.peak.e.t) + ')'
@@ -165,7 +101,7 @@ if (argv[0] === 'log') {
     const carried = e.premiumAt ? Date.parse(e.t) - Date.parse(e.premiumAt) : 0;
     // local time, like the report
     console.log(new Date(e.t).toLocaleString('sv-SE').slice(0, 16) + '  all ' + String(e.all).padStart(5) + ' %  line ' + String(e.line).padStart(5) + ' %  '
-      + ((e.premium ?? e.fable) != null ? labelOf(e.premiumModel) + ' ' + String(e.premium ?? e.fable).padStart(3) + ' %' + (carried >= 30 * 60000 ? ' (' + mins(carried) + ' old)' : '') + '  ' : '') + (e.five != null ? '5h ' + String(e.five).padStart(3) + ' %  ' : '') + e.level + (e.levelBy === 'premium' ? ' (' + labelOf(e.premiumModel) + ')' : '') + (e.premiumOut || e.fableOut ? ', ' + labelOf(e.premiumModel) + ' out' : e.premiumHeld ? ', ' + labelOf(e.premiumModel) + ' held' : '') + (e.source === 'hook' ? (e.full ? '  (auto, full)' : '  (auto)') : ''));
+      + ((e.premium ?? e.fable) != null ? meterLabel(e.premiumModel) + ' ' + String(e.premium ?? e.fable).padStart(3) + ' %' + (carried >= 30 * 60000 ? ' (' + mins(carried) + ' old)' : '') + '  ' : '') + (e.five != null ? '5h ' + String(e.five).padStart(3) + ' %  ' : '') + e.level + (e.levelBy === 'premium' ? ' (' + meterLabel(e.premiumModel) + ')' : '') + (e.premiumOut || e.fableOut ? ', ' + meterLabel(e.premiumModel) + ' out' : e.premiumHeld ? ', ' + meterLabel(e.premiumModel) + ' held' : '') + (e.source === 'hook' ? (e.full ? '  (auto, full)' : '  (auto)') : ''));
   }
   process.exit(0);
 }
@@ -183,7 +119,9 @@ const FRESH = 30 * 60000;
 let fromState = null;
 if (argv[0] === 'last') {
   const i = argv.indexOf('--now');
-  const at = i > 0 && argv[i + 1] ? new Date(argv[i + 1]) : new Date();
+  // a --now that is no date read as "no reading yet": refused
+  const at = i > 0 ? dateOf(argv[i + 1]) : new Date();
+  if (!at) badDate('--now', argv[i + 1]);
   let s = null;
   try { s = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { s = null; }
   const age = s ? at - Date.parse(s.t) : NaN;
@@ -247,10 +185,7 @@ const premArg = opt.premium !== undefined ? opt.premium : opt.fable;
 // itself (the hooks module, through the desktop app's usage tool): a full one
 const fullAuto = auto && premArg !== undefined;
 if ((auto || fromState) && premium && premArg === undefined) {
-  const r = Date.parse(opt.reset);
-  const known = readLog().filter(e => e.premiumModel === premium && e.premium != null && Math.abs(Date.parse(e.reset) - r) <= HOUR);
-  const last = known[known.length - 1];
-  if (last) premFrom = { premium: last.premium, at: last.premiumAt || last.t };
+  premFrom = carriedPremium(readLog(), premium, Date.parse(opt.reset));
 }
 const prem = premium ? (premFrom ? premFrom.premium : num(premArg)) : null;
 const five = num(opt.five);
@@ -284,7 +219,9 @@ const extraCurrency = opt['extra-currency'] || '';
 const extraOn = extraSpent !== null && extraLimit !== null && extraLimit > 0;
 const reset = new Date(opt.reset);
 const fiveReset = opt['five-reset'] ? new Date(opt['five-reset']) : null;
-const now = opt.now ? new Date(opt.now) : new Date();
+// --now given without a date (the last word, or an empty one) is bad input,
+// not "now": it was taken for the clock's time without a word
+const now = 'now' in opt ? dateOf(opt.now) || new Date(NaN) : new Date();
 const bad = [used, prem, five, context, contextTokens].some(v => v !== null && (Number.isNaN(v) || v < 0))
   || Number.isNaN(reset.getTime()) || Number.isNaN(now.getTime()) || (fiveReset && Number.isNaN(fiveReset.getTime()));
 if (bad) { console.log('bad input: percents must be numbers from 0, dates ISO 8601'); process.exit(1); }
@@ -305,167 +242,13 @@ const print = console.log;
 // kept, and only the ones that carry a decision go out at the end
 if (auto || opt.brief) console.log = (...a) => { said.push(a.join(' ')); };
 
-// ---- the budget line (a step per local day) ----
-// share(t): the part of the week's allowance that belongs to the time from the
-// week's start to t; the last 24 h before the reset weigh lastDayWeight, the
-// rest 1. The line is share() at the next local midnight (or the reset, if
-// that comes first), so the whole of the current calendar day counts as
-// available from its start, and the step falls at midnight, not at the hour
-// of the reset.
-const left = Math.max(0, (reset - now) / DAY);
-const elapsed = Math.min(7, Math.max(0, 7 - left));
-const weekStart = reset.getTime() - 7 * DAY;
-const units = 6 + lastDayWeight;
-const daily = 100 / units;
-const share = t => {
-  const d = Math.min(7, Math.max(0, (t - weekStart) / DAY));
-  return 100 * (Math.min(d, 6) + Math.max(0, d - 6) * lastDayWeight) / units;
-};
-const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-const startOfToday = midnight(now);
-// the next midnight by the calendar, not +24 h: the day the clocks change is 23 or 25 h long
-const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
-const endOfToday = Math.min(reset.getTime(), nextMidnight);
-// the day label counts calendar days, like the line: a week that resets at
-// noon touches 8 of them, the first and the last ones half
-const calDays = (a, b) => Math.round((midnight(new Date(b)) - midnight(new Date(a))) / DAY);
-const dayNo = Math.min(calDays(weekStart, now) + 1, calDays(weekStart, reset.getTime() - 1) + 1);
-const dayCount = calDays(weekStart, reset.getTime() - 1) + 1;
-const todayAllowance = share(endOfToday) - share(Math.max(weekStart, startOfToday));
-const budget = share(endOfToday);
-const delta = used - budget;
-
-// "<premium> out" is a flag beside the level, not a level: it takes every tier
-// of that model off the ladder, while the level still comes from the all-models
-// meter (at 96 % the week is still nearly used, premium meter or not)
-const premOut = prem !== null && prem >= 100;
-const LEVELS = ['ahead', 'on pace', 'over', 'throttle'];
-let level;
-if (used >= 95) level = 'stop';
-else if (delta > 5) level = 'throttle';
-else if (delta > 0) level = 'over';
-else if (delta >= -5) level = 'on pace';
-else level = 'ahead';
-
-// ---- trend from the log: the oldest reading of this week within the last two
-//      days, at least 4 h old, gives the burn rate. The same week means a reset
-//      within an hour of this one (the API's reset time jitters by milliseconds).
-//      The projection only moves the level once the sample spans 20 h or more,
-//      so that it covers a night: a busy morning alone is not a trend. ----
-const TREND_MIN_H = 20;
-const sameWeek = e => Math.abs(new Date(e.reset) - reset) <= HOUR;
-const weekLog = readLog().filter(sameWeek);
-// one meter's trend: its value at `at` (ms) against the oldest of its readings
-// ({ t, v }) within the two days before, at least 4 h older
-const trendOf = (value, at, readings) => {
-  const prev = readings.filter(p => at - p.t <= 2 * DAY && at - p.t >= 4 * HOUR);
-  if (!prev.length) return null;
-  const p = prev[0];
-  const hours = (at - p.t) / HOUR;
-  const rate = (value - p.v) / (hours / 24);
-  const projected = value + rate * Math.max(0, (reset - at) / DAY);
-  const reach = rate > 0 && projected > 100 ? new Date(at + ((100 - value) / rate) * DAY) : null;
-  return { hours, rate, projected, reach, short: hours < TREND_MIN_H };
-};
-// the projection overrides the line: past 100 % at least "over", past 115 % "throttle"
-const floorOf = tr => (!tr || tr.short ? null : tr.projected > 115 ? 'throttle' : tr.projected > 100 ? 'over' : null);
-const below = (a, b) => LEVELS.includes(a) && LEVELS.indexOf(a) < LEVELS.indexOf(b);
-const trend = trendOf(used, now.getTime(), weekLog.map(e => ({ t: Date.parse(e.t), v: e.all })));
-if (trend && floorOf(trend) && below(level, floorOf(trend))) {
-  level = floorOf(trend);
-  trend.bumped = true;
-}
-
-// ---- the per-model meter, paced on the same line. A session on that model
-//      draws on both meters at once, and a long one can drain the per-model
-//      meter while the all-models one still reads "ahead" (11 points in 46
-//      min were seen). Its level comes by the same thresholds and its own
-//      trend, from the readings that read it in full (a carried figure would
-//      flatten the slope). It counts only while tier 1 is that model: then
-//      the worse of the two levels decides, and at its "throttle" the session
-//      moves to the fallback tier as when the meter is out, so what is left
-//      of the meter goes to judgment work. A carried figure is a lower bound
-//      (the meter only rises): its level can be too mild, never too strict. ----
-const premAt = premFrom ? Date.parse(premFrom.at) : now.getTime();
-const premDelta = prem === null ? null : prem - budget;
-let premLevel = null, premTrend = null;
-if (prem !== null && !premOut) {
-  premLevel = premDelta > 5 ? 'throttle' : premDelta > 0 ? 'over' : premDelta >= -5 ? 'on pace' : 'ahead';
-  premTrend = trendOf(prem, premAt, weekLog.filter(e => e.premiumModel === premium && e.premium != null && !e.premiumAt)
-    .map(e => ({ t: Date.parse(e.t), v: e.premium })));
-  if (premTrend && floorOf(premTrend) && below(premLevel, floorOf(premTrend))) {
-    premLevel = floorOf(premTrend);
-    premTrend.bumped = true;
-  }
-}
-const premTop = !!tiers[0] && tiers[0].model === premium;
-const levelBefore = level;
-// 'premium' when the per-model meter set the level
-let levelBy = 'all';
-let premHeld = false;
-// A hold stays. The meter's level moves with its trend, which swings from
-// one reading to the next, and a session that has left the model lets the
-// trend fall again: the hold came and went within the hour and the session
-// was sent off the model and back (live: seven times in a day). So a model
-// held at the last logged reading stays held for the rest of that day (the
-// budget line steps once a day), and after the step until its meter is
-// HOLD_RELEASE points or more under the line by its figure alone. That is
-// two switches a day at most. `premKept`: held by this rule, not by the
-// level now.
-const HOLD_RELEASE = 5;
-let premKept = false, premHeldLine = null;
-if (premLevel && premTop && level !== 'stop') {
-  // held only when another model can take tier 1; with none, its throttle
-  // routes like any other
-  const others = tiers.some(t => t.model !== premium) || (fallbackTier && fallbackTier.model !== premium);
-  const before = weekLog.at(-1);
-  const wasHeld = !!before && before.premiumHeld === true && before.premiumModel === premium;
-  // the day the hold began, by its budget line (carried in the log)
-  const since = wasHeld ? (typeof before.premiumHeldLine === 'number' ? before.premiumHeldLine : before.line) : null;
-  const sameDay = typeof since === 'number' && Math.abs(since - budget) < 0.06;
-  const keep = wasHeld && premLevel !== 'throttle' && (sameDay || premDelta > -HOLD_RELEASE);
-  if ((premLevel === 'throttle' || keep) && others) { premHeld = true; premKept = keep; premHeldLine = keep && typeof since === 'number' ? since : Math.round(budget * 10) / 10; }
-  else if (below(level, premLevel)) { level = premLevel; levelBy = 'premium'; }
-}
-// the model is off tier 1 either way: out (its meter full) or held (over its line)
-const premAway = premOut || premHeld;
-
-// ---- routing ----
-// Which tier takes each class of work at each level. 1 = the top tier (the
-// session model), L = the lowest tier. Clamped to the ladder.
-// Trivial work stays in the session until throttle: a subagent costs tens of
-// thousands of tokens before it reads a file, so a grep delegated to a cheap
-// model costs more on the meter than the same grep done by the session.
-// Bulky output is the exception at every level (the "bulky" line below):
-// what a subagent reads stays out of the session's context, which is re-sent
-// on every later turn.
-const ROUTES = {
-  'ahead': { judgment: 1, medium: 1, routine: 1, trivial: 1 },
-  'on pace': { judgment: 1, medium: 1, routine: 2, trivial: 1 },
-  'over': { judgment: 1, medium: 2, routine: 2, trivial: 1 },
-  'throttle': { judgment: 2, medium: 2, routine: 2, trivial: 2 },
-  'stop': { judgment: 'L', medium: 'L', routine: 'L', trivial: 'L' },
-};
-const rest = tiers.filter(t => t.model !== premium);
-const ladder = !premAway ? tiers
-  : fallbackTier && fallbackTier.model !== premium && !rest.some(t => t.model === fallbackTier.model && t.effort === fallbackTier.effort)
-    ? [fallbackTier, ...rest]
-    : rest;
-// a reader model whose meter is out, or held off tier 1, follows the lowest tier like 'ladder'
-const readerTier = readerCfg && readerCfg !== 'ladder' && MODELS[readerCfg.model] && !(premAway && readerCfg.model === premium)
-  ? { model: readerCfg.model, label: MODELS[readerCfg.model].label, effort: readerCfg.effort } : null;
-const verifierTier = verifierCfg && verifierCfg !== 'ladder' && MODELS[verifierCfg.model] && !(premAway && verifierCfg.model === premium)
-  ? { model: verifierCfg.model, label: MODELS[verifierCfg.model].label, effort: verifierCfg.effort } : null;
-// what bulky work the lowest tier still takes, once the reader and the
-// verifier took theirs
-const bulkyWhat = !readerTier && !verifierTier ? 'logs, test runs, many files' : !readerTier ? 'logs, many files, checks to judge'
-  : !verifierTier ? 'test runs, builds, checks' : 'checks to judge against the task';
-const route = ROUTES[level];
-const pick = r => { const i = r === 'L' ? ladder.length : Math.min(r, ladder.length); return ladder[i - 1]; };
-// the model a session should run on at this level
-const sessionTier = !ladder.length ? null : level === 'throttle' || level === 'stop' ? pick(2) : pick(1);
+// ---- the budget line, the level, the hold and the routing (line.mjs) ----
+const P = pace({ settings, entries: readLog(), used, prem, premAt: premFrom ? Date.parse(premFrom.at) : now.getTime(), reset, now });
+const { left, elapsed, endOfToday, dayNo, dayCount, todayAllowance } = P.line;
+const { budget, delta, level, levelBefore, levelBy, trend, unused, weekLog, premOut, premDelta, premLevel, premTrend, premTop, premHeld, premKept,
+  premHeldLine, premAway, ladder, readerTier, verifierTier, bulkyWhat, route, pick, sessionTier } = P;
 // --session takes a short name (opus) or a full model id (claude-opus-5-5)
-const sessionModel = opt.session ? (Object.keys(MODELS).find(m => opt.session.toLowerCase().includes(m)) || opt.session) : null;
+const sessionModel = opt.session ? (modelOf(opt.session) || opt.session) : null;
 const session = sessionModel ? tiers.find(t => t.model === sessionModel) : null;
 
 // ---- report ----
@@ -540,7 +323,6 @@ console.log('');
 // the sheet under the bars, as GUIDE.md's ladder table: each tier and the
 // work it takes right now, at this level
 const sheet = [['tier', 'model', 'takes now · level ' + level]];
-const CLASSES = ['judgment', 'medium', 'routine', 'trivial'];
 ladder.forEach((t, i) => {
   const work = CLASSES.filter(cls => pick(route[cls]) === t);
   const bulky = ladder.length > 1 && i === ladder.length - 1
@@ -624,38 +406,20 @@ if (trend) {
     + (trend.reach ? ', reaches 100 % ' + when(trend.reach) : '')
     + (trend.short ? ' (sample under ' + TREND_MIN_H + ' h, not applied to the level)' : ''));
 }
-// What goes unused: the allowance does not carry over the reset. At
-// "ahead", where the trend (20 h or more of it) projects UNUSED_MIN points
-// or more under 100 % at the reset, the report, the status report and one
-// toast (readings.mjs) say so: there is room for harder work and more
-// effort, which the level alone does not show.
-const UNUSED_MIN = 10;
-const unused = trend && !trend.short && level === 'ahead' && 100 - trend.projected >= UNUSED_MIN ? Math.round(100 - trend.projected) : null;
+// what goes unused at the reset (line.mjs UNUSED_MIN)
 if (unused !== null) console.log('unused: at this pace about ' + unused + ' % of the week goes unused at the reset, and it does not carry over: there is room for harder work and more effort');
 if (premTrend) {
   console.log(premLabel + ' trend: ' + (premTrend.rate >= 0 ? '+' : '') + r1(premTrend.rate) + ' %/day over ' + r1(premTrend.hours) + ' h, projected ' + r1(premTrend.projected) + ' % at reset'
     + (premTrend.reach ? ', reaches 100 % ' + when(premTrend.reach) : '')
     + (premTrend.short ? ' (sample under ' + TREND_MIN_H + ' h, not applied to the level)' : ''));
 }
+// when the 5-hour window fills at its pace before it resets (the pane says so)
+let fiveFull = null;
 if (five !== null) {
   const resetsIn = fiveReset ? Math.max(0, Math.round((fiveReset - now) / 60000)) : null;
-  // the pace inside the window: the oldest reading of this window, at least
-  // 20 min old, whose value is not above the current one (a drop means the
-  // window reset in between)
-  let fiveTrend = null;
-  if (fiveReset) {
-    const windowStart = fiveReset.getTime() - 5 * HOUR;
-    const prevFive = readLog().filter(e => e.five != null && new Date(e.t) >= windowStart && now - new Date(e.t) >= 20 * 60000 && e.five <= five);
-    if (prevFive.length) {
-      const e = prevFive[0];
-      const h = (now - new Date(e.t)) / HOUR;
-      const rate = (five - e.five) / h;
-      const hoursLeft = Math.max(0, (fiveReset - now) / HOUR);
-      const projected = five + rate * hoursLeft;
-      const reach = rate > 0 && projected > 100 ? new Date(now.getTime() + ((100 - five) / rate) * HOUR) : null;
-      fiveTrend = { rate, projected, reach };
-    }
-  }
+  // the pace inside the window (line.mjs fiveTrendOf)
+  const fiveTrend = fiveReset ? fiveTrendOf(readLog(), five, fiveReset, now) : null;
+  if (fiveTrend && fiveTrend.reach) fiveFull = new Date(fiveTrend.reach).toISOString();
   console.log('5-hour window ' + r1(five) + ' %' + (resetsIn !== null ? ', resets in ' + resetsIn + ' min (' + when(fiveReset) + ')' : '')
     + (fiveTrend ? ', pace ' + (fiveTrend.rate >= 0 ? '+' : '') + r1(fiveTrend.rate) + ' %/h'
       + (fiveTrend.reach ? ', full at ' + when(fiveTrend.reach).slice(11) + ' at this pace, before the reset -> delegate bulky work or pause heavy runs' : ', about ' + r1(fiveTrend.projected) + ' % at the reset at this pace') : '')
@@ -750,16 +514,9 @@ if (!ladder.length) {
   const switchNow = premOut ? premLabel + ' is out until the reset: this session belongs on ' + name(pick(1)) + ' now' + offered(pick(1)) + '. '
     : premHeld ? premLabel + (premKept ? ' stays held for now' : '\'s meter is at throttle') + ': this session belongs on ' + name(pick(1)) + ' now, and ' + premLabel + ' is kept for judgment work' + offered(pick(1)) + '. ' : '';
   console.log('do: ' + switchNow + notes[level]);
-  // At "over" the cheapest lever comes first: one step less effort on the
-  // session's own model saves on every turn and keeps the work where it is.
-  // Only the user can change it: by the Switch row where the hooks module
-  // runs, else in the model menu. A session on another tier is left alone,
-  // and so is one that belongs on another model now (premium out or held).
-  const top = ladder[0], lower = EFFORTS[EFFORTS.indexOf(top.effort) - 1];
-  if (level === 'over' && lower && !premAway && (!sessionModel || sessionModel === top.model)) {
-    console.log('effort: one step less effort on this session would save most, ' + name(top) + ' -> ' + lower
-      + offered({ label: top.label, effort: lower }) + '; medium work still goes to ' + name(pick(2)));
-  }
+  // No advice to lower the session's effort (the user's word: not just
+  // because the week is a little over); at "over" medium work moves down
+  // the tiers, and that is all.
   if (premHeld && level !== 'throttle') {
     // what is left of the held meter goes to work that needs it most
     const held = tiers.find(t => t.model === premium);
@@ -828,14 +585,12 @@ if (!opt.dry) {
       console.log('settings.json not changed: ' + e.message);
     }
     // the desktop app's preset for new local sessions: the "builtIns.local"
-    // entry of ccd-session-presets.json under %LOCALAPPDATA%\Claude-Data\<id>\
+    // entry of this session's account in ccd-session-presets.json (paths.mjs
+    // presetTargets says which files and whose entry; Windows only)
     try {
       const modelId = MODELS[sessionTier.model].id;
-      const dataDir = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Claude-Data');
-      const presetFiles = fs.existsSync(dataDir)
-        ? fs.readdirSync(dataDir).map(d => path.join(dataDir, d, 'ccd-session-presets.json')).filter(p => fs.existsSync(p))
-        : [];
-      for (const p of presetFiles) {
+      const targets = presetTargets();
+      for (const p of targets ? targets.files : []) {
         // the app's own file, which the app writes too: changed on the file
         // as it is at that moment, and swapped in whole (safe.mjs)
         let changed = false;
@@ -843,7 +598,8 @@ if (!opt.dry) {
           if (text === null) return null;
           const j = JSON.parse(text);
           changed = false;
-          for (const acc of Object.values(j.byAccount || {})) {
+          for (const [id, acc] of Object.entries(j.byAccount || {})) {
+            if (!targets.owns(id)) continue;
             const s = acc.builtIns && acc.builtIns.local && acc.builtIns.local.settings;
             if (s && (s.modelId !== modelId || s.effort !== effort)) { s.modelId = modelId; s.effort = effort; changed = true; }
           }
@@ -880,7 +636,7 @@ if (opt.brief && !auto) {
 }
 // Whether another session started this one (a side session in the desktop
 // app). The app keeps a record per session, in the folder
-// <LOCALAPPDATA>/Claude-Data/<app>/claude-code-sessions/<a>/<b>/ as
+// <LOCALAPPDATA>/Claude-Data/<app>/claude-code-sessions/<a>/<b>/ (paths.mjs appDataDir) as
 // <session id>.json, with `spawnedFrom` on a
 // session another one started, and names the id in the engine's environment
 // (CLAUDE_CODE_HOST_SESSION_ID). The app's own file, not a documented
@@ -893,9 +649,9 @@ const spawnedSession = () => {
   try {
     const id = process.env.CLAUDE_CODE_HOST_SESSION_ID;
     if (!id || !/^[\w-]+$/.test(id)) return null;
-    const base = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Claude-Data');
-    const dirs = d => (fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => path.join(d, e.name)) : []);
-    for (const app of dirs(base)) for (const a of dirs(path.join(app, 'claude-code-sessions'))) for (const b of dirs(a)) {
+    const base = appDataDir();
+    if (!base) return null;
+    for (const app of subdirs(base)) for (const a of subdirs(path.join(app, 'claude-code-sessions'))) for (const b of subdirs(a)) {
       const f = path.join(b, id + '.json');
       if (fs.existsSync(f)) {
         const rec = JSON.parse(fs.readFileSync(f, 'utf8'));
@@ -923,13 +679,8 @@ const spawnedSession = () => {
 //             With the model held off tier 1 this session no longer draws
 //             on it, and three hours is soon enough. Never for an
 //             automatic reading that read the meter itself (fullAuto).
-const fulls = weekLog.filter(e => e.premiumModel === premium && typeof e.premium === 'number' && !e.premiumAt);
 const premAgeMs = premFrom ? Math.max(0, now - Date.parse(premFrom.at)) : null;
-const readAt = premFrom ? fulls.filter(e => e.t === premFrom.at).at(-1) || fulls.at(-1) : null;
-const allMoved = readAt ? Math.max(0, used - readAt.all) : null;
-const ratio = fulls.length >= 2 && fulls.at(-1).all - fulls[0].all >= 2 && fulls.at(-1).premium >= fulls[0].premium
-  ? Math.min(10, (fulls.at(-1).premium - fulls[0].premium) / (fulls.at(-1).all - fulls[0].all)) : null;
-const premEstimate = premFrom && prem !== null && ratio !== null && allMoved > 0 && ratio * allMoved >= 1 ? Math.min(100, r1(prem + ratio * allMoved)) : null;
+const { allMoved, estimate: premEstimate } = premiumSince({ weekLog, premium, premFrom, prem, used });
 const FULL_AGE = HOUR, FULL_AGE_HELD = 3 * HOUR, FULL_MOVED = 2;
 const needFull = !(auto && premium && premTop) || premOut || fullAuto ? null
   : prem === null ? 'no ' + premLabel + ' reading this week yet'
@@ -937,72 +688,41 @@ const needFull = !(auto && premium && premTop) || premOut || fullAuto ? null
       : !premHeld && allMoved !== null && allMoved >= FULL_MOVED ? 'the weekly meter moved ' + r1(allMoved) + ' points since ' + premLabel + '\'s meter was read'
         : null;
 // ---- dollars per point of the weekly meter, for "Budget tokens: 850K".
-//      The meter weighs what the work cost, not how many tokens it moved: a
-//      cache read costs a tenth of an input token, and a long session
-//      re-reads its whole context each turn, so a raw token count tracks the
-//      meter poorly. The rate is learned in dollars and shown in full-price
-//      tokens of tier 1's model, the same in every session (left, below).
-//      rate.json holds this week's baseline (from: the meter at the week's
-//      first reading, to: the highest since) and the dollars the sessions
-//      reported (--spent-usd) since then; a new week keeps the week before's
-//      rate (carried) when its meter rose 5 points or more. The first reading
-//      of a week drops its --spent-usd: that was spent before the baseline.
-//      Use by sessions without the hooks module (another device, the web)
-//      raises the meter with nothing counted, so the rate errs low and the
-//      figure shows less left than there is. Rate now: this week's from a
-//      rise of 5 points, else the carried one, else an estimate: what this
+//      The rate is learned in dollars (line.mjs: rateNext is what rate.json
+//      holds after a reading, rateOf the rate it gives and where from) and
+//      shown in full-price tokens of tier 1's model, the same in every
+//      session (left, below). Before one is learned, an estimate: what this
 //      week's local transcripts cost (estimate.mjs) over the points the meter
-//      shows, kept in rate.json's `estimate` and priced afresh at most once an
-//      hour while nothing better is learned, from 2 points on; else this
-//      week's from 2 points. rateFrom says which (week, carried, estimate,
-//      early).
+//      shows, kept in rate.json's `estimate` and priced afresh at most once
+//      an hour while nothing better is learned, from 2 points on. rateFrom
+//      says which (week, carried, estimate, early).
 //      A damaged or missing file is an empty one, and so is one without v: 2
 //      (0.9.15 and before learned raw tokens per point: dropped); a failed
 //      write is no error. ----
-const RISE_MIN = 5, RISE_EARLY = 2, RATE_V = 2;
 const spentArg = opt['spent-usd'] === undefined ? NaN : Number(opt['spent-usd']);
 const spent = Number.isFinite(spentArg) && spentArg > 0 ? spentArg : 0;
-const fin = v => typeof v === 'number' && Number.isFinite(v);
 // the pace (see "the pace" where the reading is put together)
 const PACE_MS = HOUR, PACE_MIN_USD = 0.5, PACE_MIN_SPAN = 15 * 60000, PACE_KEEP = 6 * HOUR;
-const paceOk = p => !!p && typeof p === 'object' && fin(p.usd) && p.usd > 0 && fin(p.at);
-const rateNext = text => {
+const nextRate = text => {
   let cur = null;
   try { cur = text ? JSON.parse(text) : null; } catch { cur = null; }
-  if (!cur || typeof cur !== 'object' || Array.isArray(cur) || cur.v !== RATE_V) cur = {};
-  const carried = fin(cur.carried) && cur.carried > 0 ? cur.carried : null;
-  const at = Date.parse(cur.reset);
-  const whole = fin(cur.from) && fin(cur.to) && fin(cur.usd);
-  // a late reading of a week before the file's leaves it alone
-  if (whole && at > reset.getTime() + HOUR) return { ...cur, carried };
-  if (whole && Math.abs(at - reset) <= HOUR) return { ...cur, to: Math.max(cur.to, used), usd: cur.usd + spent, carried };
-  const rise = whole ? cur.to - cur.from : 0;
-  return { v: RATE_V, reset: opt.reset, from: used, to: used, usd: 0, carried: rise >= RISE_MIN && cur.usd > 0 ? cur.usd / rise : carried,
-    ...(paceOk(cur.pace) ? { pace: cur.pace } : {}) };
+  return rateNext(cur, { reset: reset.getTime(), resetText: opt.reset, used, spent });
 };
 let rateState = null;
 try {
   const text = fs.existsSync(rateFile) ? fs.readFileSync(rateFile, 'utf8') : null;
-  rateState = rateNext(text);
+  rateState = nextRate(text);
   if (!opt.dry) {
-    const stands = updateFile(rateFile, t => { const next = JSON.stringify(rateNext(t)) + '\n'; return next === t ? null : next; });
+    const stands = updateFile(rateFile, t => { const next = JSON.stringify(nextRate(t)) + '\n'; return next === t ? null : next; });
     rateState = JSON.parse(stands);
   }
 } catch { /* the rate stays as computed, or unknown */ }
-const rateRise = rateState ? rateState.to - rateState.from : 0;
-const rateFrom = !rateState ? null
-  : rateRise >= RISE_MIN && rateState.usd > 0 ? 'week'
-    : rateState.carried ? 'carried'
-      : null;
-let rate = rateFrom === 'carried' ? rateState.carried : rateFrom ? rateState.usd / rateRise : null;
-let rateSource = rateFrom;
-// this week's from 2 points: only where no estimate can be had (live it
-// swung while the sessions' spending caught up after a reload)
-const early = rateState && rateRise >= RISE_EARLY && rateState.usd > 0 ? rateState.usd / rateRise : null;
+// this week's or the carried one; else the estimate, renewed here when it is
+// due; else this week's from 2 points
+let learned = rateOf(rateState, { estimate: false });
 const ESTIMATE_MS = HOUR, ESTIMATE_MIN = 2;
-const estOk = e => !!e && typeof e === 'object' && fin(e.usd) && e.usd > 0 && fin(e.points) && e.points > 0 && fin(e.at);
-if (rate === null && rateState && used >= ESTIMATE_MIN) {
-  let est = estOk(rateState.estimate) ? rateState.estimate : null;
+if (rateState && learned.from !== 'week' && learned.from !== 'carried' && used >= ESTIMATE_MIN) {
+  let est = estimateOk(rateState.estimate) ? rateState.estimate : null;
   if (!opt.dry && (!est || now.getTime() - est.at >= ESTIMATE_MS || now.getTime() < est.at)) {
     try {
       const w = weekSpend({ since: reset.getTime() - 7 * DAY, until: now.getTime() });
@@ -1018,9 +738,9 @@ if (rate === null && rateState && used >= ESTIMATE_MIN) {
       }
     } catch { /* no estimate */ }
   }
-  if (est) { rate = est.usd / est.points; rateSource = 'estimate'; }
+  learned = rateOf({ ...rateState, estimate: est });
 }
-if (rate === null && early !== null) { rate = early; rateSource = 'early'; }
+const rate = learned.usd, rateSource = learned.from;
 // what a full-price token costs: an input token of tier 1 on the configured
 // ladder (of the ladder in force when none is configured), in every session
 // alike. It was the session's own model's: live, a session on Fable 5.2 ($8
@@ -1033,38 +753,8 @@ if (auto) {
   const doLine = said.find(l => l.startsWith('do: '));
   // For the status line: what is left under the budget line, and what the
   // module needs to split the session's use by tier: each model's prices, and
-  // its tier number on the ladder in force now (with the fallback on top
-  // while the per-model meter is out or held). A usage record names a model,
-  // not an effort, and one model can hold two places (Opus 5.5 high as the
-  // fallback on top, Opus 5.5 medium at tier 2). So the session's own turns
-  // count at a model's first place (tierOf), and its subagents' at its first
-  // place below tier 1 (agentTierOf): subagents take the lower tiers. A model
-  // off the ladder now (the premium one while out or held, a configured tier
-  // the ladder dropped) keeps its configured place; the reader's and the
-  // verifier's models, off the ladder, come after its last tier.
-  const tierOf = {}, agentTierOf = {};
-  const idOf = t => (t && MODELS[t.model] ? MODELS[t.model].id : null);
-  ladder.forEach((t, i) => {
-    const id = idOf(t);
-    if (!id) return;
-    if (!tierOf[id]) tierOf[id] = i + 1;
-    if (i > 0 && !agentTierOf[id]) agentTierOf[id] = i + 1;
-  });
-  tiers.forEach((t, i) => { const id = idOf(t); if (id && !tierOf[id]) tierOf[id] = i + 1; });
-  if (fallbackTier && !tierOf[idOf(fallbackTier)]) tierOf[idOf(fallbackTier)] = 1;
-  const last = Math.max(ladder.length, tiers.length);
-  if (readerCfg && readerCfg !== 'ladder' && idOf(readerCfg) && !tierOf[idOf(readerCfg)]) tierOf[idOf(readerCfg)] = last + 1;
-  if (verifierCfg && verifierCfg !== 'ladder' && idOf(verifierCfg) && !tierOf[idOf(verifierCfg)]) tierOf[idOf(verifierCfg)] = Math.max(last, ...Object.values(tierOf)) + 1;
-  for (const id of Object.keys(tierOf)) if (!agentTierOf[id]) agentTierOf[id] = tierOf[id];
-  // each of those tier numbers as the user reads it, the model with its
-  // effort (/pacing-status names models, not tier numbers): the ladder's at
-  // that place, else the configured tier's, the reader's or the verifier's
-  const tierNames = {};
-  const nameAt = (n, t) => { if (n && t && MODELS[t.model] && !tierNames[n]) tierNames[n] = MODELS[t.model].label + ' ' + t.effort; };
-  ladder.forEach((t, i) => nameAt(i + 1, t));
-  tiers.forEach((t, i) => nameAt(i + 1, t));
-  if (readerCfg && readerCfg !== 'ladder') nameAt(tierOf[idOf(readerCfg)], readerCfg);
-  if (verifierCfg && verifierCfg !== 'ladder') nameAt(tierOf[idOf(verifierCfg)], verifierCfg);
+  // its tier number and name on the ladder in force now (line.mjs tierMaps).
+  const { tierOf, agentTierOf, tierNames } = tierMaps({ ladder, tiers, fallbackTier, readerCfg, verifierCfg });
   const prices = Object.fromEntries(Object.values(MODELS).map(m => [m.id, m.price]));
   // The weekly meter moves in whole points (about $6.50 of use each), so
   // what is left stood still between them: live, "Budget tokens" rarely
@@ -1142,11 +832,11 @@ if (auto) {
     weekLevel: levelBefore,
     premiumOfBudget: premLevel && budget > 0 ? Math.round(100 * prem / budget) : null,
     premiumEstimate: premEstimate, needFull, full: fullAuto, unused, reset: opt.reset,
+    // the 5-hour window, for the pane's bar under the per-model meter
+    five: five === null ? null : r1(five), fiveReset: fiveReset ? fiveReset.toISOString() : null, fiveFull,
     // what the session should run on, and at "over" the effort one step
     // lower on tier 1: the hooks module offers them in its Switch row
     recommend: sessionTier ? { model: MODELS[sessionTier.model].id, label: sessionTier.label, effort: sessionTier.effort } : null,
-    effortStep: ladder.length && level === 'over' && !premAway && EFFORTS.indexOf(ladder[0].effort) > 0
-      ? { model: MODELS[ladder[0].model].id, label: ladder[0].label, effort: EFFORTS[EFFORTS.indexOf(ladder[0].effort) - 1] } : null,
     premiumModelId: premium && MODELS[premium] ? MODELS[premium].id : null,
     // this session's id, for the hooks module to find the side sessions it started
     hostSessionId: /^[\w-]+$/.test(process.env.CLAUDE_CODE_HOST_SESSION_ID || '') ? process.env.CLAUDE_CODE_HOST_SESSION_ID : null,

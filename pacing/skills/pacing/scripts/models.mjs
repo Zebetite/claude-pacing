@@ -2,7 +2,10 @@
 // the label the user sees, and the full id the desktop app's preset and model
 // picker use. The one place to edit when a model comes or goes.
 // price: US dollars per million tokens, as the API lists them (input, output,
-// cache read, cache write at 1.25 x input). The weekly meter is not priced in
+// cache read, cache write at 1.25 x input), checked against
+// https://platform.claude.com/docs/en/about-claude/pricing on 2026-11-27.
+// Haiku 5.5 over 100 000 tokens of input costs more ([0.5, 2.5, 0.05,
+// 0.625]); that is not modelled, the estimate takes the lower price. The weekly meter is not priced in
 // dollars, but it weighs models the same way, so these turn token counts into
 // an estimate of each tier's share of what was used.
 export const MODELS = {
@@ -15,6 +18,50 @@ export const MODELS = {
 // was written; a known model is always shown under its current label.
 export const relabel = t => (t && MODELS[t.model] ? { ...t, label: MODELS[t.model].label } : t);
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+// The model a name or an id belongs to, as its short name: the full id
+// ("claude-opus-5-5"), an older one of the same family ("claude-fable-5-1")
+// or the short name itself; null for one the table does not know. The one
+// lookup: --session (budget.mjs, saved.mjs) and a transcript's model
+// (estimate.mjs) are read by it.
+export const modelOf = id => {
+  if (typeof id !== 'string') return null;
+  const s = id.toLowerCase(), names = Object.keys(MODELS);
+  return names.find(m => s === MODELS[m].id) || names.find(m => s.includes(m)) || null;
+};
+// the per-model meter's model as a reading names it (premiumModel); a reading
+// from before that field was Fable's
+export const meterLabel = m => (m && MODELS[m] ? MODELS[m].label : 'Fable');
+
+// The settings a fresh config.json holds, in the order it is written
+// (config.mjs adds the install date). The one place the defaults are: what
+// reads a config that lacks a key (budget.mjs through line.mjs, doctor.mjs,
+// saved.mjs, config.mjs's own texts) takes it from here, with setting().
+// The ladder: Fable 5.2 high for the session, Opus 5.5 medium and Sonnet 5.5
+// medium below. fallback: the tier that takes the top place while the
+// per-model meter (premium) is used up. reader, verifier: the models those
+// two agents run at; 'ladder' there follows the lowest tier. autoCompact:
+// the window Claude Code's /autocompact is set to (the hooks module runs
+// it), a token count, 'auto' (Claude Code's own) or 'off' (left alone).
+export const tier = (model, effort) => ({ model, label: MODELS[model].label, effort });
+export const defaults = () => ({
+  tiers: [tier('fable', 'high'), tier('opus', 'medium'), tier('sonnet', 'medium')],
+  lastDayWeight: 1.5,
+  setNextModel: true,
+  compactAsk: true,
+  agentNotices: true,
+  switchAsk: true,
+  autoReload: true,
+  autoCompact: 750000,
+  premium: 'fable',
+  fallback: { model: 'opus', effort: 'high' },
+  reader: { model: 'haiku', effort: 'medium' },
+  verifier: { model: 'haiku', effort: 'medium' },
+});
+// what /autocompact takes: a window from 100 000 to 1 000 000 tokens
+export const AUTO_COMPACT_MIN = 100000, AUTO_COMPACT_MAX = 1000000;
+// a setting as it stands: the config's own value, else the default. null is
+// a value of its own (no per-model meter, no fallback), not a missing one.
+export const setting = (cfg, key) => (cfg && cfg[key] !== undefined ? cfg[key] : defaults()[key]);
 
 // A config.json as read from disk, checked value by value: what the commands
 // never write (a hand edit, a cut-off save) is dropped for its default, and
@@ -45,6 +92,7 @@ export const checkConfig = raw => {
   drop('agentNotices', v => typeof v === 'boolean', 'the toasts about running subagents are not on or off');
   drop('switchAsk', v => typeof v === 'boolean', 'the offers to switch model or effort are not on or off');
   drop('autoReload', v => typeof v === 'boolean', 'the reload at a new version is not on or off');
+  drop('autoCompact', v => v === 'auto' || v === 'off' || (Number.isInteger(v) && v >= AUTO_COMPACT_MIN && v <= AUTO_COMPACT_MAX), 'the auto-compact window is not a token count from 100k to 1M, auto or off');
   return { cfg: c, problems };
 };
 // Every key a config.json may hold: the ones checkConfig knows, the install
@@ -53,5 +101,5 @@ export const checkConfig = raw => {
 // setting since removed, left in older files and ignored. A new setting goes
 // in SETTINGS; a removed one moves to RETIRED.
 export const SETTINGS = ['tiers', 'lastDayWeight', 'premium', 'fallback', 'reader', 'verifier', 'setNextModel', 'compactAsk',
-  'agentNotices', 'switchAsk', 'autoReload', 'installed', 'primary'];
+  'agentNotices', 'switchAsk', 'autoReload', 'autoCompact', 'installed', 'primary'];
 export const RETIRED = ['agentsPanel'];

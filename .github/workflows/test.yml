@@ -1,0 +1,23 @@
+# The node tests on every push and pull request, on Windows and Linux.
+# The hooks module's kit tests (`claude plugin test pacing`) need Claude
+# Code's own test kit and are run locally before a release
+# (`node scripts/release.mjs test`).
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  node:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [18, 22]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --test

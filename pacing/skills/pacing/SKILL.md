@@ -5,7 +5,7 @@ description: "Pace the weekly plan allowance over a ladder of models. Use whenev
 
 # Model pacing: reports and settings
 
-The weekly meter (**Weekly · all models**) and the per-model meter
+The weekly meter ("Weekly · all models") and the per-model meter
 (Fable's by default, `premium` in the config) are paced on one day-by-day budget
 line; the level decides how far down the ladder of models work goes.
 This skill takes readings, reports and changes the settings; the rules for
@@ -31,7 +31,7 @@ a terminal session without the app): the start line says what to run.
 | `/pacing`, `usage`, no argument | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" last`: show its report as section 2 says; on a `measure:` line, sections 1 and 2 |
 | `usage now` | sections 1 and 2 |
 | `help full` ("usage help full") | answer in one line: "`/pacing-guide` shows the whole guide without spending tokens; if your Claude Code does not know that command, say so and I show it here." Only on that answer: `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" help full`, shown whole |
-| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `compact on\|off`, `notify on\|off`, `switch on\|off`, `reload on\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `reader <model> <effort>\|ladder`, `verifier <model> <effort>\|ladder`, `version`, `notes`, `agents`, `help` ("usage help"), `handover done` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result whole |
+| `set <n> <model> <effort>`, `add <model> <effort>`, `remove <n>`, `reset`, `weight <n>`, `next on\|off`, `compact on\|off`, `notify on\|off`, `switch on\|off`, `reload on|off`, `autocompact <tokens>|auto|off`, `premium <model>|none`, `fallback\|off`, `premium <model>\|none`, `fallback <model> <effort>\|none`, `reader <model> <effort>\|ladder`, `verifier <model> <effort>\|ladder`, `version`, `notes`, `agents`, `help` ("usage help"), `handover done` | `node "${CLAUDE_SKILL_DIR}/scripts/config.mjs" <the same words>`, show the result whole |
 | `doctor` | `node "${CLAUDE_SKILL_DIR}/scripts/doctor.mjs"`, show the result whole |
 | `saved`, `saved detail` | `node "${CLAUDE_SKILL_DIR}/scripts/saved.mjs" [--detail]`, show the result whole |
 | `log`, `week` | `node "${CLAUDE_SKILL_DIR}/scripts/budget.mjs" log` (or `week`), show the result |
@@ -76,22 +76,20 @@ or this session's model is out or held. Then one line on what applies,
 the `do:` line in words, as in:
 
 ```
-Weekly 44 % used, budget line 41 %: over by 3; one step less effort would save most.
-Weekly 58 % used, budget line 41 %, reaches 100 % Wednesday: throttle. This session hands work to Opus 5.5 high subagents.
-Fable's meter at 100 %: Fable is out until Thursday's reset.
-Weekly 96 %: stop. Extra usage is on (12.40 of 50.00 EUR this month): going on is charged; your call.
+Weekly 44 % used, budget line 41 %: over by 3; medium tasks go to subagents too.
 Context 440k tokens: compacting (/compact) at the next natural break makes every later turn cheaper; then we go on here, whatever the next task is.
-Fixed overhead 70k tokens on every turn, 40k of it MCP tools: switching off connectors you do not need saves up to 40k a turn.
 ```
 
 A `last week:` line (the first reading after a reset): say it once, in
 one line, before the rest.
 
-**This session's model or effort**: it cannot change them itself. Where
-the hooks module runs (a pacing status line shows), its Switch row above
-the prompt is the only offer: give no steps and ask nothing; name the
-fact in a few words, as above. Without it (as in a terminal), the line
-starts "switch the session to <model> <effort>", in the model menu's
-words. When the script printed a `desktop app preset:` line, say new
+**This session's model or effort**: the plugin handles them by handing
+work to subagents on the right models; never suggest a switch or less
+effort. Only when the per-model meter's model is out, or held 20 points or more
+over its line, name the
+fact in a few words, as above: where the hooks module runs (a pacing
+status line shows), its Switch row is the offer, so give no steps and ask
+nothing; without it (as in a terminal), the line starts "switch the
+session to <model> <effort>", in the model menu's words. When the script printed a `desktop app preset:` line, say new
 sessions now start on that model. Name models with their effort ("Opus
 5.5 high"), never a tier number.

@@ -1,4 +1,4 @@
-import { paneView } from './pane.mjs';
+import { paneView, TASK_MARKS } from './pane.mjs';
 
 // Automatic readings: after a turn, the engine hands this module the session's
 // rate-limit windows (session.measure). When the weekly all-models window
@@ -163,14 +163,60 @@ export const compactFailedText = (reason, filled) => {
 };
 // the setting in config.json: on unless it says false
 export const compactAskOf = text => { try { return JSON.parse(text).compactAsk !== false; } catch { return true; } };
-// read when an offer is due, so a change applies at once; any failure: on
-async function compactAskOn($) {
-  try {
+
+// ---- pacing's own files ----
+// config.json, state.json and line.json lie in ~/.claude/pacing. Seven
+// functions each asked the engine for the home folder and read a file
+// there, and a main thread's turn end read config.json two or three times,
+// once per toggle that asked. Now the home folder is asked for once per load
+// of the module (`pf.home`; one not found is asked for again), every file
+// is read through pacingFile, and config.json through configOf alone, which
+// keeps what it read for CONFIG_FRESH by the engine's clock. A main
+// thread's turn end starts it over first (configStale): the turn may have
+// changed a setting (`/pacing compact off`), which then holds at that
+// turn's end already, read once for all its toggles. Elsewhere a change (in
+// another session, or by hand) holds within CONFIG_FRESH. No file reads as
+// {} and is kept as long: most people have none. An engine without a clock
+// reads the file each time, as before.
+export const CONFIG_FRESH = 3000;
+const pf = { home: null, config: null, at: 0 };
+// Claude Code's folder: CLAUDE_CONFIG_DIR where it is set (the scripts
+// follow it too, paths.mjs), else ~/.claude
+async function homeOf($) {
+  if (pf.home) return pf.home;
+  let dir = null;
+  try { dir = await $.env.get('CLAUDE_CONFIG_DIR'); } catch { /* not set */ }
+  if (!dir) {
     const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
-    if (!home) return true;
-    return compactAskOf(await $.fs.read(home + '/.claude/pacing/config.json'));
-  } catch { return true; }
+    if (home) dir = home + '/.claude';
+  }
+  if (dir) pf.home = dir;
+  return dir || null;
 }
+// one of pacing's files as text; throws without a home folder or the file
+async function pacingFile($, name) {
+  const dir = await homeOf($);
+  if (!dir) throw new Error('no home folder');
+  return $.fs.read(dir + '/pacing/' + name);
+}
+function configStale() { pf.config = null; }
+// config.json as it stands, or {}
+async function configOf($) {
+  let now = null;
+  try { now = await $.clock.now(); } catch { /* no clock: read each time */ }
+  if (pf.config && now !== null && now >= pf.at && now - pf.at < CONFIG_FRESH) return pf.config;
+  let c = {};
+  try {
+    const v = JSON.parse(await pacingFile($, 'config.json'));
+    if (v && typeof v === 'object' && !Array.isArray(v)) c = v;
+  } catch { /* none, or not to be read: every setting at its default */ }
+  if (now !== null) { pf.config = c; pf.at = now; }
+  return c;
+}
+// a toggle of config.json: on unless it says false; any failure: on
+async function settingOn($, key) { try { return (await configOf($))[key] !== false; } catch { return true; } }
+// the offers to compact (compactAsk)
+async function compactAskOn($) { return settingOn($, 'compactAsk'); }
 
 // what budget.mjs is run with for a reading from the hooks module; `dry`
 // computes from given figures and logs nothing. `m` is every meter the
@@ -192,20 +238,7 @@ export const readingArgv = (root, all, reset, five, fiveReset, dry, m = null, se
   ...(dry ? ["--dry"] : [])];
 // the last reading budget.mjs stored for the start line (state.json), or null
 async function storedReading($) {
-  try {
-    const home = (await $.env.get("USERPROFILE")) || (await $.env.get("HOME"));
-    if (!home) return null;
-    return JSON.parse(await $.fs.read(home + "/.claude/pacing/state.json"));
-  } catch { return null; }
-}
-// config.json as it stands, or {} (read where it is needed, so a change applies at once)
-async function configOf($) {
-  try {
-    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
-    if (!home) return {};
-    const c = JSON.parse(await $.fs.read(home + '/.claude/pacing/config.json'));
-    return c && typeof c === 'object' && !Array.isArray(c) ? c : {};
-  } catch { return {}; }
+  try { return JSON.parse(await pacingFile($, 'state.json')); } catch { return null; }
 }
 
 // ---- every meter, read by the module itself ----
@@ -228,6 +261,18 @@ async function configOf($) {
 export const USAGE_TOOL = 'mcp__ccd_session_mgmt__get_usage';
 export const AGENT_GAP = 5 * 60 * 1000;
 const amount = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+// The texts of a tool's answer as a module gets it, in the order they are
+// tried: `text`, then each text of `result`, the tool's content (an array of
+// { type, text }, or an object holding one as `content`). The usage tool's
+// and the sessions list's answers are both read through it.
+export const textsOf = res => {
+  const texts = [];
+  if (res && typeof res.text === 'string') texts.push(res.text);
+  const r = res && res.result;
+  const content = Array.isArray(r) ? r : r && Array.isArray(r.content) ? r.content : [];
+  for (const c of content) if (c && typeof c.text === 'string') texts.push(c.text);
+  return texts;
+};
 // a reset time as budget.mjs takes it (ISO 8601): a date as written, or
 // from seconds or milliseconds since the epoch
 const isoOf = v => {
@@ -243,12 +288,7 @@ const isoOf = v => {
 // `name`, `tokens`). `premium` is config.json's per-model meter (a model's
 // short name; null: the plan has none).
 export const usageOf = (res, premium = 'fable') => {
-  const texts = [];
-  if (res && typeof res.text === 'string') texts.push(res.text);
-  const r = res && res.result;
-  const content = Array.isArray(r) ? r : r && Array.isArray(r.content) ? r.content : [];
-  for (const c of content) if (c && typeof c.text === 'string') texts.push(c.text);
-  for (const t of texts) {
+  for (const t of textsOf(res)) {
     let v;
     try { v = JSON.parse(t); } catch { continue; }
     const windows = v && v.plan && Array.isArray(v.plan.windows) ? v.plan.windows.filter(w => w && typeof w.label === 'string') : [];
@@ -370,33 +410,17 @@ async function takeReading($, rd, { at, week, five, lastFirst = false } = {}) {
     const j = await runReading($, week, five, rd.session(), rd.spend, rd.health);
     if (j) {
       rd.setLast({ pct: pct !== null ? pct : j.all, at });
-      sayLevel($, rd.held(), j);
-      sayUnused($, j, rd.un).catch(() => { /* a convenience */ });
+      sayLevel($, rd.held(), j, rd.session());
       rd.hold(j);
     }
     return j;
   } catch { return null; } finally { rd.running = false; sayFailing($, rd.health); }
 }
 // What goes unused at the reset (budget.mjs's `unused`, points of the week
-// the trend leaves at "ahead"): one toast per week and step of UNUSED_STEP
-// points, in whichever session reads it first ($.store is every session's;
-// `un` is this copy's memory where there is no store). The allowance does
-// not carry over, and the level alone ("ahead") does not say how much room
-// there is. /pacing-status says it too.
+// the trend leaves at "ahead") is a note in the pane and in /pacing-status,
+// no toast (the user's word: fewer messages).
 export const UNUSED_STEP = 10;
 export const unusedText = n => ICON.room + ' at this pace about ' + n + '% of the week goes unused at the reset, and it does not carry over: there is room for harder work and more effort.';
-async function sayUnused($, j, un) {
-  if (!j || j.fromLoad || typeof j.unused !== 'number' || j.unused < UNUSED_STEP) return;
-  const step = Math.floor(j.unused / UNUSED_STEP) * UNUSED_STEP;
-  const week = Date.parse(j.reset) || 0;
-  const said = k => !!k && typeof k === 'object' && Math.abs((k.week || 0) - week) <= 3600000 && k.step >= step;
-  let kept = un.said;
-  try { kept = (await $.store.get('unused')) || kept; } catch { /* this copy's memory */ }
-  if (said(kept)) { un.said = kept; return; }
-  un.said = { week, step };
-  try { await $.store.set('unused', un.said); } catch { /* this copy's memory */ }
-  $.ui.toast(unusedText(j.unused), { timeoutMs: TOAST_LONG });
-}
 // A large tool result in the main thread stays in the session: every later
 // turn sends it again (from the cache, but it counts), and it brings the
 // compaction nearer. /pacing-status counts them; no toast (the user's word:
@@ -475,6 +499,105 @@ async function breakdownNow($) {
   } catch { return null; }
 }
 
+// ---- Claude Code's auto-compact window ----
+// Claude Code compacts a session by itself as it nears its auto-compact
+// window, which /autocompact sets and the settings keep per model. The user
+// wants it at 750 000 tokens. config.json's autoCompact says what pacing
+// sets (config.mjs autocompact): a token count, 'auto' (Claude Code's own
+// window) or 'off' (pacing leaves /autocompact alone). At a session's start,
+// when its model changes and when the setting changes, the context breakdown
+// says what Claude Code has, and where it differs /autocompact runs, once.
+// A success says nothing (the user's word: few toasts; the pane's row shows
+// the value); a failure is one toast per load of the module at most.
+export const AUTO_COMPACT_DEFAULT = 750000;
+// what /autocompact takes (models.mjs has the same bounds for config.mjs)
+export const AUTO_COMPACT_MIN = 100000;
+export const AUTO_COMPACT_MAX = 1000000;
+// one press of the pane's − or +
+export const AUTO_COMPACT_STEP = 50000;
+// the setting as config.json holds it; a value config.mjs would refuse is the default
+export const autoCompactOf = c => {
+  const v = c && c.autoCompact;
+  return v === 'auto' || v === 'off' ? v : Number.isInteger(v) && v >= AUTO_COMPACT_MIN && v <= AUTO_COMPACT_MAX ? v : AUTO_COMPACT_DEFAULT;
+};
+// Whether Claude Code has `want` already, by the breakdown `bd`. A window the
+// settings set is the window measured against (rawMaxTokens), with the
+// source 'settings'; 'auto' is any window the settings did not set. One from
+// CLAUDE_CODE_AUTO_COMPACT_WINDOW (source 'env') outranks the settings, so
+// /autocompact could not change it: that counts as had.
+export const autoCompactHas = (bd, want) => {
+  const source = bd && bd.autocompactSource;
+  if (source === 'env') return true;
+  if (want === 'auto') return source !== 'settings';
+  return source === 'settings' && bd.rawMaxTokens === want;
+};
+// the pane's words for the setting
+export const autoCompactText = v => (v === 'auto' ? 'Auto-compact: Claude Code\'s default' : 'Auto-compact at ' + kText(v));
+export const autoCompactFailedText = (want, why) => {
+  const w = String(why || '').replace(/\s+/g, ' ').trim();
+  const short = w.length > 80 ? w.slice(0, 79) + '…' : w;
+  return ICON.failed + ' Claude Code\'s auto-compact was not set to ' + (want === 'auto' ? 'its default' : kText(want))
+    + (short ? ': ' + short.replace(/[.\s]+$/, '') : '') + '. /autocompact ' + want + ' sets it.';
+};
+// config.mjs stores a press's value (it owns config.json)
+export const autoCompactArgv = (root, v) => ['node', root + '/skills/pacing/scripts/config.mjs', 'autocompact', String(v)];
+// /autocompact with `want`; whether it took. A failure is told once per
+// load where `quiet` (the run at a start or a change), at every press else.
+async function autoCompactRun($, ac, want, quiet) {
+  let why = '';
+  try {
+    const r = await $.command.run({ command: 'autocompact', args: String(want) });
+    if (!commandFailed(r)) return true;
+    why = (r && r.text) || '';
+  } catch (err) { why = (err && err.message) || ''; }
+  if (quiet && ac.told) return false;
+  if (quiet) ac.told = true;
+  try { $.ui.toast(autoCompactFailedText(want, why), { timeoutMs: TOAST_LONG }); } catch { /* no toast */ }
+  return false;
+}
+// The check. `ac` is what it reads and writes of the copy's memory (see
+// register): `on` once a session started, `due` while the start's check
+// waits for a breakdown, the model and the setting last checked (`model`,
+// `want`), `told`, and `busy` while a check runs. `model`: the session's
+// model as the caller knows it, or null (not known is no change).
+async function autoCompactCheck($, ac, model) {
+  if (!ac.on || ac.busy) return;
+  ac.busy = true;
+  try {
+    const want = autoCompactOf(await configOf($));
+    const same = !model || !ac.model || sameModel(ac.model, model) || sameModel(model, ac.model);
+    if (!ac.due && want === ac.want && same) return;
+    if (want === 'off') { ac.want = want; ac.due = false; return; }
+    const bd = await breakdownNow($);
+    // none yet: the next turn's end asks again
+    if (!bd) { ac.due = true; return; }
+    ac.due = false;
+    ac.want = want;
+    if (model || !ac.model) ac.model = model || (typeof bd.model === 'string' ? bd.model : null);
+    if (!autoCompactHas(bd, want)) await autoCompactRun($, ac, want, true);
+  } catch { /* the next start or change */ } finally { ac.busy = false; }
+}
+// A press on the pane's −, + or Auto: config.json first, through config.mjs,
+// then /autocompact with the new value. One press at a time.
+async function autoCompactPress($, ac, v) {
+  if (ac.pressing) return;
+  ac.pressing = true;
+  try {
+    let r = null;
+    try { r = await $.process.run(autoCompactArgv($.plugin.root, v), { timeoutMs: 20000 }); } catch { /* said below */ }
+    if (!r || r.exitCode !== 0) {
+      const why = String((r && r.stdout) || '').trim().split('\n')[0];
+      $.ui.toast(ICON.failed + ' the auto-compact setting was not saved' + (why ? ': ' + why.replace(/[.\s]+$/, '') : '') + '.', { timeoutMs: TOAST_LONG });
+      return;
+    }
+    configStale();
+    // the check at the next turn's end has nothing more to do
+    ac.want = v;
+    redraw($);
+    await autoCompactRun($, ac, v, false);
+  } catch { /* the toast said it */ } finally { ac.pressing = false; redraw($); }
+}
+
 // ---- the pane ----
 // `/pacing-pane` opens a pane beside the chat with what /pacing-status says
 // (the budget in time, the usage, what to do, the agents running) and what
@@ -492,12 +615,37 @@ export const PANE_CLOSED = 'paneClosed';
 export const closedByPerson = e => !!e && e.id === PANE_ID && !!e.origin && e.origin.kind === 'person';
 // What the pane draws, as plain data (pane.mjs draws it): the time left
 // today in plain words with the level, the meters with the budget line, the
-// session's models, the agents running, and how full the context is.
+// session's models, the agents running (`running`: a text each, or
+// { text, id } where a press on the row opens that agent's transcript), how
+// full the context is, and the background tasks (`tasks`, taskRows).
+// `compact`: whether the Context section offers to compact, 'offer' from
+// PANE_COMPACT_AT tokens (`tokens`: the session's size at its last measure,
+// else the breakdown's total), 'running' while one runs (`compacting`).
+// The figure is the user's, and lower than the row's SUGGEST_AT on purpose:
+// the pane's button is there for whoever looks, the row is what interrupts.
+// `autoCompact`: the setting (autoCompactOf), drawn in the Context section
+// as its words, the values a press on − and + gives (a step of
+// AUTO_COMPACT_STEP on the step's grid, none past the bounds; from 'auto'
+// they step from the default) and whether Auto is offered; nothing for
+// 'off' or none given.
+export const PANE_COMPACT_AT = 300000;
+// the 5-hour window's figure from which heavy work waits (budget.mjs says HOLD there too)
+export const FIVE_HOLD = 85;
 // The budget is said as time alone, never in tokens or dollars: "9h 30m" and
 // "left to use today to stay on budget"; past the line, "40m" and "over
 // today's budget". Without a pace there is no time: the points of the week.
-export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky = null, now = Date.now(), busy = false, failing = false } = {}) => {
-  const m = { level: 'ok', levelText: '', budget: null, meters: [], notes: [], mix, running, context: null, contextNote: '', empty: '' };
+export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky = null, now = Date.now(), busy = false, failing = false, tasks = [], tokens = null, compacting = false, autoCompact = null } = {}) => {
+  const m = { level: 'ok', levelText: '', budget: null, meters: [], notes: [], mix, running, context: null, contextNote: '', empty: '', tasks, compact: null, autoCompact: null };
+  if (autoCompact !== null && autoCompact !== 'off') {
+    const n = typeof autoCompact === 'number' ? autoCompact : AUTO_COMPACT_DEFAULT;
+    const less = Math.max(AUTO_COMPACT_MIN, Math.ceil(n / AUTO_COMPACT_STEP) * AUTO_COMPACT_STEP - AUTO_COMPACT_STEP);
+    const more = Math.min(AUTO_COMPACT_MAX, Math.floor(n / AUTO_COMPACT_STEP) * AUTO_COMPACT_STEP + AUTO_COMPACT_STEP);
+    const auto = autoCompact === 'auto';
+    m.autoCompact = { text: autoCompactText(autoCompact), less: auto || less < n ? less : null, more: auto || more > n ? more : null, auto: !auto };
+  }
+  const size = typeof tokens === 'number' ? tokens : bd && typeof bd.totalTokens === 'number' ? bd.totalTokens : null;
+  if (compacting) m.compact = 'running';
+  else if (size !== null && size >= PANE_COMPACT_AT) m.compact = 'offer';
   if (j) {
     // The top area is the week alone (the user's word: do not mix the weekly
     // meter and Fable's there): its level before the per-model meter's
@@ -535,6 +683,20 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky =
       m.meters.push({ label: j.premiumLabel, pct: j.premium, line, loud: true, over: by !== null && by > 0,
         note: [state, read].filter(Boolean).join(' · ') });
     }
+    // the 5-hour window under the per-model meter (the user's word): no
+    // budget line; under it when it resets, and when it fills first at its
+    // pace. Once the reset has passed the window starts over: 0 until the
+    // next reading.
+    if (typeof j.five === 'number') {
+      const resetAt = j.fiveReset ? Date.parse(j.fiveReset) : NaN;
+      const passed = resetAt <= now;
+      const fullAt = j.fiveFull ? Date.parse(j.fiveFull) : NaN;
+      const note = passed ? 'started over; the figure comes with the next reading'
+        : [resetAt > now ? 'resets in ' + timeText((resetAt - now) / 3600000) : '',
+          fullAt > now && !(fullAt >= resetAt) ? 'full in ' + timeText((fullAt - now) / 3600000) + ' at this pace' : '',
+          j.five >= FIVE_HOLD ? 'heavy work waits for the reset' : ''].filter(Boolean).join(' · ');
+      m.meters.push({ label: '5-hour', pct: passed ? 0 : j.five, line: null, five: true, note });
+    }
     if (typeof j.unused === 'number') m.notes.push('At this pace about ' + j.unused + '% of the week goes unused at the reset; it does not carry over.');
   // a reading on its way (at load, or Refresh): said so, not "none"
   } else m.empty = busy ? 'Reading the meters…' : 'No reading yet in this session: /pacing usage takes one.';
@@ -551,13 +713,39 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, bulky =
 // A change of level is one toast, and so is the session moved off the
 // per-model meter's model, or let back. A reading the module took at load is
 // no level the user was told of.
-function sayLevel($, was, j) {
-  if (!was || was.fromLoad) return;
-  if (j.level !== was.level) {
-    $.ui.toast(levelIcon(j) + ' ' + levelPhrase(was.level) + ' -> ' + levelPhrase(j.level) + (j.levelBy === 'premium' && j.premiumLabel ? ' (' + j.premiumLabel.split(' ')[0] + '\'s meter)' : '') + '. ' + (j.do || ''), { timeoutMs: TOAST_LONG });
-  } else if (!!j.premiumHeld !== !!was.premiumHeld) {
-    $.ui.toast(levelIcon(j) + ' ' + (j.do || ''), { timeoutMs: TOAST_LONG });
-  }
+// The toast says the change and one short step; the whole advice (budget.mjs's
+// do: line, 250 characters and more) was cut off in the desktop app's toast
+// (the user's word: can't see the full text). The pane and /pacing-status
+// have the rest.
+const LEVEL_STEP = {
+  'ahead': 'Nearly all work stays on the top model.',
+  'on pace': 'Work splits over the tiers as usual.',
+  'over': 'Medium tasks go to subagents too.',
+};
+export const levelStepText = j => {
+  const rec = j.recommend ? j.recommend.label + ' ' + j.recommend.effort : null;
+  const prem = j.premiumLabel || 'The per-model meter\'s model';
+  if (j.premiumOut) return prem + ' is out until the reset' + (rec ? '; the Switch row offers ' + rec : '') + '.';
+  if (j.premiumHeld) return prem + ' is kept for hard tasks' + (rec ? '; the Switch row offers ' + rec : '') + '.';
+  if (j.level === 'throttle') { const t2 = j.tierNames && j.tierNames[2]; return 'Most work goes to ' + (t2 ? t2 + ' ' : '') + 'subagents.'; }
+  if (j.level === 'stop') return /extra usage/.test(j.do || '') ? 'The week is nearly used; past 100% it is charged to extra usage.' : 'Wrap up: the week is nearly used.';
+  return LEVEL_STEP[j.level] || '';
+};
+export const levelToastText = (was, j) => levelIcon(j) + ' ' + levelPhrase(was.level) + ' -> ' + levelPhrase(j.level)
+  + (j.levelBy === 'premium' && j.premiumLabel ? ' (' + j.premiumLabel.split(' ')[0] + '\'s meter)' : '') + '. ' + levelStepText(j);
+// Only a level that got worse and calls for something is a toast (the user's
+// word: fewer messages): far over the line, or the week nearly used. A little
+// over, a level that got better, and Fable held or let back show in the pane
+// alone; where the session runs on the held model, the Switch row says it.
+export const LEVEL_RANK = { 'ahead': 0, 'on pace': 1, 'over': 2, 'throttle': 3, 'stop': 4 };
+export const levelToastDue = (was, j, session = null) => {
+  if (!was || was.fromLoad || !j) return false;
+  if (!(LEVEL_RANK[j.level] >= LEVEL_RANK.throttle) || !(LEVEL_RANK[j.level] > (LEVEL_RANK[was.level] ?? -1))) return false;
+  // the Switch row is there for it
+  return !((j.premiumOut || (j.premiumHeld && heldFar(j))) && j.premiumModelId && typeof session === 'string' && session.startsWith(j.premiumModelId));
+};
+function sayLevel($, was, j, session = null) {
+  if (levelToastDue(was, j, session)) $.ui.toast(levelToastText(was, j), { timeoutMs: TOAST_LONG });
 }
 
 // a redraw of the band; an engine without it has nothing to redraw
@@ -984,7 +1172,8 @@ async function liveAgents($) {
 // background that have run implausibly long. Of those that run, what the
 // list says of them where it does: the tokens used so far (for the record
 // at its end, should the list have let it go by then) and its effort.
-async function settleAgents($, agents, now) {
+async function settleAgents($, st, now) {
+  const agents = st.agents;
   const live = await liveAgents($);
   let dropped = false;
   for (const [id, a] of agents) {
@@ -994,7 +1183,7 @@ async function settleAgents($, agents, now) {
     if (row && row.tokenCount > 0) a.tokens = row.tokenCount;
     if (row && !a.effort && EFFORT_ORDER.includes(row.effort)) a.effort = row.effort;
   }
-  if (dropped) await keepAgents($, agents);
+  if (dropped) await keepAgents($, st);
 }
 
 // ---- running agents across a reload ----
@@ -1002,22 +1191,50 @@ async function settleAgents($, agents, now) {
 // was then known by nothing: the line and the toasts lost its role, its
 // assignment, its time and its step. So what they need of each running
 // subagent is kept in $.store under the session's id ('agents:<id>'):
-// written when one starts, takes a new step or part, or ends (never on the
-// refresh), the key deleted when none runs. At the load it is read back,
+// written when one starts, says a new part, or ends, the key deleted when
+// none runs. A new step alone is not written at once: Read, Grep and Bash
+// take turns with every tool call of an agent, and each was a $.session.id()
+// and a $.store.set of every agent. It is noted (`st.stepMoved`) and the
+// next refresh writes it, once per REFRESH_EVERY at most, and only where a
+// step moved. At the load it is read back,
 // only the agents $.agent.list() still runs; without the list, none. The
 // time it started is the first one, so the time and the estimate go on.
 // Side sessions are not kept: the poll at load finds them again.
+// One write at a time: the writes were started and not waited for, so two
+// could be under way at once and the older list land last. `kp` is one
+// kept list ({ prefix, list(), busy, due }; the agents' is st.kept): a call
+// while a write is under way (`busy`) asks for one more after it (`due`),
+// which takes the list as it stands then, so the last write always holds
+// the latest list. Every caller gets the promise of the whole run, and it
+// never rejects. The session's id is asked at each write: a /clear changes it.
 const KEPT = ['id', 'type', 'description', 'model', 'effort', 'background', 'startedAt', 'step', 'part', 'tokens'];
 async function agentsKey($) { try { const id = await $.session.id(); return id ? 'agents:' + id : null; } catch { return null; } }
-async function keepAgents($, agents) {
-  try {
-    const key = await agentsKey($);
-    if (!key) return;
-    const list = [...agents.values()].filter(a => !a.provisional && a.kind !== 'session')
-      .map(a => Object.fromEntries(KEPT.filter(k => a[k] !== undefined && a[k] !== null).map(k => [k, a[k]])));
-    if (list.length) await $.store.set(key, list); else await $.store.delete(key);
-  } catch { /* no store or no id: this copy's own memory */ }
+function keepUnder($, kp) {
+  kp.due = true;
+  if (!kp.busy) kp.busy = writeKept($, kp);
+  return kp.busy;
 }
+async function writeKept($, kp) {
+  try {
+    while (kp.due) {
+      kp.due = false;
+      try {
+        const id = await $.session.id();
+        if (!id) continue;
+        const list = kp.list();
+        if (list.length) await $.store.set(kp.prefix + id, list); else await $.store.delete(kp.prefix + id);
+      } catch { /* no store or no id: this copy's own memory */ }
+    }
+  } finally { kp.busy = null; }
+}
+// the agents as they are kept (the list as it stands, steps and all: no
+// step waits for the refresh after it)
+function keptAgents(st) {
+  st.stepMoved = false;
+  return [...st.agents.values()].filter(a => !a.provisional && a.kind !== 'session')
+    .map(a => Object.fromEntries(KEPT.filter(k => a[k] !== undefined && a[k] !== null).map(k => [k, a[k]])));
+}
+function keepAgents($, st) { return keepUnder($, st.kept); }
 // the kept agents the engine still runs, into `agents`; how many came back
 async function restoreAgents($, agents) {
   try {
@@ -1051,12 +1268,7 @@ export const SESSIONS_TOOL = 'mcp__ccd_session_mgmt__list_sessions';
 // (a live answer: `text`, the rows as JSON, and `result`, the tool's content
 // as an array of { type, text })
 export const sessionRows = res => {
-  const texts = [];
-  if (res && typeof res.text === 'string') texts.push(res.text);
-  const r = res && res.result;
-  const content = Array.isArray(r) ? r : r && Array.isArray(r.content) ? r.content : [];
-  for (const c of content) if (c && typeof c.text === 'string') texts.push(c.text);
-  for (const t of texts) { try { const v = JSON.parse(t); if (Array.isArray(v)) return v; } catch { /* not this one */ } }
+  for (const t of textsOf(res)) { try { const v = JSON.parse(t); if (Array.isArray(v)) return v; } catch { /* not this one */ } }
   return [];
 };
 // the side sessions of `host` that are working now, as running entries
@@ -1088,7 +1300,9 @@ function startTick($, st) {
 function stopTickOf(st) { if (st.timer) { try { st.timer.cancel(); } catch { /* gone */ } st.timer = null; } }
 async function tick($, st) {
   const t = await $.clock.now();
-  if (t - st.settledAt >= SETTLE_EVERY) { st.settledAt = t; await settleAgents($, st.agents, t); }
+  if (t - st.settledAt >= SETTLE_EVERY) { st.settledAt = t; await settleAgents($, st, t); }
+  // a step that moved since the last write: kept now, once per refresh
+  if (st.stepMoved) await keepAgents($, st);
   const watching = t < st.watchUntil || [...st.agents.values()].some(a => a.kind === 'session');
   if (watching && t - st.polledAt >= POLL_EVERY) await pollSessions($, st, t);
   if (!st.agents.size && t >= st.watchUntil) stopTickOf(st);
@@ -1173,21 +1387,9 @@ async function paneShown($, st) {
   } catch { return false; }
 }
 // whether the toasts about agents are on (config.json's agentNotices; on unless false)
-async function noticesOn($) {
-  try {
-    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
-    if (!home) return true;
-    return JSON.parse(await $.fs.read(home + '/.claude/pacing/config.json')).agentNotices !== false;
-  } catch { return true; }
-}
+async function noticesOn($) { return settingOn($, 'agentNotices'); }
 // whether the offer to switch the session's model or effort is on (switchAsk)
-async function switchOn($) {
-  try {
-    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
-    if (!home) return true;
-    return JSON.parse(await $.fs.read(home + '/.claude/pacing/config.json')).switchAsk !== false;
-  } catch { return true; }
-}
+async function switchOn($) { return settingOn($, 'switchAsk'); }
 // the effort the session runs at: as last set in it (`ss`, see "the
 // session's model and effort as last set"), else where the engine says
 // (CLAUDE_EFFORT, fixed at the session's start)
@@ -1339,8 +1541,10 @@ export const usageText = out => {
 // Not now, by urgency:
 //   out     the per-model meter's model is out until the reset: warning colour
 //   held    that meter is over its line: warning colour
-//   model   another model or effort than the reading recommends: calm
-//   effort  at "over", one step less effort on tier 1: calm
+// Nothing else: a session on another model or effort than recommended gets
+// no row, since the plugin moves the work to subagents on the right models
+// by itself (the user's word: switch only sometimes, never less effort for
+// being over).
 // Switch runs /model and /effort as if typed (a live test: $.command.run
 // with /model answered "Set model to ... for this session only", and
 // $.session.model() agreed); where a run fails, the box is filled with the
@@ -1357,6 +1561,11 @@ const sameModel = (cur, id) => typeof cur === 'string' && typeof id === 'string'
 // gains "Compact, then switch": the compaction first, so the switch stores
 // the summary. Not where the model is out (compacting runs on it).
 export const SWITCH_LARGE = 200000;
+// A held per-model meter is a row only when it is far over its line, by
+// HELD_SWITCH_AT points or more (the user's word: a button to switch from
+// Fable when much over, 20+); short of that the subagents take the work.
+export const HELD_SWITCH_AT = 20;
+export const heldFar = j => typeof j.premium === 'number' && typeof j.line === 'number' && j.premium - j.line >= HELD_SWITCH_AT;
 export const switchOffer = (j, curModel, curEffort, ctx = null) => {
   if (!j || typeof curModel !== 'string' || !curModel) return null;
   const rec = j.recommend, prem = j.premiumModelId, name = j.premiumLabel || 'The per-model model';
@@ -1372,17 +1581,12 @@ export const switchOffer = (j, curModel, curEffort, ctx = null) => {
   };
   if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumOut)
     return make('out', rec, name + ' is out until the reset. Switch this session to ' + rec.label + ' ' + rec.effort + '.');
-  if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumHeld)
+  if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumHeld && heldFar(j))
     return make('held', rec, name + '\'s meter is over its budget line. Switch to ' + rec.label + ' ' + rec.effort + '; ' + name.split(' ')[0] + ' stays for hard tasks.');
-  if (rec && (!sameModel(curModel, rec.model) || (curEffort && curEffort !== rec.effort && !j.effortStep)))
-    // what the session runs on, from its requests: the app's model menu can
-    // go on naming the model it had before a /model (live: the menu said
-    // Fable 5.2 High on a session that ran on Opus 5.5, and the row read as
-    // an offer of what was already set)
-    return make('model', rec, 'This session runs on ' + modelLabel(curModel) + (curEffort ? ' ' + curEffort : '') + '; this week\'s budget suggests ' + rec.label + ' ' + rec.effort + '.');
-  const step = j.effortStep;
-  if (step && sameModel(curModel, step.model) && (!curEffort || EFFORT_ORDER.indexOf(curEffort) > EFFORT_ORDER.indexOf(step.effort)))
-    return make('effort', step, 'Over budget: one step less effort saves the most. Switch to ' + step.label + ' ' + step.effort + '.');
+  // Nothing else: the plugin changes models and effort by itself, through
+  // the subagents it starts (the user's word: the user switches only
+  // sometimes). A session on another model or effort than recommended is
+  // left alone; only a model it cannot go on with is a row.
   return null;
 };
 // After a press. `was`: the model before it; where the model changed, the
@@ -1535,13 +1739,7 @@ export const RELOAD_AFTER_TURN = 2 * 1000;
 export const versionOf = text => { try { const v = JSON.parse(text).version; return typeof v === 'string' && v ? v : null; } catch { return null; } };
 export const reloadText = version => ICON.waiting + ' Pacing ' + version + ' is installed: type /reload-plugins to load it, or open a new session.';
 // whether the new-version row is on (config.json's autoReload; on unless false)
-async function reloadOn($) {
-  try {
-    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
-    if (!home) return true;
-    return JSON.parse(await $.fs.read(home + '/.claude/pacing/config.json')).autoReload !== false;
-  } catch { return true; }
-}
+async function reloadOn($) { return settingOn($, 'autoReload'); }
 // ---- the newest shared reading ----
 // Each session took its own readings and kept its own figure, so two
 // sessions side by side showed different budgets (live: 28.9M and 10.4M). A
@@ -1571,10 +1769,7 @@ export const sharedOf = text => {
   return out;
 };
 async function readShared($) {
-  try {
-    const home = (await $.env.get('USERPROFILE')) || (await $.env.get('HOME'));
-    return home ? await $.fs.read(home + '/.claude/pacing/line.json') : null;
-  } catch { return null; }
+  try { return await pacingFile($, 'line.json'); } catch { return null; }
 }
 // `sh`: the reading held (held), taking the shared part in (take), the line
 async function takeShared($, sh) {
@@ -1612,7 +1807,7 @@ async function noteLoaded($, version) {
   } catch { /* the row stays in the others, as before */ }
 }
 // The store's keys under a session's id (the version it loaded as, the model
-// and effort last set, its running agents): nothing deleted them, so the
+// and effort last set, its running agents, its background tasks): nothing deleted them, so the
 // store gained one or more per session for good. An ending session's go
 // (session.end). Those left by sessions before that, once a day at a load:
 // a `version:` key naming another version than this copy's is a session
@@ -1620,7 +1815,7 @@ async function noteLoaded($, version) {
 // sessions keep their row for that one time).
 export const PRUNED = 'prunedAt';
 export const PRUNE_EVERY = 24 * 3600000;
-const SESSION_KEYS = ['version:', 'switch:', 'agents:'];
+const SESSION_KEYS = ['version:', 'switch:', 'agents:', 'tasks:'];
 async function dropKeys($, id) {
   if (!id) return;
   for (const k of SESSION_KEYS) { try { await $.store.delete(k + id); } catch { /* no store */ } }
@@ -1664,6 +1859,262 @@ async function look($, rl) {
     rl.row = disk;
     redraw($);
   } catch { /* the next look */ } finally { rl.looking = false; }
+}
+
+// ---- background tasks ----
+// A shell the session runs in the background (Bash or PowerShell with
+// run_in_background, or one the person moved there with Ctrl+B), a monitor
+// and a workflow each answer their call with a task id and go on after it.
+// The pane lists them at its foot, as the app's own tasks list does: the
+// kind, the description (else the command, shortened), how long it has run.
+// Subagents are not among them: they are the pane's "Agents at work".
+// The engine hands a plugin no list of such tasks, so the module keeps one:
+//   a start is the call's own result in the main thread (taskStarted): Bash's and
+//   PowerShell's `backgroundTaskId`, Monitor's and Workflow's `taskId`;
+//   an end is the task's notification, a prompt of origin
+//   `task-notification` whose text names the task and how it ended (taskEnded:
+//   <task-id> and <status>), or a TaskStop call that names it.
+// A finished one stays TASK_DONE_FOR with its status (✓ done, ✗ failed,
+// ■ stopped), then goes; a monitor whose own deadline passed that long ago
+// with no word goes too. A subagent's background tasks are left out: their
+// notifications go to the subagent, and nothing here would end the row. No
+// toasts. Kept in $.store under the session's id ('tasks:<id>') as the
+// agents are, so a reload keeps the list; a /clear keeps it too (the tasks
+// are the process's, not the conversation's); the session's end deletes it.
+// `tk` is the copy's memory of them ({ tasks, kept, timer }).
+export const TASK_DONE_FOR = 60 * 1000;
+// while any is listed the pane is drawn again this often, for the times
+export const TASK_EVERY = 60 * 1000;
+const TASK_TOOLS = { Bash: 'shell', PowerShell: 'shell', Monitor: 'monitor', Workflow: 'workflow' };
+// the background task a tool call started, { id, kind, what, lasts } (lasts:
+// a monitor's own time limit in ms, else null), or null: no such tool, a
+// call refused, or one that ran in the foreground
+export const taskStarted = (e, r) => {
+  const kind = e ? TASK_TOOLS[e.tool] : null;
+  const res = r && !r.deny && r.result && typeof r.result === 'object' ? r.result : null;
+  if (!kind || !res) return null;
+  const id = kind === 'shell' ? res.backgroundTaskId : res.taskId;
+  if (typeof id !== 'string' || !id) return null;
+  const what = kind === 'workflow' ? res.workflowName || e.name || '' : e.description || e.command || '';
+  return { id, kind, what: cut(String(what).replace(/\s+/g, ' ').trim(), TASK_MAX),
+    lasts: kind === 'monitor' && res.timeoutMs > 0 && !res.persistent ? res.timeoutMs : null };
+};
+// how a task ended, by the word its notification gives; a word not known
+// here (a monitor's event in passing) is no end
+const TASK_STATES = { completed: 'done', done: 'done', success: 'done', failed: 'failed', error: 'failed',
+  killed: 'stopped', stopped: 'stopped', cancelled: 'stopped', canceled: 'stopped', timeout: 'stopped', expired: 'stopped' };
+// the task a notification's text says has ended, { id, state }, or null
+export const taskEnded = text => {
+  const s = typeof text === 'string' ? text : '';
+  const id = /<task[-_]id>\s*([^<\s][^<]*?)\s*<\/task[-_]id>/i.exec(s), status = /<status>\s*([^<]*?)\s*<\/status>/i.exec(s);
+  const state = status ? TASK_STATES[status[1].toLowerCase()] : null;
+  return id && state ? { id: id[1], state } : null;
+};
+// the pane's rows, oldest first: { kind, what, state, time }; `state` is
+// 'running' or how it ended, `time` how long it has run or ran
+export const taskRows = (tasks, now) => [...tasks].filter(t => !t.endedAt || now - t.endedAt < TASK_DONE_FOR).sort((a, b) => a.startedAt - b.startedAt)
+  .map(t => ({ kind: t.kind, what: t.what, state: t.endedAt ? t.state : 'running', time: dur((t.endedAt || now) - t.startedAt) }));
+function watchTasks($, tk) {
+  if (tk.timer || !tk.tasks.size) return;
+  try { tk.timer = $.clock.every(TASK_EVERY, () => { tasksTick($, tk).catch(() => { /* the next one */ }); }); } catch { /* no timers: drawn with the pane's other draws */ }
+}
+// what has stayed its minute goes, and the pane is drawn again; the timer
+// stops with the last task
+async function tasksTick($, tk) {
+  let now;
+  try { now = await $.clock.now(); } catch { now = Date.now(); }
+  let gone = false;
+  for (const [id, t] of tk.tasks) {
+    if (t.endedAt ? now - t.endedAt >= TASK_DONE_FOR : t.until && now - t.until >= TASK_DONE_FOR) { tk.tasks.delete(id); gone = true; }
+  }
+  if (gone) keepUnder($, tk.kept);
+  if (!tk.tasks.size && tk.timer) { try { tk.timer.cancel(); } catch { /* gone */ } tk.timer = null; }
+  redraw($);
+}
+function noteTask($, tk, task, now) {
+  tk.tasks.set(task.id, { id: task.id, kind: task.kind, what: task.what, startedAt: now, ...(task.lasts ? { until: now + task.lasts } : {}) });
+  keepUnder($, tk.kept);
+  watchTasks($, tk);
+  redraw($);
+}
+function endTask($, tk, id, state, now) {
+  const t = tk.tasks.get(id);
+  if (!t || t.endedAt) return;
+  t.state = state;
+  t.endedAt = now;
+  keepUnder($, tk.kept);
+  redraw($);
+  // its minute, then gone (the slow timer alone could leave it up to two)
+  try { $.clock.after(TASK_DONE_FOR, () => { tasksTick($, tk).catch(() => { /* the next draw leaves it out */ }); }); } catch { /* no timers */ }
+}
+// the tasks kept under this session, into tk.tasks, after a reload
+async function restoreTasks($, tk) {
+  try {
+    const id = await $.session.id();
+    const got = id ? await $.store.get('tasks:' + id) : null;
+    if (!Array.isArray(got)) return;
+    for (const t of got) {
+      if (!t || typeof t !== 'object' || typeof t.id !== 'string' || typeof t.startedAt !== 'number' || !Object.values(TASK_TOOLS).includes(t.kind) || tk.tasks.has(t.id)) continue;
+      tk.tasks.set(t.id, { id: t.id, kind: t.kind, what: typeof t.what === 'string' ? t.what : '', startedAt: t.startedAt,
+        ...(typeof t.until === 'number' ? { until: t.until } : {}),
+        ...(typeof t.endedAt === 'number' && TASK_MARKS[t.state] ? { state: t.state, endedAt: t.endedAt } : {}) });
+    }
+    watchTasks($, tk);
+    await tasksTick($, tk);
+    // a finished one's minute goes on from its end: gone when it is over
+    const now = await $.clock.now();
+    for (const t of tk.tasks.values()) {
+      if (t.endedAt) $.clock.after(Math.max(0, TASK_DONE_FOR - (now - t.endedAt)), () => { tasksTick($, tk).catch(() => { /* the next draw leaves it out */ }); });
+    }
+  } catch { /* none kept */ }
+}
+
+// ---- an agent's transcript, from its row in the pane ----
+// A press on an agent's row in "Agents at work" puts that agent's transcript
+// in the main view, as the app's own tasks list does ($.ui.view, which the
+// engine allows only while a press, a pick or a prompt of the person's is
+// being answered: so it runs within the press, not after it). Where the
+// view does not move, a toast gives the engine's reason. A side session has
+// no transcript the engine can show here, and an agent not yet spawned no
+// id: their rows are text.
+export const viewDeniedText = why => {
+  const w = typeof why === 'string' ? why.replace(/\s+/g, ' ').trim().replace(/[.\s]+$/, '') : '';
+  return ICON.failed + ' the agent\'s transcript did not open' + (w ? ': ' + (w.length > 80 ? w.slice(0, 79) + '…' : w) : '') + '.';
+};
+async function openAgent($, id) {
+  let why = null;
+  try { const r = await $.ui.view({ agentId: id }); if (r && r.deny) why = r.deny; else return; } catch (err) { why = (err && err.message) || ''; }
+  try { $.ui.toast(viewDeniedText(why)); } catch { /* no toast */ }
+}
+
+// ---- what the band's buttons do ----
+// The band's drawing (ui.render, AbovePrompt) only draws. What a press does
+// stood inside it, written anew at every draw; it stands here, once. A
+// Button's onPress is handed the press and no `$`, so the drawing gives
+// each button a one-line closure over its own `$` that calls one of these.
+// `pr` is what a press reads and writes of the copy's memory (see
+// register): the model and effort last set and run on (ss, here), what
+// calls off the toast of a queued /compact (waited), forget() and
+// setContext(tokens) after a compaction.
+
+// A toast when a queued command has not run after `wait`: the session is
+// busy, and the command runs when it is free. Answers what calls it off.
+function whileWaiting($, text, wait = RUN_WAIT) {
+  let timer = null;
+  try { timer = $.clock.after(wait, () => { try { $.ui.toast(text); } catch { /* no toast */ } }); } catch { /* no timers: no toast */ }
+  return () => { try { if (timer) timer.cancel(); } catch { /* fired already */ } };
+}
+// /compact as if typed (command.run, queued until the session is free); it
+// resolves once the compaction has run, and throws where none started. The
+// toast that it waits is called off as the compaction starts (the
+// session.compact hook, through pr.waited), so it shows only while the
+// session is busy.
+async function typedCompact($, pr) {
+  const waited = whileWaiting($, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT);
+  pr.waited = waited;
+  try {
+    const ran = await $.command.run({ command: 'compact', args: COMPACT_INSTRUCTIONS });
+    if (commandFailed(ran)) throw new Error((ran && ran.text) || 'the /compact command failed');
+  } finally { waited(); if (pr.waited === waited) pr.waited = null; }
+}
+// The direct call did not compact (`err`). The engine rejects it while a
+// turn runs, and in the desktop app always: "$.session.compact: not
+// available in a headless (-p / SDK) session yet: compaction here runs
+// inside a turn" (seen live), while a typed /compact works there. So
+// /compact runs as if typed; only where that fails too does a toast give the
+// engine's reason and /compact go in the box. Whether a compaction ran. The
+// one place for it: Compact now and Compact, then switch both come here.
+async function compactTyped($, pr, err) {
+  try { await typedCompact($, pr); return true; } catch (err2) {
+    let filled = false;
+    try { const f = await $.prompt.fill({ text: '/compact', mode: 'replace' }); filled = !f || f.isFilled !== false; } catch { /* the toast alone */ }
+    $.ui.toast(compactFailedText((err2 && err2.message) || (err && err.message), filled), { timeoutMs: TOAST_LONG });
+    return false;
+  }
+}
+// Compact now, for the offer `shown` ({ tokens }: the band's row, or the
+// pane's Compact button): the compaction, and a toast with the sizes.
+// `pr.compacting` is set by the press that asked (see register: one at a
+// time) and cleared here, however it ends; the pane's button reads it.
+async function compactNow($, pr, shown) {
+  try {
+    let r;
+    try { r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS }); } catch (err) {
+      if (await compactTyped($, pr, err)) { $.ui.toast(ICON.compacted + ' compacted.'); pr.forget(); }
+      return;
+    }
+    if (r && r.skip) { $.ui.toast(ICON.failed + ' the compaction did not run: ' + r.skip, { timeoutMs: TOAST_LONG }); return; }
+    $.ui.toast(compactedText((r && r.tokensBefore) || shown.tokens, r && r.tokensAfter));
+    pr.forget();
+    pr.setContext((r && r.tokensAfter) || null);
+  } finally { pr.compacting = false; redraw($); }
+}
+// Switch, to the offer `target`: /model, then /effort, and the toast
+async function runSwitch($, pr, target) {
+  const { ss, here } = pr;
+  let ran = true, was = null, modelRan = null;
+  const waited = whileWaiting($, switchWaitText(target));
+  try {
+    // /model runs on every press, then /effort. What the module takes
+    // for the session's model can be wrong: live, a read named the
+    // target while the turns ran on another, and later the offer's own
+    // model did, and each time a press ran /effort alone. /model to
+    // the model the session runs on already does no harm.
+    was = target.from || ss.model || (await $.session.model());
+    // only the part that differs from what the session runs on (here);
+    // with neither known to differ, /model all the same
+    const modelSame = sameModel(here.model, target.model);
+    const effortSame = !target.effort || here.effort === target.effort;
+    if (!modelSame || effortSame) {
+      modelRan = await $.command.run({ command: 'model', args: target.model });
+      if (commandFailed(modelRan)) throw new Error('refused');
+    }
+    ss.model = target.model;
+    here.model = target.model;
+    if (target.effort && !effortSame) {
+      if (commandFailed(await $.command.run({ command: 'effort', args: target.effort }))) throw new Error('refused');
+    }
+    if (target.effort) { ss.effort = target.effort; here.effort = target.effort; }
+    await keepSwitch($, ss);
+  } catch { ran = false; }
+  waited();
+  if (!ran) {
+    // the command as text in the box, for the user to send
+    try { await $.prompt.fill({ text: '/model ' + target.model, mode: 'replace' }); } catch { /* the menu alone */ }
+    $.ui.toast(ICON.switched + ' press Enter to switch to ' + target.label + (target.effort ? '; then set effort ' + target.effort + ' in the model menu' : '') + '.', { timeoutMs: TOAST_LONG });
+    return;
+  }
+  // the read-back: one that disagrees is read again after a moment;
+  // a /model that answered without an error is trusted over it
+  const effort = await effortNow($, ss);
+  const tell = nowModel => {
+    const model = sameModel(nowModel, target.model) || !modelRan || !commandFailed(modelRan) ? target.model : nowModel;
+    $.ui.toast(switchedText(target, model, effort, was), sameModel(model, target.model) ? undefined : { timeoutMs: TOAST_LONG });
+  };
+  let nowModel = null;
+  try { nowModel = await $.session.model(); } catch { /* no read-back */ }
+  if (sameModel(nowModel, target.model)) { tell(target.model); return; }
+  try {
+    $.clock.after(READ_BACK_LAG, async () => {
+      let again = nowModel;
+      try { again = await $.session.model(); } catch { /* the first read stands */ }
+      try { tell(again); } catch { /* no toast */ }
+    });
+  } catch { tell(nowModel); }
+}
+// "Compact, then switch", in a large session (switchOffer): the compaction
+// as the Compact now button runs it, then the switch; a compaction that did
+// not start leaves the session as it is
+async function compactThenSwitch($, pr, target) {
+  try {
+    const r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS });
+    if (r && r.skip) throw new Error(r.skip);
+    pr.setContext((r && r.tokensAfter) || null);
+  } catch (err) {
+    if (!(await compactTyped($, pr, err))) return;
+  }
+  pr.forget();
+  await runSwitch($, pr, target);
 }
 
 /** @type {import('claude-code').Register} */
@@ -1740,8 +2191,6 @@ export const register = on => {
   // the offer to compact: the one in the band ({ level, tokens }) or null, the
   // size at each level's last offer, and whether a person has typed here
   let offer = null;
-  // calls off the toast that a queued /compact waits; set while one is queued
-  let compactWaited = null;
   // the pane drawn since it last opened: its first draw takes fresh figures
   let paneDrawn = false;
   let offered = {};
@@ -1758,6 +2207,20 @@ export const register = on => {
   let results = newResults();
   let ctxNow = null;
   const forget = () => { offer = null; offered = {}; results = newResults(); ctxNow = null; };
+  // what a press's work reads and writes (see "what the band's buttons do");
+  // `waited` calls off the toast that a queued /compact waits, set while one
+  // is queued; `compacting`: a compaction the band's or the pane's button
+  // asked for is under way (claimCompact; compactNow clears it)
+  const pr = { ss, here, waited: null, compacting: false, forget, setContext: v => { contextTokens = v; } };
+  // Claude Code's auto-compact window (see "Claude Code's auto-compact
+  // window"): what its check and the pane's presses read and write
+  const ac = { on: false, due: false, model: null, want: null, told: false, busy: false, pressing: false };
+  // one compaction at a time: whether this press may start one
+  const claimCompact = () => (pr.compacting ? false : (pr.compacting = true));
+  // the background tasks (see "background tasks"): by id, their write to the
+  // store, and the slow timer that draws their times again
+  const tasks = new Map();
+  const tk = { tasks, timer: null, kept: { prefix: 'tasks:', busy: null, due: false, list: () => [...tasks.values()] } };
   // the switch the band offers now, and every suggestion offered already
   let sw = null;
   const switchSeen = new Set();
@@ -1781,7 +2244,9 @@ export const register = on => {
     if (reading) return marked(lineOf(liveLeft(reading, spend.total - liveFrom), sessionModel, tokens, agentTokens, now, false, list, st.max));
     return list.length ? agentPart(list, now, st.max) : undefined;
   };
+  // (kept, stepMoved: the write of the agents to the store, see keepAgents)
   const st = { agents, timer: null, settledAt: 0, polledAt: 0, watchUntil: 0, progressAt: 0, host: null, children: 0, quiet: false, watchSince: 0, max: LINE_MAX, surfaces: null,
+    kept: { prefix: 'agents:', busy: null, due: false, list: () => keptAgents(st) }, stepMoved: false,
     list: runningAgents, lineNow, reading: () => reading };
   const stopTick = () => stopTickOf(st);
 
@@ -1827,10 +2292,12 @@ export const register = on => {
     try {
       if (e.agentId && agents.has(e.agentId)) {
         const a = agents.get(e.agentId), step = stepOf(e.tool), part = partOf(e, a.part || null);
-        const moved = step !== a.step || part !== (a.part || null);
+        const stepped = step !== a.step, parted = part !== (a.part || null);
         a.step = step;
         a.part = part;
-        if (moved) { redraw($); keepAgents($, agents); }
+        if (stepped || parted) redraw($);
+        // a part said is kept at once; a step alone at the next refresh (keepAgents)
+        if (parted) keepAgents($, st); else if (stepped) st.stepMoved = true;
       }
     } catch { /* no step known */ }
     if (e.agentId) return next(e);
@@ -1849,6 +2316,15 @@ export const register = on => {
         bulky.tokens += n;
       }
     } catch { /* not counted */ }
+    // a background task this call started, or one a TaskStop ended
+    try {
+      const task = taskStarted(e, r);
+      if (task) noteTask($, tk, task, await $.clock.now());
+      else if (e.tool === 'TaskStop' && r && !r.deny && !r.isError) {
+        const id = (r.result && r.result.task_id) || e.task_id || e.shell_id;
+        if (tasks.has(id)) endTask($, tk, id, 'stopped', await $.clock.now());
+      }
+    } catch { /* not listed */ }
     const toSession = e.tool === 'mcp__ccd_session__start_session' || e.tool === 'mcp__ccd_session_mgmt__send_message'
       || (e.tool === 'SendMessage' && /^local_/.test(String(e.to || '')));
     if (toSession) {
@@ -1880,7 +2356,7 @@ export const register = on => {
         if (!e.resume && roleFor(type)) fresh.delete(roleFor(type));
         if (!agents.size) st.progressAt = now;
         agents.set(a.id, a);
-        keepAgents($, agents);
+        keepAgents($, st);
         startTick($, st);
         // in the line at once; its history for the estimate after
         $.ui.status(lineNow(now));
@@ -1891,6 +2367,24 @@ export const register = on => {
     } catch { /* an engine without timers or toasts: the count alone */ }
     return r;
   });
+
+  // What a press changes in the band's own memory, at once; its work runs
+  // after the press (later; see "what the band's buttons do"). The switch
+  // row answered, by any of its buttons. An offer to compact answered, by
+  // Compact now or Not now: gone, and offered at its size; the pause's timers
+  // with it (`timersToo`: Compact now at any level, Not now on a now row).
+  // The new-version row put off for that version.
+  const switchAnswered = () => { sw = null; };
+  const offerAnswered = (shown, timersToo) => { if (timersToo) clearTimers(); offer = null; offered[shown.level] = shown.tokens; };
+  const reloadPutOff = version => { rl.dismissed.add(version); rl.row = null; };
+  // A now row drawn: the notice after this pause need not say it again, and
+  // the pause counts as told at this size (pauseDue). Noted as it is drawn,
+  // not as the timer raises it: a row raised is not a row shown (an engine
+  // without the band, a survey over it, a subagent's transcript in view, an
+  // urgent switch in its place), nothing but its drawing tells the module
+  // which, and a row never shown leaves the notice to say it at the next
+  // prompt. It sets the same three values at every draw of the same row.
+  const nowDrawn = shown => { nowFor = shown.pause; offered.now = shown.tokens; offered.nowPause = shown.pause; };
 
   // the band above the prompt: the suggest, urge and now offers, and under
   // them a row for background agents still at work. Hidden while a turn
@@ -1910,113 +2404,15 @@ export const register = on => {
       ? Text({ dimColor: true, children: backgroundText(background, now, typeof p.bodyColumns === 'number' ? p.bodyColumns : MSG_MAX) })
       : null;
     const stack = row => (agentRow ? Box({ flexDirection: 'column', children: [row, agentRow] }) : row);
-    // a toast when a queued command has not run after RUN_WAIT: the session
-    // is busy, and the command runs when it is free
-    const whileWaiting = (text, wait = RUN_WAIT) => {
-      let timer = null;
-      try { timer = $.clock.after(wait, () => { try { $.ui.toast(text); } catch { /* no toast */ } }); } catch { /* no timers: no toast */ }
-      return () => { try { if (timer) timer.cancel(); } catch { /* fired already */ } };
-    };
-    // /compact as if typed (command.run, queued until the session is free);
-    // it resolves once the compaction has run, and throws where none started.
-    // The toast that it waits is called off as the compaction starts (the
-    // session.compact hook), so it shows only while the session is busy.
-    const typedCompact = async () => {
-      const waited = whileWaiting(COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT);
-      compactWaited = waited;
-      try {
-        const ran = await $.command.run({ command: 'compact', args: COMPACT_INSTRUCTIONS });
-        if (commandFailed(ran)) throw new Error((ran && ran.text) || 'the /compact command failed');
-      } finally { waited(); if (compactWaited === waited) compactWaited = null; }
-    };
     if (sw && (sw.urgent || !offer)) {
       const target = sw;
-      // the switch itself: /model, then /effort, and the toast
-      const runSwitch = async () => {
-        let ran = true, was = null, modelRan = null;
-        const waited = whileWaiting(switchWaitText(target));
-        try {
-          // /model runs on every press, then /effort. What the module takes
-          // for the session's model can be wrong: live, a read named the
-          // target while the turns ran on another, and later the offer's own
-          // model did, and each time a press ran /effort alone. /model to
-          // the model the session runs on already does no harm.
-          was = target.from || ss.model || (await $.session.model());
-          // only the part that differs from what the session runs on (here);
-          // with neither known to differ, /model all the same
-          const modelSame = sameModel(here.model, target.model);
-          const effortSame = !target.effort || here.effort === target.effort;
-          if (!modelSame || effortSame) {
-            modelRan = await $.command.run({ command: 'model', args: target.model });
-            if (commandFailed(modelRan)) throw new Error('refused');
-          }
-          ss.model = target.model;
-          here.model = target.model;
-          if (target.effort && !effortSame) {
-            if (commandFailed(await $.command.run({ command: 'effort', args: target.effort }))) throw new Error('refused');
-          }
-          if (target.effort) { ss.effort = target.effort; here.effort = target.effort; }
-          await keepSwitch($, ss);
-        } catch { ran = false; }
-        waited();
-        if (!ran) {
-          // the command as text in the box, for the user to send
-          try { await $.prompt.fill({ text: '/model ' + target.model, mode: 'replace' }); } catch { /* the menu alone */ }
-          $.ui.toast(ICON.switched + ' press Enter to switch to ' + target.label + (target.effort ? '; then set effort ' + target.effort + ' in the model menu' : '') + '.', { timeoutMs: TOAST_LONG });
-          return;
-        }
-        // the read-back: one that disagrees is read again after a moment;
-        // a /model that answered without an error is trusted over it
-        const effort = await effortNow($, ss);
-        const tell = nowModel => {
-          const model = sameModel(nowModel, target.model) || !modelRan || !commandFailed(modelRan) ? target.model : nowModel;
-          $.ui.toast(switchedText(target, model, effort, was), sameModel(model, target.model) ? undefined : { timeoutMs: TOAST_LONG });
-        };
-        let nowModel = null;
-        try { nowModel = await $.session.model(); } catch { /* no read-back */ }
-        if (sameModel(nowModel, target.model)) { tell(target.model); return; }
-        try {
-          $.clock.after(READ_BACK_LAG, async () => {
-            let again = nowModel;
-            try { again = await $.session.model(); } catch { /* the first read stands */ }
-            try { tell(again); } catch { /* no toast */ }
-          });
-        } catch { tell(nowModel); }
-      };
-      // "Compact, then switch", in a large session (switchOffer): the
-      // compaction as the Compact now button runs it, then the switch; a
-      // compaction that did not start leaves the session as it is
-      const compactThenSwitch = async () => {
-        try {
-          const r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS });
-          if (r && r.skip) throw new Error(r.skip);
-          contextTokens = (r && r.tokensAfter) || null;
-        } catch (err) {
-          try {
-            await typedCompact();
-          } catch (err2) {
-            let filled = false;
-            try { const f = await $.prompt.fill({ text: '/compact', mode: 'replace' }); filled = !f || f.isFilled !== false; } catch { /* the toast alone */ }
-            $.ui.toast(compactFailedText((err2 && err2.message) || (err && err.message), filled), { timeoutMs: TOAST_LONG });
-            return;
-          }
-        }
-        forget();
-        await runSwitch();
-      };
       const switchRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
         Text(target.urgent ? { color: 'warning', children: target.icon + ' ' + target.text } : { dimColor: true, children: target.icon + ' ' + target.text }),
-        ...(target.compactFirst ? [Button({ key: 'pacing-compact-switch', label: 'Compact, then switch', variant: target.urgent ? 'primary' : 'secondary', onPress: () => {
-          sw = null;
-          redraw($);
-          later($, compactThenSwitch);
-        } })] : []),
-        Button({ key: 'pacing-switch', label: 'Switch', variant: target.urgent && !target.compactFirst ? 'primary' : 'secondary', onPress: () => {
-          sw = null;
-          redraw($);
-          later($, runSwitch);
-        } }),
-        Button({ key: 'pacing-switch-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { sw = null; redraw($); } }),
+        ...(target.compactFirst ? [Button({ key: 'pacing-compact-switch', label: 'Compact, then switch', variant: target.urgent ? 'primary' : 'secondary',
+          onPress: () => { switchAnswered(); redraw($); later($, () => compactThenSwitch($, pr, target)); } })] : []),
+        Button({ key: 'pacing-switch', label: 'Switch', variant: target.urgent && !target.compactFirst ? 'primary' : 'secondary',
+          onPress: () => { switchAnswered(); redraw($); later($, () => runSwitch($, pr, target)); } }),
+        Button({ key: 'pacing-switch-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { switchAnswered(); redraw($); } }),
       ] });
       return stack(switchRow);
     }
@@ -2024,7 +2420,7 @@ export const register = on => {
       const version = rl.row;
       const reloadRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
         Text({ dimColor: true, children: reloadText(version) }),
-        Button({ key: 'pacing-reload-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { rl.dismissed.add(version); rl.row = null; redraw($); } }),
+        Button({ key: 'pacing-reload-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { reloadPutOff(version); redraw($); } }),
       ] });
       return stack(reloadRow);
     }
@@ -2032,50 +2428,15 @@ export const register = on => {
     const shown = offer;
     const urge = shown.level !== 'suggest';
     const words = shown.level === 'now' ? ICON.pause + ' ' + nowText(shown.tokens, shown.lapsed) : ICON.compacted + ' ' + offerText(shown.level, shown.tokens);
-    // drawn: the notice after this pause need not say it again
-    if (shown.level === 'now') { nowFor = shown.pause; offered.now = shown.tokens; offered.nowPause = shown.pause; }
+    // the one thing a drawing notes (nowDrawn says why it cannot be noted sooner)
+    if (shown.level === 'now') nowDrawn(shown);
     const offerRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
       Text(urge ? { color: 'warning', children: words } : { dimColor: true, children: words }),
-      Button({ key: 'pacing-compact', label: 'Compact now', variant: urge ? 'primary' : 'secondary', onPress: () => {
-        offer = null;
-        offered[shown.level] = shown.tokens;
-        clearTimers();
-        redraw($);
-        // the compaction takes a minute: it runs after the press (later)
-        later($, async () => {
-        try {
-          const r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS });
-          if (r && r.skip) $.ui.toast(ICON.failed + ' the compaction did not run: ' + r.skip, { timeoutMs: TOAST_LONG });
-          else {
-            $.ui.toast(compactedText((r && r.tokensBefore) || shown.tokens, r && r.tokensAfter));
-            forget();
-            contextTokens = (r && r.tokensAfter) || null;
-          }
-        } catch (err) {
-          // The engine rejects while a turn runs, and in the desktop app always:
-          // "$.session.compact: not available in a headless (-p / SDK) session
-          // yet: compaction here runs inside a turn" (seen live), while a typed
-          // /compact works there. So /compact runs as if typed (typedCompact);
-          // only where that fails too does the toast give the engine's reason
-          // and /compact go in the box.
-          try {
-            await typedCompact();
-            $.ui.toast(ICON.compacted + ' compacted.');
-            forget();
-          } catch (err2) {
-            let filled = false;
-            try { const f = await $.prompt.fill({ text: '/compact', mode: 'replace' }); filled = !f || f.isFilled !== false; } catch { /* the toast alone */ }
-            $.ui.toast(compactFailedText((err2 && err2.message) || (err && err.message), filled), { timeoutMs: TOAST_LONG });
-          }
-        }
-        });
-      } }),
-      Button({ key: 'pacing-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => {
-        if (shown.level === 'now') clearTimers();
-        offer = null;
-        offered[shown.level] = shown.tokens;
-        redraw($);
-      } }),
+      // the compaction takes a minute: it runs after the press (later)
+      Button({ key: 'pacing-compact', label: 'Compact now', variant: urge ? 'primary' : 'secondary',
+        onPress: () => { offerAnswered(shown, true); redraw($); if (claimCompact()) later($, () => compactNow($, pr, shown)); } }),
+      Button({ key: 'pacing-not-now', label: 'Not now', role: 'dismiss', dimColor: true,
+        onPress: () => { offerAnswered(shown, shown.level === 'now'); redraw($); } }),
     ] });
     return agentRow ? Box({ flexDirection: 'column', children: [offerRow, agentRow] }) : offerRow;
   });
@@ -2084,7 +2445,7 @@ export const register = on => {
   // the agents are counted again from the engine's list (none without it)
   on('session.compact', async ($, e, next) => {
     // the session's compaction starts: a queued /compact waits no more
-    if (!e.agentId && compactWaited) { compactWaited(); compactWaited = null; }
+    if (!e.agentId && pr.waited) { pr.waited(); pr.waited = null; }
     const r = await next(e);
     if (!e.agentId && r && r.messages) {
       forget();
@@ -2094,7 +2455,7 @@ export const register = on => {
         // (side sessions are not in the engine's list: they stay, or the
         // next poll took each for a new one and said it started again)
         for (const [id, a] of [...agents]) if (a.kind !== 'session' && (!live || !live.has(id))) agents.delete(id);
-        keepAgents($, agents);
+        keepAgents($, st);
         if (!agents.size) stopTick();
         $.ui.status(lineNow(await $.clock.now()));
       } catch { /* the line is redrawn at the next measure */ }
@@ -2149,6 +2510,8 @@ export const register = on => {
   on('command.run', { command: 'model' }, async ($, e, next) => {
     const r = await next(e);
     try { if (!commandFailed(r) && (await noteSet($, ss, 'model', e.args))) here.model = ss.model; } catch { /* not noted */ }
+    // another model may have another auto-compact window
+    if (!commandFailed(r)) autoCompactCheck($, ac, ss.model).catch(() => { /* at the next turn's end */ });
     return r;
   });
   on('command.run', { command: 'effort' }, async ($, e, next) => {
@@ -2164,6 +2527,8 @@ export const register = on => {
     agents.clear();
     stopTick();
     fresh.clear();
+    tasks.clear();
+    if (tk.timer) { try { tk.timer.cancel(); } catch { /* gone */ } tk.timer = null; }
     st.surfaces = null;
     try {
       await $.command.register({ name: 'pacing-status', description: 'Pacing: the whole status line, and what to do now.', immediate: true });
@@ -2243,7 +2608,7 @@ export const register = on => {
     // "running agents across a reload"): in the line and the next toast as before
     (async () => {
       const n = await restoreAgents($, agents);
-      await keepAgents($, agents);
+      await keepAgents($, st);
       if (!n) return;
       const now = await $.clock.now();
       for (const a of agents.values()) if (a.effort) keptEffort.set(a.id, a.effort);
@@ -2264,6 +2629,16 @@ export const register = on => {
     // the model and effort last set in this session, should a reload have
     // started this memory over
     restoreSwitch($, ss).catch(() => { /* none kept */ });
+    // Claude Code's auto-compact window as the user set it, once for this start
+    ac.on = true;
+    ac.due = true;
+    (async () => {
+      let model = null;
+      try { model = await $.session.model(); } catch { /* the breakdown's */ }
+      await autoCompactCheck($, ac, typeof model === 'string' ? model : null);
+    })().catch(() => { /* at the next turn's end */ });
+    // the background tasks a reload found listed
+    restoreTasks($, tk).catch(() => { /* none kept */ });
     // the version this copy was loaded as, and from here a slow look at the
     // one on disk (see "a new version")
     look($, rl);
@@ -2290,14 +2665,17 @@ export const register = on => {
   // last reading is too old to show, the module takes one itself first, if
   // the app's usage tool answers; else it says why and where to measure.
   // the pane: what /pacing-status says, a row each, then the context
-  const paneNow = now => {
+  const paneNow = (now, autoCompact = null) => {
     const j = reading ? liveLeft(reading, spend.total - liveFrom) : null;
     return paneModel({
       j,
       mix: j ? tierMix(tokens, j.tierOf || {}, j.prices || {}, agentTokens, j.agentTierOf).map(x => ({ name: tierName(j, x.tier), share: x.share })) : [],
-      running: runningAgents().map(a => (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { task: TASK_MAX, time: 1, est: 1, step: 1 })
-        + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.kind === 'session' && a.description ? ', ' + a.description : '')),
+      // (an id only where the engine has a transcript to show: a subagent it spawned)
+      running: runningAgents().map(a => ({ id: a.kind === 'session' || a.provisional ? null : a.id,
+        text: (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { task: TASK_MAX, time: 1, est: 1, step: 1 })
+          + (runOn(a) ? ' (' + runOn(a) + ')' : '') + (a.kind === 'session' && a.description ? ', ' + a.description : '') })),
       bd: ctxNow, bulky, now, busy: rd.running || loading, failing: readingsFail(rd.health),
+      tasks: taskRows(tasks.values(), now), tokens: contextTokens, compacting: pr.compacting, autoCompact,
     });
   };
   // a person's close keeps it closed in later sessions; a plugin's own, or an
@@ -2340,7 +2718,16 @@ export const register = on => {
     });
     // the first draw since it opened: fresh figures, once
     if (!paneDrawn) { paneDrawn = true; refreshPane(true); }
-    return paneView($.ui.resolve(e), paneNow(now), { surface: e.surface, placement: e.props && e.props.placement, onRefresh: () => refreshPane(false) });
+    // Compact, in the Context section: the row's Compact now (compactNow),
+    // one at a time; the pause's timers end with it, as at the row's press
+    const size = typeof contextTokens === 'number' ? contextTokens : ctxNow && ctxNow.totalTokens;
+    // the auto-compact window, with its −, + and Auto (autoCompactPress)
+    let autoCompact = null;
+    try { autoCompact = autoCompactOf(await configOf($)); } catch { /* no row */ }
+    return paneView($.ui.resolve(e), paneNow(now, autoCompact), { surface: e.surface, placement: e.props && e.props.placement, now, onRefresh: () => refreshPane(false),
+      onAgent: id => openAgent($, id),
+      onCompact: () => { if (!claimCompact()) return; clearTimers(); redraw($); later($, () => compactNow($, pr, { tokens: size })); },
+      onAutoCompact: v => autoCompactPress($, ac, v) });
   });
   on('command.run', { command: 'pacing-usage' }, async ($) => {
     const show = text => ({ text, isTextDisplayOnly: true });
@@ -2400,6 +2787,11 @@ export const register = on => {
     return { text: line + (rest.length ? '\n\n```\n' + rest.join('\n\n') + '\n```' : ''), isTextDisplayOnly: true };
   });
   on('prompt.submit', async ($, e, next) => {
+    // a background task's notification: the task it names has ended
+    try {
+      const end = e.origin && e.origin.kind === 'task-notification' ? taskEnded(e.text) : null;
+      if (end && tasks.has(end.id)) endTask($, tk, end.id, end.state, await $.clock.now());
+    } catch { /* the row stays as it is */ }
     try {
       // only a prompt that starts a turn after a pause, typed by the user; a
       // slash command (/compact, a handover) is the user acting on it already
@@ -2414,7 +2806,8 @@ export const register = on => {
         rekey = false;
         if (rl.loaded) noteLoaded($, rl.loaded);
         keepSwitch($, ss);
-        keepAgents($, agents);
+        keepAgents($, st);
+        keepUnder($, tk.kept);
       }
       // the user compacting or handing over already: the band's offer is answered
       const cmd = e.command ? e.command.name + ' ' + (e.command.args || '') : String(e.text || '').trimStart();
@@ -2470,12 +2863,17 @@ export const register = on => {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e);
     if (!e.agentId) {
+      // the turn may have changed a setting: read again, once for this turn's end
+      configStale();
       try { lastTurnAt = await $.clock.now(); } catch { /* no clock: no warning */ }
       // the turn's own model: from here it, not the one last set, is the model
       if (e.usage && e.usage.model) {
         sessionModel = e.usage.model;
         if (ss.model) { ss.model = null; keepSwitch($, ss); }
       }
+      // a model changed in the menu, a setting changed in this turn, or the
+      // start's check still without a breakdown
+      autoCompactCheck($, ac, (e.usage && e.usage.model) || null).catch(() => { /* the next turn's end */ });
       // a natural break: one look at the version on disk, once the turn is over
       if (attended) {
         try {
@@ -2501,7 +2899,7 @@ export const register = on => {
       try {
         const a = agents.get(e.agentId);
         agents.delete(e.agentId);
-        keepAgents($, agents);
+        keepAgents($, st);
         const now = await $.clock.now();
         if (!agents.size) stopTick();
         $.ui.status(lineNow(now));
@@ -2546,8 +2944,8 @@ export const register = on => {
       try {
         const before = agents.size;
         for (const [id, a] of agents) if (!a.background) agents.delete(id);
-        if (agents.size !== before) keepAgents($, agents);
-        await settleAgents($, agents, await $.clock.now());
+        if (agents.size !== before) keepAgents($, st);
+        await settleAgents($, st, await $.clock.now());
         if (!agents.size) stopTick();
         redraw($);
       } catch { /* the count is settled at the next refresh */ }
@@ -2621,8 +3019,9 @@ export const register = on => {
     if (e.context && typeof e.context.tokens === 'number') {
       const before = contextTokens;
       contextTokens = e.context.tokens;
-      // the offers start over, as at a compaction pacing heard
-      if (!e.agentId && compactedBetween(before, contextTokens)) {
+      // the offers start over, as at a compaction pacing heard (a measure
+      // is the session's own: its input names no agent)
+      if (compactedBetween(before, contextTokens)) {
         forget();
         clearTimers();
         // a switch that said "compact first" is offered again at the turn's

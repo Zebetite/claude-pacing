@@ -1,6 +1,6 @@
 ---
 name: route
-description: "Rules for delegating work under pacing: which work this session keeps and which goes to the role agents (reader, verifier, implementer, researcher) at which model and effort; what to do at over, throttle, held or out, and with a long session's next task. Load once per session, before the first delegation; it stays loaded."
+description: "Rules for delegating work under pacing: what this session keeps, what goes to which role agent at which model and effort. Load once per session, before the first delegation."
 ---
 
 # Pacing: routing work
@@ -10,7 +10,7 @@ The `pacing` skill reports and holds the settings. `config.mjs` below is
 
 **The routing lines.** `node "${CLAUDE_SKILL_DIR}/../pacing/scripts/budget.mjs" last --brief`
 prints what the last reading decides: the level, `route:`, `do:`,
-`effort:`, `upward:`, `unused:` and the context line when it advises. On a
+`upward:`, `unused:` and the context line when it advises. On a
 `measure:` line the `pacing` skill takes a reading.
 
 ## Classes of work
@@ -48,12 +48,11 @@ This session's model is the user's to set; the lever is delegation.
   another tier (an agent keeps its model), when the task is unrelated to
   what it read, or when pacing says the role needs one (about five tasks
   or 150 000 tokens: its history is re-sent every task). Never start two
-  of one role over the same files. Several small tasks for one role go to the kept agent in
-  one message, never one start each (a start costs 11 000 to 15 000
-  tokens, a follow-up 800 to 2 300); a task too small for a start waits
-  for the next batch or stays in the session. `config.mjs agents` lists
-  the kept ones when a summary lost the ids. Without the hooks module (no
-  pacing status line), record each finished task: `config.mjs agent
+  of one role over the same files.
+  Several small tasks for one role go to the kept agent in one message, never one start each
+  (a start costs many times a follow-up); a task too small for a start waits for the next batch or stays in the session.
+  `config.mjs agents` lists the kept ones when a summary lost the ids.
+  Without the hooks module (no pacing status line), record each finished task: `config.mjs agent
   <role> <agent id> <model> <effort> <tokens>`, beside the next tool call, never alone.
 - **Results come back here**, and the plan and decisions stay here. Check
   each result against the task, then give the user the whole outcome here: what changed, what was verified and how, what is open, any decision needed,
@@ -69,25 +68,18 @@ This session's model is the user's to set; the lever is delegation.
   general-purpose agent (`Explore` to only read) with what
   `config.mjs start --project "<folder>"` prints atop its prompt; never a
   `fork`, which ignores the model.
-- Trivial work stays here until throttle (a start costs more than a
-  grep); bulky work goes to the lowest tier at every level.
-- **Context line**, in tokens. All work stays in this session. From
-  400 000: suggest `/compact` at the next natural break, then go on here,
-  whatever the next task is; an unrelated task is a reason to compact
-  first, not to leave. From 650 000: compact first if not yet done; a
-  next task with a clear outcome goes whole to one fresh agent, unasked,
-  at the model the line names (`pacing:implementer` for a specified
-  change, else general-purpose with the `start` brief), briefed with
-  HANDOVER.md's headings, what done looks like, report what was verified
-  and how, never commit, push or publish unasked. Never offer a new
-  session: name one only when the session cannot be compacted or the
-  user asks, with a handover.
+- **Context line**, in tokens: all work stays in this session. After a
+  `/compact`, go on here whatever the next task is; an unrelated task is
+  a reason to compact first, not to leave. The whole-task agent from
+  650 000 is `pacing:implementer` for a specified change, else
+  general-purpose with the `start` brief, briefed with HANDOVER.md's
+  headings, what done looks like, report what was verified and how,
+  never commit, push or publish unasked. Never offer a new session: name
+  one only when the session cannot be compacted or the user asks, with a
+  handover.
 - In doubt, take the higher tier: a wrong result costs more.
-- **Over** (`effort:` line): one step less effort here saves most. Where
-  the hooks module runs (a pacing status line shows), its Switch row
-  offers it: say nothing. Without it (as in a terminal), say it once, in
-  one line, before medium work leaves (`/effort <level>` or the model
-  menu). Never ask: this session cannot change its own model or effort.
+- **Over**: medium work goes to subagents too; say nothing about it.
+  Never suggest less effort for being over the line.
 - **Throttle**: no manual change now: dispatch to tier 2 subagents and
   check results.
 - **Other sessions**: at throttle, or with the per-model meter out or
@@ -95,11 +87,10 @@ This session's model is the user's to set; the lever is delegation.
   move those above the recommendation (`set_session_model` /
   `set_session_effort`; the app asks; other sessions only), never unasked.
 - **`upward:` line**: one contained hard task with a clear deliverable may
-  go to the subagent it names; an open debugging hunt may not.
+  go to the subagent it names; open-ended debugging may not.
 - **`unused:` line**: allowance is left over at the reset, and it does not
-  carry over: in doubt between two tiers take the higher, and keep medium
-  work here. Say it once if the user asks about models or effort; never
-  raise the session's effort unasked.
+  carry over: keep medium work here. Say it once if the user asks about
+  models or effort; never raise the session's effort unasked.
 - **5-hour window**: at 85 % or more, hold heavy work until the printed
   time; if its `5-hour window` line says it fills before the reset, delegate bulky
   work or pause heavy runs.

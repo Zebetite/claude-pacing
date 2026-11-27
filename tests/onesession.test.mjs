@@ -25,6 +25,7 @@ const sentencesNaming = text => text.replace(/\s*\n\s*/g, ' ').split(/(?<=[.!?:;
 const ALLOWED = [
   /\bnever offer/i, /never offers one/i, /last resort/i, /cannot be compacted/i, /only way/i, // the last resort
   /default (?:model )?(?:to|for|of) .*new sessions|new sessions (?:default|now start)|for new sessions/i, // the default model
+  /what new sessions start on/i, // /pacing doctor's 'next model' check
   /start line/i, /the new session does/i, // a handover's file, read by the session that starts next
   /another session (?:started|drives|has been|wrote|ran|cleared)|that another session started|another one has been/i, // side sessions, the shared-checkout notice
   /pointing the user at another session/i, /never open .* another session/i, // the rule against pointing elsewhere

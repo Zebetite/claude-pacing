@@ -1,12 +1,23 @@
-// Where a project's files live in the user's data folder. Shared by config.mjs
-// (the role agents' notes, the handovers) and hook.mjs (the handover a new
-// session should read). Everything here is under ~/.claude/pacing, outside the
-// plugin folder, which an update replaces.
+// Where things live: Claude Code's own folder and the user's data folder in
+// it, a project's files there (the role agents' notes, the handovers, the
+// agent records), the log of readings, and the desktop app's own files. The
+// one place a path under ~/.claude or the app's folder is built: every script
+// takes it from here. The data folder is ~/.claude/pacing, outside the plugin
+// folder, which an update replaces.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export const dataDir = path.join(os.homedir(), '.claude', 'pacing');
+// Claude Code's folder: ~/.claude, or where CLAUDE_CONFIG_DIR says (its own
+// setting for that folder: settings.json, projects/ and the rest move with
+// it, and so does the data folder).
+export const claudeDir = () => process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+export const dataDir = path.join(claudeDir(), 'pacing');
+// what a new terminal session starts on (budget.mjs sets model and effortLevel)
+export const settingsFile = path.join(claudeDir(), 'settings.json');
+// the sessions' transcripts (estimate.mjs)
+export const projectsDir = () => path.join(claudeDir(), 'projects');
 
 // the project is the repository a folder belongs to, wherever inside it
 export const projectRoot = start => {
@@ -39,6 +50,27 @@ export const ageText = f => {
   return h < 1 ? 'under an hour ago' : h < 48 ? Math.round(h) + ' h ago' : Math.round(h / 24) + ' days ago';
 };
 
+// ---- .jsonl files: the log of readings, the agent records ----
+// The lines of a .jsonl file that hold an object, and how many do not parse
+// or hold something else: a cut-off write or a stray edit is skipped, never
+// fatal. `missing`: no such file; `damaged`: it cannot be read.
+export const readJsonl = file => {
+  let text;
+  try { text = fs.readFileSync(file, 'utf8'); } catch (e) { return { missing: e.code === 'ENOENT', damaged: e.code !== 'ENOENT', rows: [], bad: 0 }; }
+  const rows = [];
+  let bad = 0;
+  for (const l of text.split('\n')) {
+    if (!l.trim()) continue;
+    try { const v = JSON.parse(l); if (v && typeof v === 'object' && !Array.isArray(v)) rows.push(v); else bad++; } catch { bad++; }
+  }
+  return { missing: false, damaged: false, rows, bad };
+};
+// a reading as budget.mjs logs it: a time and the weekly meter's figure
+export const isReading = e => !!e && typeof e === 'object' && !Array.isArray(e) && !Number.isNaN(Date.parse(e.t)) && typeof e.all === 'number';
+export const logFile = path.join(dataDir, 'log.jsonl');
+// every reading in the log, oldest first
+export const readLog = () => readJsonl(logFile).rows.filter(isReading);
+
 // When the hooks module last took a reading (log.jsonl, source 'hook'), as a
 // time in ms, if that was in the 24 h before `now`; else null. Where it runs,
 // its Switch row is the one place a change of the session's model or effort
@@ -46,7 +78,7 @@ export const ageText = f => {
 // day's readings are a few KB.
 export const recentHookReading = (now = Date.now()) => {
   try {
-    const log = path.join(dataDir, 'log.jsonl'), size = fs.statSync(log).size, fd = fs.openSync(log, 'r');
+    const log = logFile, size = fs.statSync(log).size, fd = fs.openSync(log, 'r');
     const buf = Buffer.alloc(Math.min(size, 65536));
     fs.readSync(fd, buf, 0, buf.length, size - buf.length);
     fs.closeSync(fd);
@@ -119,4 +151,60 @@ export const otherSessions = (root, id, now = Date.now()) => {
     const all = entriesOf(JSON.parse(fs.readFileSync(sessionsFile(root), 'utf8')));
     return Object.entries(all).filter(([k, e]) => k !== id && fresh(e, now)).map(([k, e]) => ({ id: k, since: typeof e.since === 'number' ? e.since : e.t, t: e.t })).sort((a, b) => b.t - a.t);
   } catch { return []; }
+};
+
+// ---- the desktop app's own files ----
+// The app keeps its data per Windows account in %LOCALAPPDATA%\Claude-Data,
+// a folder per app profile: the preset new local sessions start on
+// (ccd-session-presets.json), the copies of the plugins it installed (rpm/),
+// a record per session (claude-code-sessions/). The app's own layout, not a
+// documented interface, and seen on Windows only: where it keeps the same on
+// macOS or Linux is not known here, and a guessed path would be a file the
+// app never reads. So off Windows there is no such folder (null), and what
+// rests on it is left out: the preset (budget.mjs; doctor.mjs says so), the
+// installed copies (doctor.mjs), the record of a side session (budget.mjs).
+// PACING_TEST_PLATFORM: the tests name the system, so both sides are tested
+// on every one.
+const platform = () => process.env.PACING_TEST_PLATFORM || process.platform;
+export const appDataDir = () => (platform() === 'win32'
+  ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Claude-Data') : null);
+export const subdirs = d => { try { return fs.readdirSync(d, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => path.join(d, e.name)); } catch { return []; } };
+
+// Where the app installed the copy of the plugin that `script` belongs to:
+// <Claude-Data>/<app>/rpm/<account>/<organisation>/plugin_<id>/..., the two
+// folders named by the first eight characters of the account's and the
+// organisation's ids (seen so on Windows, compared with the ids the engine
+// names). null for a copy from anywhere else: a GitHub install under
+// ~/.claude/plugins, a checkout.
+export const installOf = (script, base = appDataDir()) => {
+  if (!base || !script) return null;
+  const rel = path.relative(base, path.resolve(script));
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const [app, rpm, account, org, plug] = rel.split(/[\\/]/);
+  return rpm === 'rpm' && account && org && /^plugin_/.test(plug || '') ? { app: path.join(base, app), account: account.toLowerCase() } : null;
+};
+
+// The preset files a reading may change, and whose entry in them. A preset
+// file holds an entry per account (`byAccount`, keyed by the account's id),
+// and a computer can hold several accounts and app profiles: a reading under
+// one account must not move another's preset. The account this session runs
+// under is told two ways. The engine names it to every command it runs
+// (CLAUDE_CODE_ACCOUNT_UUID, the whole id: seen from the desktop app's
+// sessions). And a copy of the plugin the app installed lies under its
+// account's folder (installOf): its profile's file alone is written, and the
+// entry whose id starts with the folder's eight characters. Told neither way
+// (a terminal session running a copy from somewhere else), every entry of
+// every file is written, as before: nothing on disk says then which account
+// the session's meter belongs to, and for the usual one account that is the
+// right one. `account`: 'this' when it was told, 'every' when not.
+// null off Windows (appDataDir).
+export const presetTargets = (script = process.argv[1]) => {
+  const base = appDataDir();
+  if (!base) return null;
+  const inst = installOf(script, base) || installOf(fileURLToPath(import.meta.url), base);
+  const named = String(process.env.CLAUDE_CODE_ACCOUNT_UUID || '').toLowerCase();
+  const id = /^[0-9a-f][0-9a-f-]{7,}$/.test(named) ? named : null;
+  const files = (inst ? [inst.app] : subdirs(base)).map(d => path.join(d, 'ccd-session-presets.json')).filter(p => fs.existsSync(p));
+  const owns = id ? key => String(key).toLowerCase() === id : inst ? key => String(key).toLowerCase().startsWith(inst.account) : () => true;
+  return { files, owns, account: id || inst ? 'this' : 'every' };
 };

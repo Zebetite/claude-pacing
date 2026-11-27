@@ -1,8 +1,12 @@
 // Shared by the tests: every script runs in a child process whose home is a
 // fresh temp folder, so nothing a test does reaches the real ~/.claude.
 // HOME and USERPROFILE move os.homedir(); APPDATA and LOCALAPPDATA move the
-// desktop app's preset folder that budget.mjs writes on Windows. TZ is UTC so
-// the budget line's midnight step falls where the tests expect it.
+// desktop app's folder, which the scripts know on Windows only (paths.mjs
+// appDataDir): PACING_TEST_PLATFORM says win32, so what rests on that folder
+// (the preset, the installed copies, a side session's record) is tested on
+// every system; a test of the other side names another platform. TZ is UTC so
+// the budget line's midnight step falls where the tests expect it; the tests
+// of other zones (tests/line.test.mjs) name theirs.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -28,6 +32,7 @@ export const sandbox = () => {
     APPDATA: path.join(home, 'AppData', 'Roaming'),
     LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
     TZ: 'UTC',
+    PACING_TEST_PLATFORM: 'win32',
     CLAUDE_PROJECT_DIR: project,
   });
   const data = path.join(home, '.claude', 'pacing');

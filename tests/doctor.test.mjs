@@ -11,7 +11,7 @@ import { projectSlug } from '../pacing/skills/pacing/scripts/paths.mjs';
 const NOW = '2026-11-13T12:00:00.000Z';
 const at = min => new Date(Date.parse(NOW) + min * 60000).toISOString();
 const VERSION = JSON.parse(fs.readFileSync(path.join(plugin, '.claude-plugin', 'plugin.json'), 'utf8')).version;
-const NAMES = ['version', 'hooks', 'reading', 'per-model', 'week', 'settings', 'token rate', 'agents', 'folders'];
+const NAMES = ['version', 'hooks', 'reading', 'per-model', 'week', 'settings', 'next model', 'token rate', 'agents', 'folders'];
 
 const reading = (min, more = {}) => ({ t: at(min), all: 20, premium: 30, premiumModel: 'fable', premiumOut: false, line: 25, level: 'ahead', reset: RESET, source: 'hook', full: true, ...more });
 const writeLog = (s, entries) => s.write('log.jsonl', entries.map(e => JSON.stringify(e) + '\n').join(''));
@@ -58,10 +58,10 @@ describe('doctor.mjs', () => {
     try {
       const r = doctor(s);
       assert.equal(r.code, 0, r.out + r.err);
-      assert.equal(r.rows.length, 10);
-      assert.deepEqual(r.rows.slice(0, 9).map(l => l.slice(6, 16).trim()), NAMES);
+      assert.equal(r.rows.length, 11);
+      assert.deepEqual(r.rows.slice(0, 10).map(l => l.slice(6, 16).trim()), NAMES);
       for (const n of NAMES) isOk(r, n);
-      assert.equal(r.summary, 'All 9 checks pass.');
+      assert.equal(r.summary, 'All 10 checks pass.');
       for (const l of r.rows) assert.ok(l.length <= 100, l);
       isOk(r, 'version', new RegExp('^running ' + VERSION.replace(/\./g, '\\.') + ', the app holds '));
       isOk(r, 'hooks', /^it took a reading 10 min ago$/);
@@ -69,6 +69,7 @@ describe('doctor.mjs', () => {
       isOk(r, 'per-model', /^Fable 5\.2 read 10 min ago, at 30 %$/);
       isOk(r, 'week', /^resets Thu 19 Nov 12:00, in 6 days; the log agrees$/);
       isOk(r, 'settings', /^compact on, notify on, switch on, reload on, 3 tiers$/);
+      isOk(r, 'next model', /^a reading sets settings\.json; no desktop app preset found$/);
       isOk(r, 'token rate', /^learned, \$0\.0123 per point, from 6 points this week$/);
       isOk(r, 'agents', /^2 records, the last 30 min ago$/);
       isOk(r, 'folders', /^the data folder and the notes folder take writes$/);
@@ -87,6 +88,7 @@ describe('doctor.mjs', () => {
       isOk(r, 'per-model', /^no reading yet: nothing to check$/);
       isOk(r, 'week', /^no reading yet: nothing to check$/);
       isOk(r, 'settings', /^no config\.json yet: the defaults stand$/);
+      isOk(r, 'next model', /^a reading sets settings\.json; no desktop app preset found$/);
       isOk(r, 'token rate', /^not learned yet$/);
       isOk(r, 'agents', /^no agent recorded for this project yet$/);
       isOk(r, 'folders');
@@ -264,8 +266,8 @@ describe('doctor.mjs', () => {
         assert.equal(typeof c.found, 'string');
         assert.equal(c.fix, null);
       }
-      assert.deepEqual(j.counts, { ok: 9, warn: 0, fail: 0 });
-      assert.equal(j.summary, 'All 9 checks pass.');
+      assert.deepEqual(j.counts, { ok: 10, warn: 0, fail: 0 });
+      assert.equal(j.summary, 'All 10 checks pass.');
       assert.equal(j.checks.find(c => c.name === 'token rate').usdPerPoint, 0.0123);
       assert.equal(j.checks.find(c => c.name === 'version').running, VERSION);
       s.write('config.json', 'nope');
@@ -273,9 +275,27 @@ describe('doctor.mjs', () => {
       r = doctor(s, ['--json']);
       assert.equal(r.code, 1);
       const k = JSON.parse(r.out);
-      assert.deepEqual(k.counts, { ok: 7, warn: 1, fail: 1 });
+      assert.deepEqual(k.counts, { ok: 8, warn: 1, fail: 1 });
       assert.equal(k.summary, '1 warning, 1 failure: see above.');
       assert.equal(k.checks.find(c => c.name === 'version').fix, 'type /reload-plugins or open a new session');
+    } finally { s.cleanup(); }
+  });
+});
+
+describe('doctor.mjs, a --now that is no date', () => {
+  test('refused in one line, exit code 1: it was taken for the clock\'s time without a word', () => {
+    const s = healthy();
+    try {
+      for (const [args, line] of [
+        [['--now', 'garbage'], '--now must be a date, such as 2026-11-22T10:00:00Z, not "garbage"'],
+        [['--json', '--now', 'garbage'], '--now must be a date, such as 2026-11-22T10:00:00Z, not "garbage"'],
+        [['--now'], '--now must be a date, such as 2026-11-22T10:00:00Z'],
+      ]) {
+        const r = s.run('doctor.mjs', args);
+        assert.equal(r.code, 1, args.join(' '));
+        assert.equal(r.out.trim(), line);
+        assert.equal(r.err, '');
+      }
     } finally { s.cleanup(); }
   });
 });

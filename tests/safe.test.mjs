@@ -250,6 +250,116 @@ describe('the helper itself', () => {
       assert.deepEqual(fs.readdirSync(path.dirname(f)), ['file.json'], 'no lock, no renamed stale lock, no temporary file');
     } finally { s.cleanup(); }
   });
+  test('the lock file holds its owner\'s token, the process id and a random part: a new one for every lock', () => {
+    const { s, f } = tmp();
+    try {
+      const seen = [];
+      for (let i = 0; i < 2; i++) assert.equal(withLock(f, () => { seen.push(fs.readFileSync(f + '.lock', 'utf8')); return i; }), i);
+      for (const t of seen) assert.match(t, new RegExp('^' + process.pid + '\\.[0-9a-f]{16}$'));
+      assert.notEqual(seen[0], seen[1]);
+      assert.ok(!fs.existsSync(f + '.lock'), 'released by its owner');
+    } finally { s.cleanup(); }
+  });
+  test('a holder that stalled past the stale age does not remove its successor\'s lock', () => {
+    const { s, f } = tmp();
+    try {
+      // inside this holder's change its lock went stale and another process
+      // took it over: the file under the lock's name is that one's now
+      assert.equal(withLock(f, () => {
+        fs.unlinkSync(f + '.lock');
+        fs.writeFileSync(f + '.lock', '4242.0123456789abcdef');
+        return 'done';
+      }), 'done');
+      assert.equal(fs.readFileSync(f + '.lock', 'utf8'), '4242.0123456789abcdef', 'the successor still holds it');
+      // and so when the change throws
+      assert.throws(() => withLock(f + '2', () => { fs.writeFileSync(f + '2.lock', 'theirs'); throw new Error('stop'); }), /stop/);
+      assert.equal(fs.readFileSync(f + '2.lock', 'utf8'), 'theirs');
+      // a lock taken over and released meanwhile: nothing to remove, no error
+      assert.equal(withLock(f + '3', () => { fs.unlinkSync(f + '3.lock'); return 1; }), 1);
+      fs.unlinkSync(f + '.lock');
+      fs.unlinkSync(f + '2.lock');
+    } finally { s.cleanup(); }
+  });
+  test('the real course of it: the lock goes stale under a holder, a successor takes it over and is still at work when the holder ends', () => {
+    const { s, f } = tmp();
+    try {
+      let inner = null, outer = null;
+      withLock(f, () => {
+        outer = fs.readFileSync(f + '.lock', 'utf8');
+        const old = new Date(Date.now() - 60000);
+        fs.utimesSync(f + '.lock', old, old);
+        // the successor (here the same process, with a token of its own)
+        withLock(f, () => { inner = fs.readFileSync(f + '.lock', 'utf8'); });
+        // a third writer makes its lock while the first is still inside
+        fs.writeFileSync(f + '.lock', 'third', { flag: 'wx' });
+      });
+      assert.ok(inner && outer && inner !== outer, 'two tokens');
+      assert.equal(fs.readFileSync(f + '.lock', 'utf8'), 'third');
+      assert.deepEqual(fs.readdirSync(path.dirname(f)), ['file.json.lock'], 'no renamed stale lock left');
+    } finally { s.cleanup(); }
+  });
+  test('a command that ends inside a change removes its own lock, and only its own', async () => {
+    const { s, f } = tmp();
+    try {
+      const code = 'const fs = (await import("node:fs")).default; const { withLock } = await import(process.argv[1]); const f = process.argv[2];'
+        + 'withLock(f, () => { if (process.argv[3] === "taken") { fs.unlinkSync(f + ".lock"); fs.writeFileSync(f + ".lock", "successor"); } process.exit(3); });';
+      const run = how => new Promise(resolve => {
+        const p = spawn(process.execPath, ['--input-type=module', '-e', code, pathToFileURL(path.join(scripts, 'safe.mjs')).href, f, how], { env: s.env });
+        p.on('exit', resolve);
+      });
+      assert.equal(await run('own'), 3);
+      assert.ok(!fs.existsSync(f + '.lock'), 'its own lock is gone');
+      assert.equal(await run('taken'), 3);
+      assert.equal(fs.readFileSync(f + '.lock', 'utf8'), 'successor');
+    } finally { s.cleanup(); }
+  });
+  // what the file system says of a path, answered for one path (safe.mjs
+  // asks through the same module object): a link can be tested where the
+  // system lets no test make one
+  const linked = (link, to, fn) => stubbed('lstatSync', p => (p === link ? { isSymbolicLink: () => true } : undefined),
+    () => stubbed('realpathSync', p => (p === link ? (to === null ? refuse('ENOENT') : to) : undefined), fn));
+  test('a target that is a symbolic link is written through: the temporary file and the rename are at the file it leads to', () => {
+    const { s, f } = tmp();
+    try {
+      const real = path.join(s.home, 'dotfiles', 'settings.json'), link = path.join(s.home, 'x', 'settings.json');
+      atomicWrite(real, 'old');
+      fs.mkdirSync(path.dirname(link), { recursive: true });
+      linked(link, real, () => atomicWrite(link, 'new'));
+      assert.equal(fs.readFileSync(real, 'utf8'), 'new');
+      assert.ok(!fs.existsSync(link), 'nothing was put in the link\'s place');
+      assert.deepEqual(fs.readdirSync(path.dirname(real)), ['settings.json'], 'no temporary file left');
+      // a link to a file that is not there yet: followed one step, relative to the link's folder
+      const later = path.join(s.home, 'x', 'later', 'made.json');
+      linked(link, null, () => stubbed('readlinkSync', p => (p === link ? path.join('later', 'made.json') : undefined), () => atomicWrite(link, 'first')));
+      assert.equal(fs.readFileSync(later, 'utf8'), 'first');
+      assert.ok(!fs.existsSync(link));
+      // a plain file, and one not there yet, are written as before
+      atomicWrite(f, 'plain');
+      atomicWrite(f, 'again');
+      assert.equal(fs.readFileSync(f, 'utf8'), 'again');
+    } finally { s.cleanup(); }
+  });
+  test('a settings.json that is a real symbolic link stays one after a reading', t => {
+    const s = sandbox();
+    try {
+      const real = path.join(s.home, 'dotfiles', 'settings.json'), link = path.join(s.home, '.claude', 'settings.json');
+      atomicWrite(real, JSON.stringify({ theme: 'dark' }));
+      fs.mkdirSync(path.dirname(link), { recursive: true });
+      try { fs.symlinkSync(real, link, 'file'); } catch (e) {
+        // Windows without the right to make links
+        if (e.code === 'EPERM') { t.skip('this system does not let the test make a symbolic link'); return; }
+        throw e;
+      }
+      assert.deepEqual(updateJson(link, v => ({ ...v, a: 1 })), { theme: 'dark', a: 1 });
+      assert.ok(fs.lstatSync(link).isSymbolicLink(), 'still a link');
+      assert.deepEqual(JSON.parse(fs.readFileSync(real, 'utf8')), { theme: 'dark', a: 1 });
+      const r = s.budget(['--all', '30', '--reset', RESET, '--now', '2026-11-13T12:00:00.000Z']);
+      assert.equal(r.code, 0, r.out + r.err);
+      assert.ok(fs.lstatSync(link).isSymbolicLink(), 'still a link after a reading');
+      assert.deepEqual(JSON.parse(fs.readFileSync(real, 'utf8')), { theme: 'dark', a: 1, model: 'opus', effortLevel: 'medium' });
+      assert.deepEqual(fs.readdirSync(path.dirname(real)), ['settings.json']);
+    } finally { s.cleanup(); }
+  });
   test('atomicWrite waits out another process that has the file open (Windows refuses the rename meanwhile), and leaves no temporary file', async () => {
     const { s, f } = tmp();
     try {

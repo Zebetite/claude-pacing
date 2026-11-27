@@ -169,7 +169,6 @@ describe('fewer calls, fewer lines', () => {
       'Fable 5.2 used 10 %, delta -10 -> ahead',
       'route: judgment, trivial -> Fable 5.2 high (the session); medium, routine -> Opus 5.5 medium; bulky -> Sonnet 5.5 medium; reader -> Haiku 5.5 medium; verifier -> Haiku 5.5 medium (plain runs; checks to judge -> Sonnet 5.5 medium)',
       'do: medium tasks leave the session\'s model too',
-      'effort: one step less effort on this session would save most, Fable 5.2 high -> medium; the Switch row offers it (without the hooks module: model menu Fable 5.2, effort medium); medium work still goes to Opus 5.5 medium',
       'next session: Fable 5.2 high',
     ]);
     assert.ok(brief.length * 4 < full.length * 1.2, brief.length + ' against ' + full.length);

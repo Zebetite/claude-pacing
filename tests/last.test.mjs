@@ -103,3 +103,30 @@ describe('budget.mjs last', () => {
     } finally { s.cleanup(); }
   });
 });
+
+// a --now that is no date read as "measure: no reading yet": the session then
+// took a reading it did not need
+describe('budget.mjs last, a --now that is no date', () => {
+  test('refused in one line, exit code 1, whether or not a reading is there', () => {
+    const s = sandbox();
+    try {
+      for (const fresh of [false, true]) {
+        if (fresh) reading(s, 10, NOW, ['--premium', '2']);
+        for (const [args, line] of [
+          [['last', '--now', 'garbage'], '--now must be a date, such as 2026-11-22T10:00:00Z, not "garbage"'],
+          [['last', '--brief', '--now', '2026-13-45'], '--now must be a date, such as 2026-11-22T10:00:00Z, not "2026-13-45"'],
+          [['last', '--now', ''], '--now must be a date, such as 2026-11-22T10:00:00Z, not ""'],
+          [['last', '--now'], '--now must be a date, such as 2026-11-22T10:00:00Z'],
+        ]) {
+          const r = s.budget(args);
+          assert.equal(r.code, 1, args.join(' '));
+          assert.equal(r.out.trim(), line);
+          assert.equal(r.err, '');
+        }
+      }
+      assert.equal(lines(s), 1, 'nothing logged');
+      // a date still serves
+      assert.match(last(s, at(5)).out, /not read now/);
+    } finally { s.cleanup(); }
+  });
+});

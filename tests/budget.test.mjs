@@ -252,6 +252,13 @@ describe('the trend', () => {
     seed(24, 49);
     assert.doesNotMatch(dry(now, 50).out, /^unused:/m);
   });
+  test('the hooks module\'s answer carries the 5-hour window: its figure and reset, and none without one', () => {
+    const fiveReset = new Date(Date.parse(now) + 2 * 3600000).toISOString();
+    const j = JSON.parse(sb.budget(['--all', '40', '--reset', RESET, '--five', '42', '--five-reset', fiveReset, '--now', now, '--source', 'hook', '--dry']).out.trim());
+    assert.deepEqual([j.five, j.fiveReset, j.fiveFull], [42, fiveReset, null]);
+    const none = JSON.parse(sb.budget(['--all', '40', '--reset', RESET, '--now', now, '--source', 'hook', '--dry']).out.trim());
+    assert.deepEqual([none.five, none.fiveReset, none.fiveFull], [null, null, null]);
+  });
   test('a reading of another week is not a trend', () => {
     sb.write('log.jsonl', JSON.stringify({ t: '2026-11-14T12:00:00Z', all: 5, reset: '2026-11-26T12:00:00Z' }) + '\n');
     assert.doesNotMatch(dry(now, 40).out, /^trend:/m);
@@ -398,6 +405,19 @@ describe('arguments', () => {
       assert.equal(s.budget(['week', '3']).code, 0);
     } finally { s.cleanup(); }
   });
+  test('--now without a date is bad input, not the clock\'s time; a date that is none is refused as before', () => {
+    for (const now of [['--now'], ['--now', ''], ['--now', 'garbage'], ['--now', '--dry']]) {
+      const r = sb.budget(['--all', '10', '--reset', RESET, ...now]);
+      assert.equal(r.code, 1, now.join(' '));
+      assert.equal(r.out.trim(), 'bad input: percents must be numbers from 0, dates ISO 8601');
+      assert.equal(r.err, '');
+    }
+    for (const bad of [['--reset', 'garbage'], ['--reset', RESET, '--five', '10', '--five-reset', 'garbage']]) {
+      const r = sb.budget(['--all', '10', '--now', '2026-11-13T12:00:00Z', '--dry', ...bad]);
+      assert.equal(r.code, 1, bad.join(' '));
+      assert.equal(r.out.trim(), 'bad input: percents must be numbers from 0, dates ISO 8601');
+    }
+  });
   test('a meter the plan lacks is -', () => {
     const r = dry('2026-11-13T12:00:00Z', 10, '--premium', '-', '--five', '-');
     assert.equal(r.code, 0);
@@ -444,23 +464,12 @@ describe('the reader agent', () => {
   });
 });
 
-describe('the effort step at "over"', () => {
+describe('no advice to lower the effort', () => {
   const now = '2026-11-13T12:00:00Z';
   const effort = out => (out.split(/\r?\n/).find(l => l.startsWith('effort: ')) || null);
-  test('at over: lower the session\'s effort one step first', () => {
-    assert.equal(effort(dry(now, 22).out), 'effort: one step less effort on this session would save most, Fable 5.2 high -> medium; the Switch row offers it (without the hooks module: model menu Fable 5.2, effort medium); medium work still goes to Opus 5.5 medium');
-    assert.match(effort(dry(now, 22, '--session', 'claude-fable-5-2').out), /Fable 5.2 high -> medium/);
-  });
-  test('not at the other levels', () => {
-    for (const all of [10, 18, 30, 96]) assert.equal(effort(dry(now, all).out), null, String(all));
-  });
-  test('not for a session on another tier, nor below low', () => {
-    assert.equal(effort(dry(now, 22, '--session', 'claude-opus-5-5').out), null);
-    sb.config(['set', '1', 'fable', 'low']);
-    try { assert.equal(effort(dry(now, 22).out), null); } finally { sb.config(['reset']); }
-  });
-  test('not while the session is told to switch model (Fable out)', () => {
-    assert.equal(effort(dry(now, 22, '--premium', '100').out), null);
+  test('at no level, on no tier (the user\'s word: not for being a little over)', () => {
+    for (const all of [10, 18, 22, 30, 96]) assert.equal(effort(dry(now, all).out), null, String(all));
+    assert.equal(effort(dry(now, 22, '--session', 'claude-fable-5-2').out), null);
   });
 });
 
@@ -514,8 +523,8 @@ describe('the per-model meter, paced on the same line', () => {
     assert.match(out.replace(/\s+/g, ' '), /Fable 5\.2's meter at 22 % is 2 points over the same budget line: "over", worse than the weekly meter alone \("ahead", 10 points under\), and Fable 5\.2 runs tier 1, so that meter sets the level/);
     assert.equal(routeOf(out, 'medium'), 'tier 2 Opus 5.5 medium (subagent)');
     assert.equal(routeOf(out, 'judgment'), 'tier 1 Fable 5.2 high (the session)');
-    // at its "over", one step less effort first, as at the all-models one
-    assert.match(effort(out), /Fable 5.2 high -> medium/);
+    // no step less effort at its "over" either
+    assert.equal(effort(out), null);
     assert.equal(levelOf(dry(now, 10, '--premium', '17').out), 'on pace');
   });
   test('better than all models: all models decide', () => {

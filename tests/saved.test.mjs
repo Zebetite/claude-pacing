@@ -135,7 +135,9 @@ describe('saved.mjs', () => {
       assert.equal(JSON.parse(saved(s, ['--json', '--session', 'opus']).out).session.from, 'flag');
       const r = saved(s, ['--session', 'gpt']);
       assert.equal(r.code, 1);
-      assert.match(r.err, /--session must name a known model/);
+      // a refusal is on standard output, as in every script
+      assert.equal(r.out.trim(), '--session must name a known model: fable, opus, sonnet, haiku');
+      assert.equal(r.err, '');
     } finally { s.cleanup(); }
   });
 
@@ -184,6 +186,31 @@ describe('saved.mjs', () => {
       assert.equal(j.points, 9.97);
       assert.deepEqual(j.groups.map(g => [g.role, g.model, g.tasks, g.above]), [['implementer', 'sonnet', 1, false], ['reader', 'haiku', 1, false]]);
       assert.equal(j.text, 'Delegation this week: 2 tasks, 2.6M tokens on agents; on Opus 5.5 they would have cost 6.9× as much, about 10 points of the weekly meter saved.');
+    } finally { s.cleanup(); }
+  });
+});
+
+// what a script refuses is one line on standard output, exit code 1: the
+// session and the hooks module read one stream
+describe('saved.mjs, arguments it refuses', () => {
+  test('a flag without its value, and a --now that is no date', () => {
+    const s = sandbox();
+    try {
+      reading(s); records(s, plain);
+      for (const [args, line] of [
+        [['--project'], '--project needs a value: --project <folder>'],
+        [['--project', '--json'], '--project needs a value: --project <folder>'],
+        [['--session'], '--session needs a value: --session <model>'],
+        [['--json', '--now'], '--now needs a value: --now <ISO date>'],
+        [['--now', 'garbage'], '--now must be a date, such as 2026-11-22T10:00:00Z, not "garbage"'],
+      ]) {
+        const r = s.run('saved.mjs', args);
+        assert.equal(r.code, 1, args.join(' '));
+        assert.equal(r.out.trim(), line);
+        assert.equal(r.err, '');
+      }
+      // --project with its folder still narrows
+      assert.equal(JSON.parse(saved(s, ['--session', 'opus', '--json', '--project', s.project]).out).tasks, 2);
     } finally { s.cleanup(); }
   });
 });

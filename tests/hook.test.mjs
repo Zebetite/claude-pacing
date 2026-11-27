@@ -27,9 +27,11 @@ test('no reading and no handover: prints nothing', withHome(s => {
 test('a fresh reading names the model, under its current label', withHome(s => {
   state(s);
   const j = parse(s.hook());
-  assert.match(j.systemMessage, /^Pacing \(0 h ago\): weekly meter 36 % used, budget line 46.7 %, level ahead\. Recommended model for this session: Fable 5.2 high\./);
+  // the user is not asked to switch: the plugin moves work to subagents itself
+  assert.equal(j.systemMessage, 'Pacing (0 h ago): weekly meter 36 % used, budget line 46.7 %, level ahead. Pacing hands work to subagents on the right models by itself.');
   assert.equal(j.hookSpecificOutput.hookEventName, 'SessionStart');
-  assert.match(j.hookSpecificOutput.additionalContext, /switch the model menu to Fable 5.2, effort high/);
+  assert.match(j.hookSpecificOutput.additionalContext, /Recommended model for this session: Fable 5\.2 high\. Do not tell the user to switch model or effort: the plugin moves work to subagents on the right models by itself \(pacing:route\)\./);
+  assert.doesNotMatch(j.hookSpecificOutput.additionalContext, /model menu/);
   assert.match(j.hookSpecificOutput.additionalContext, /This reading is fresh/);
 }));
 
@@ -62,22 +64,27 @@ test('a handover alone is named, with the order to read it', withHome(s => {
 }));
 
 test('where the hooks module runs, its Switch row offers the switch: no steps for the user or the session', withHome(s => {
-  // the last reading was the module's own
-  state(s, { source: 'hook', next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
+  // the per-model model is out, and the last reading was the module's own
+  state(s, { source: 'hook', premiumOut: true, next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
   let j = parse(s.hook());
-  assert.match(j.systemMessage, /Recommended model for this session: Opus 5\.5 high\.$/);
+  assert.match(j.systemMessage, /Fable 5\.2 is out until the reset: switch this session to Opus 5\.5 high\.$/);
   assert.doesNotMatch(j.systemMessage, /model menu/);
-  assert.match(j.hookSpecificOutput.additionalContext, /Recommended model for this session: Opus 5\.5 high\. The pacing hooks module runs here: if you run on another model or effort, its Switch row above the prompt offers the change; do not tell the user to switch, nor how\./);
+  assert.match(j.hookSpecificOutput.additionalContext, /Recommended model for this session: Opus 5\.5 high\. Fable 5\.2 is out until the reset: the Switch row above the prompt offers Opus 5\.5 high; do not give steps\./);
   assert.doesNotMatch(j.hookSpecificOutput.additionalContext, /model menu/);
   // a reading of the session's own, with one of the module's in the last day
-  state(s, { next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
+  state(s, { premiumOut: true, next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
   s.write('log.jsonl', JSON.stringify({ t: new Date(Date.now() - 3600000).toISOString(), all: 30, source: 'hook' }) + '\n');
-  assert.match(parse(s.hook()).hookSpecificOutput.additionalContext, /The pacing hooks module runs here/);
-  // the module's last reading two days ago: no module now, the old line
+  assert.match(parse(s.hook()).hookSpecificOutput.additionalContext, /the Switch row above the prompt offers Opus 5\.5 high/);
+  // the module's last reading two days ago: no module now, the one-line step
   s.write('log.jsonl', JSON.stringify({ t: new Date(Date.now() - 48 * 3600000).toISOString(), all: 30, source: 'hook' }) + '\n');
   j = parse(s.hook());
-  assert.match(j.systemMessage, /Check the model menu shows Opus 5\.5, effort high\./);
-  assert.match(j.hookSpecificOutput.additionalContext, /your first reply starts with one line telling the user to switch the model menu to Opus 5\.5, effort high/);
+  assert.match(j.systemMessage, /Fable 5\.2 is out until the reset: switch this session to Opus 5\.5 high\.$/);
+  assert.match(j.hookSpecificOutput.additionalContext, /Fable 5\.2 is out until the reset: if you run on it, your first reply starts with one line telling the user to switch the model menu to Opus 5\.5, effort high \(only the user can\)\./);
+  // nothing out: no switch asked for, with the module or without
+  state(s, { next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
+  j = parse(s.hook());
+  assert.match(j.systemMessage, /Pacing hands work to subagents on the right models by itself\.$/);
+  assert.doesNotMatch(j.hookSpecificOutput.additionalContext, /model menu|Switch row/);
 }));
 
 test('a stale reading asks for `usage`, which measures only where no newer reading came', withHome(s => {
@@ -92,7 +99,7 @@ test('a handover beside a reading; the newest is named, the older counted', with
   const dir = path.dirname(handover(s));
   fs.writeFileSync(path.join(dir, '2000-01-01-0000.md'), 'old');
   const j = parse(s.hook());
-  assert.match(j.systemMessage, /Recommended model for this session: Fable 5.2 high\..* Handover waiting for this project \(under an hour ago, and 1 older beside it\)/);
+  assert.match(j.systemMessage, /Pacing hands work to subagents on the right models by itself\..* Handover waiting for this project \(under an hour ago, and 1 older beside it\)/);
 }));
 
 test('a handover for another project is not named', withHome(s => {
@@ -113,5 +120,6 @@ test('the per-model meter that set the level, or holds its model back, is named'
   assert.match(parse(s.hook()).systemMessage, /level over \(set by Fable 5\.2's meter at 52 %\)\./);
   state(s, { premiumHeld: true, premium: 60, next: { model: 'opus', label: 'Opus 5.5', effort: 'high' } });
   const j = parse(s.hook());
-  assert.match(j.systemMessage, /level ahead, Fable 5\.2 at 60 % is over its budget line: kept for judgment work\. Recommended model for this session: Opus 5\.5 high\./);
+  assert.match(j.systemMessage, /level ahead, Fable 5\.2 at 60 % is over its budget line: kept for judgment work\. Pacing hands work to subagents on the right models by itself\./);
+  assert.match(j.hookSpecificOutput.additionalContext, /Recommended model for this session: Opus 5\.5 high\. Do not tell the user to switch model or effort/);
 }));

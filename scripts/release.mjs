@@ -178,8 +178,9 @@ async function release(args) {
     return;
   }
 
-  // (.claude-plugin: the marketplace entry, whose description is the plugin's)
-  git('add', '-A', '--', 'pacing', 'docs', 'tests', 'scripts', '.claude-plugin', 'README.md', 'package.json');
+  // (.claude-plugin: the marketplace entry, whose description is the plugin's;
+  // .github: the workflow that runs the node tests on every push)
+  git('add', '-A', '--', 'pacing', 'docs', 'tests', 'scripts', '.claude-plugin', '.github', 'README.md', 'package.json');
   say(git('diff', '--cached', '--stat'));
   git('commit', '-q', '-F', messageFile);
   step('committed ' + git('log', '--oneline', '-1'));

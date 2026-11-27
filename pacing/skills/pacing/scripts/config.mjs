@@ -19,6 +19,9 @@
 //                                   (haiku medium by default); ladder: the lowest tier
 //   node config.mjs verifier <model> <effort>|ladder   the model the verifier runs plain test
 //                                   runs at (haiku medium by default); ladder: the lowest tier
+//   node config.mjs autocompact <tokens>|auto|off   the window Claude Code's /autocompact is set
+//                                   to at each session start (750k by default): 750000, 750k or
+//                                   0.75M, from 100k to 1M; auto: Claude Code's own; off: left alone
 //   node config.mjs reset           back to the defaults (the ladder, the weight, the reader, the verifier)
 //   node config.mjs json            the config as JSON (for scripts)
 //   node config.mjs version         the plugin's version, from .claude-plugin/plugin.json
@@ -48,50 +51,52 @@
 //   node config.mjs part <done> <total>   an agent's progress through a task in parts: one
 //                                   line, nothing written (the hooks module reads the call)
 // Models are the Agent tool's ids; the label is what the user sees.
+// A refusal (bad input, an unknown command) is one line on standard output
+// and exit code 1, as in every script here: the session and the hooks module
+// read one stream.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { MODELS, EFFORTS, relabel, checkConfig } from './models.mjs';
+import { MODELS, EFFORTS, checkConfig, tier, defaults as settingDefaults, setting, AUTO_COMPACT_MIN, AUTO_COMPACT_MAX } from './models.mjs';
 import { updateFile } from './safe.mjs';
-import { dataDir, projectRoot as rootOf, notesDir, handoverDir, agentsLog, pendingHandovers, ageText } from './paths.mjs';
+import { claudeDir, dataDir, configFile as file, projectRoot as rootOf, notesDir, handoverDir, agentsLog, pendingHandovers, ageText, readJsonl } from './paths.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const file = path.join(dataDir, 'config.json');
 const localBrief = path.join(dataDir, 'BRIEF.local.md');
 // scripts/ -> skills/pacing -> skills -> the plugin root
 const manifest = path.join(here, '..', '..', '..', '.claude-plugin', 'plugin.json');
 // where the standalone skill kept these files before it became a plugin
-const legacyDir = path.join(os.homedir(), '.claude', 'skills', 'pacing');
+const legacyDir = path.join(claudeDir(), 'skills', 'pacing');
 
 const version = () => {
   try { return JSON.parse(fs.readFileSync(manifest, 'utf8')).version; } catch { return 'unknown'; }
 };
 
-const tier = (model, effort) => ({ model, label: MODELS[model].label, effort });
-const defaults = () => ({
-  tiers: [tier('fable', 'high'), tier('opus', 'medium'), tier('sonnet', 'medium')],
-  lastDayWeight: 1.5,
-  setNextModel: true,
-  compactAsk: true,
-  agentNotices: true,
-  switchAsk: true,
-  autoReload: true,
-  premium: 'fable',
-  fallback: { model: 'opus', effort: 'high' },
-  reader: { model: 'haiku', effort: 'medium' },
-  verifier: { model: 'haiku', effort: 'medium' },
-  installed: new Date().toLocaleDateString('sv-SE'),
-});
-const premiumText = c => (c.premium === undefined ? MODELS.fable.label + ' (default)' : c.premium === null ? 'none' : MODELS[c.premium] ? MODELS[c.premium].label : c.premium);
+// a fresh config.json: the defaults (models.mjs, the one place they are) and
+// the day it was made
+const defaults = () => ({ ...settingDefaults(), installed: new Date().toLocaleDateString('sv-SE') });
+const premiumText = c => (c.premium === undefined ? MODELS[settingDefaults().premium].label + ' (default)' : c.premium === null ? 'none' : MODELS[c.premium] ? MODELS[c.premium].label : c.premium);
 const fallbackText = c => {
-  const f = c.fallback === undefined ? { model: 'opus', effort: 'high' } : c.fallback;
+  const f = setting(c, 'fallback');
   return f === null ? 'none (the remaining tiers move up)' : (MODELS[f.model] ? MODELS[f.model].label : f.model) + ' ' + f.effort + ' takes tier 1';
 };
 
+// 750000 -> "750k", 1000000 -> "1M"
+const windowText = n => (n >= 1e6 ? n / 1e6 + 'M' : Math.round(n / 1000) + 'k');
+const autoCompactText = c => {
+  const v = setting(c, 'autoCompact');
+  return v === 'off' ? 'off (pacing leaves /autocompact alone)' : v === 'auto' ? 'auto (Claude Code\'s own)'
+    : windowText(v) + ' tokens (pacing sets /autocompact to it)';
+};
+// 750000, 750k or 0.75M as tokens; null for anything else
+const windowOf = v => {
+  const m = /^(\d+(?:\.\d+)?)([km]?)$/i.exec(String(v || ''));
+  return m ? Math.round(Number(m[1]) * ({ k: 1e3, m: 1e6 }[m[2].toLowerCase()] || 1)) : null;
+};
+
 const readerText = c => {
-  const r = c.reader === undefined ? { model: 'haiku', effort: 'medium' } : c.reader;
+  const r = setting(c, 'reader');
   return r === 'ladder' ? 'the lowest tier' : (MODELS[r.model] ? MODELS[r.model].label : r.model) + ' ' + r.effort;
 };
 
@@ -99,7 +104,7 @@ const readerText = c => {
 // verifier runs it on a model of its own, like the reader. A check with
 // acceptance points to judge stays on the lowest tier.
 const verifierText = c => {
-  const v = c.verifier === undefined ? { model: 'haiku', effort: 'medium' } : c.verifier;
+  const v = setting(c, 'verifier');
   return v === 'ladder' ? 'the lowest tier' : (MODELS[v.model] ? MODELS[v.model].label : v.model) + ' ' + v.effort;
 };
 
@@ -189,6 +194,7 @@ const show = c => {
   console.log('toasts about running subagents: ' + (c.agentNotices === false ? 'off' : 'on'));
   console.log('offers to switch this session to the recommended model or effort: ' + (c.switchAsk === false ? 'off' : 'on'));
   console.log('New-version row above the prompt (off: one toast per version instead): ' + (c.autoReload === false ? 'off' : 'on'));
+  console.log('auto-compact window: ' + autoCompactText(c));
   console.log('data folder: ' + dataDir);
 };
 const fail = m => { console.log(m); process.exit(1); };
@@ -204,6 +210,9 @@ const argv = process.argv.slice(2);
 // the words as they were given: `apply` hands each of its commands its own
 const given = [...argv];
 const projectAt = argv.indexOf('--project');
+// --project without a folder (the last word, or another flag after it) fell
+// back to the folder the command ran in without a word: refused
+if (projectAt >= 0 && (!argv[projectAt + 1] || argv[projectAt + 1].startsWith('--'))) fail('--project needs a folder: --project "<project folder>"');
 const projectArg = projectAt >= 0 ? argv.splice(projectAt, 2)[1] : null;
 const replaceAt = argv.indexOf('--replace');
 const replaceArg = replaceAt >= 0 ? argv.splice(replaceAt, 2)[1] : null;
@@ -258,9 +267,7 @@ const localFor = root => {
 // many tasks, or a notification this large, the next task goes to a fresh
 // one (SKILL.md, "Retain them"). The totals below are what tunes them.
 const KEEP_TASKS = 5, KEEP_TOKENS = 150000, KEPT_HOURS = 24;
-const readRuns = f => (fs.existsSync(f)
-  ? fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } })
-  : []);
+const readRuns = f => readJsonl(f).rows;
 // 84000, 84k or 84.5k
 const parseTokens = v => { const m = /^(\d+(?:\.\d+)?)(k?)$/i.exec(String(v || '')); return m ? Math.round(Number(m[1]) * (m[2] ? 1000 : 1)) : null; };
 const kTok = n => (n >= 1000 ? Math.round(n / 1000) + 'k' : String(n));
@@ -276,7 +283,7 @@ process.on('exit', () => { for (const n of configNotes) console.log(n); });
 // whole history, so a setup that writes eight settings, or three agent
 // records after a batch of tasks, is one call this way and not eight.
 if (cmd === 'apply') {
-  const APPLY = ['set', 'add', 'remove', 'weight', 'next', 'compact', 'notify', 'switch', 'reload', 'premium', 'fallback', 'reader', 'verifier', 'agent', 'note'];
+  const APPLY = ['set', 'add', 'remove', 'weight', 'next', 'compact', 'notify', 'switch', 'reload', 'autocompact', 'premium', 'fallback', 'reader', 'verifier', 'agent', 'note'];
   // The commands are cut from the words as given, not from argv, which has
   // lost --project and --replace by now: a note's --replace stays with its
   // note (without it the note was added and the stale line left), and a
@@ -635,6 +642,19 @@ switch (cmd || 'show') {
     }); show(cfg);
     break;
   }
+  case 'autocompact': {
+    mutate(cfg => {
+      const usage = 'autocompact <tokens> | auto | off: a window from 100k to 1M, such as 750000, 750k or 0.75M';
+      if (argv.length !== 2) fail(usage);
+      const w = a.toLowerCase();
+      if (w === 'auto' || w === 'off') { cfg.autoCompact = w; return; }
+      const n = windowOf(a);
+      if (n === null) fail(usage + '; not ' + a);
+      if (n < AUTO_COMPACT_MIN || n > AUTO_COMPACT_MAX) fail('the auto-compact window must be from 100k to 1M tokens, not ' + a);
+      cfg.autoCompact = n;
+    }); show(cfg);
+    break;
+  }
   case 'premium': {
     mutate(cfg => {
       if (a === undefined) fail('premium <model> | premium none');
@@ -675,6 +695,7 @@ switch (cmd || 'show') {
       if (keep.agentNotices === false) c.agentNotices = false;
       if (keep.switchAsk === false) c.switchAsk = false;
       if (keep.autoReload === false) c.autoReload = false;
+      if (keep.autoCompact !== undefined) c.autoCompact = keep.autoCompact;
       if (keep.premium !== undefined) c.premium = keep.premium;
       return c;
     });
@@ -682,5 +703,5 @@ switch (cmd || 'show') {
     break;
   }
   default:
-    fail('commands: show | json | init | help [full] | apply <command> + <command> ... | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | compact on|off | notify on|off | switch on|off | reload on|off | premium <model>|none | fallback <model> <effort>|none | reader <model> <effort>|ladder | verifier <model> <effort>|ladder | reset | version | where | notes | note <role> <fact> | agent <role> <id> <model> <effort> <tokens> | agents | start [<role>] | part <done> <total> | handover [new|done]');
+    fail('commands: show | json | init | help [full] | apply <command> + <command> ... | set <n> <model> <effort> | add <model> <effort> | remove <n> | weight <n> | next on|off | compact on|off | notify on|off | switch on|off | reload on|off | autocompact <tokens>|auto|off | premium <model>|none | fallback <model> <effort>|none | reader <model> <effort>|ladder | verifier <model> <effort>|ladder | reset | version | where | notes | note <role> <fact> | agent <role> <id> <model> <effort> <tokens> | agents | start [<role>] | part <done> <total> | handover [new|done]');
 }

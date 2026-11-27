@@ -17,33 +17,39 @@
 // (as budget.mjs works it out), else as a share.
 //   --detail  a table by role and model as well
 //   --json    the figures as one JSON line (for the hooks module)
+// A refusal is one line on standard output and exit code 1, as in every
+// script here.
 import fs from 'node:fs';
 import path from 'node:path';
-import { MODELS, checkConfig } from './models.mjs';
-import { dataDir, projectRoot, agentsLog, loadConfig } from './paths.mjs';
+import { MODELS, checkConfig, modelOf, defaults, setting } from './models.mjs';
+import { dataDir, projectRoot, agentsLog, loadConfig, readJsonl, readLog } from './paths.mjs';
+import { DAY, rateOf, dateOf, badDateText } from './line.mjs';
 
-const DAY = 24 * 60 * 60 * 1000, HOUR = 60 * 60 * 1000;
 const argv = process.argv.slice(2);
 const flag = f => argv.includes(f);
-const opt = f => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
-const fail = msg => { console.error(msg); process.exit(1); };
-const readLines = f => (fs.existsSync(f)
-  ? fs.readFileSync(f, 'utf8').split('\n').filter(Boolean).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } })
-  : []);
+const fail = msg => { console.log(msg); process.exit(1); };
+// a flag's value; a flag given without one (the last word, or another flag
+// after it) is refused: it was taken for "not given" without a word
+const opt = f => {
+  const i = argv.indexOf(f);
+  if (i < 0) return undefined;
+  if (!argv[i + 1] || argv[i + 1].startsWith('--')) fail(f + ' needs a value: ' + f + ' <' + { '--now': 'ISO date', '--project': 'folder', '--session': 'model' }[f] + '>');
+  return argv[i + 1];
+};
+const readLines = f => readJsonl(f).rows;
 const readJson = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 const fin = v => typeof v === 'number' && Number.isFinite(v);
 
-const now = opt('--now') ? new Date(opt('--now')) : new Date();
-if (Number.isNaN(now.getTime())) fail('--now must be a date, such as 2026-11-22T10:00:00Z');
+const now = opt('--now') !== undefined ? dateOf(opt('--now')) : new Date();
+if (!now) fail(badDateText('--now', opt('--now')));
 // the record files read: every project's, or the one --project names
 const logs = opt('--project') !== undefined ? [agentsLog(projectRoot(opt('--project')))]
   : (() => { const d = path.dirname(agentsLog('x')); try { return fs.readdirSync(d).filter(n => n.endsWith('.jsonl')).sort().map(n => path.join(d, n)); } catch { return []; } })();
 
 // ---- the session model ----
-const shortOf = s => Object.keys(MODELS).find(m => String(s).toLowerCase().includes(m)) || null;
 let session = null, sessionFrom = null;
 if (opt('--session') !== undefined) {
-  session = shortOf(opt('--session'));
+  session = modelOf(opt('--session'));
   if (!session) fail('--session must name a known model: ' + Object.keys(MODELS).join(', '));
   sessionFrom = 'flag';
 }
@@ -53,34 +59,24 @@ if (!session) {
 }
 if (!session) {
   const { cfg } = loadConfig(checkConfig);
-  const top = cfg && cfg.tiers && cfg.tiers[0];
-  session = top && MODELS[top.model] ? top.model : 'fable';
+  const top = setting(cfg, 'tiers')[0];
+  session = top && MODELS[top.model] ? top.model : defaults().tiers[0].model;
   sessionFrom = 'config';
 }
 const sessionLabel = MODELS[session].label;
 
 // ---- the week ----
-const isReading = e => !!e && typeof e === 'object' && !Number.isNaN(Date.parse(e.t)) && fin(e.all);
-const lastReading = readLines(path.join(dataDir, 'log.jsonl')).filter(e => isReading(e) && !Number.isNaN(Date.parse(e.reset))).at(-1);
+const lastReading = readLog().filter(e => !Number.isNaN(Date.parse(e.reset))).at(-1);
 let weekEnd = lastReading ? Date.parse(lastReading.reset) : now.getTime() + 1;
 while (weekEnd <= now.getTime()) weekEnd += 7 * DAY;
 const weekStart = weekEnd - 7 * DAY;
 
-// ---- dollars per point of the weekly meter: budget.mjs's rule on rate.json
-//      as it stands (this week's from a rise of 5 points, else the carried
-//      one, else this week's from 2 points). A file without v: 2 holds the
-//      raw tokens per point of 0.9.15 and before: no rate. ----
-const rs = readJson(path.join(dataDir, 'rate.json'));
-let rate = null;
-if (rs && typeof rs === 'object' && rs.v === 2) {
-  const rise = fin(rs.from) && fin(rs.to) ? rs.to - rs.from : 0;
-  const usd = fin(rs.usd) ? rs.usd : 0;
-  rate = rise >= 5 && usd > 0 ? usd / rise : fin(rs.carried) && rs.carried > 0 ? rs.carried : null;
-  // else budget.mjs's estimate from this week's transcripts, else this week's from 2 points
-  const e = rs.estimate;
-  if (rate === null && e && fin(e.usd) && e.usd > 0 && fin(e.points) && e.points > 0) rate = e.usd / e.points;
-  if (rate === null && rise >= 2 && usd > 0) rate = usd / rise;
-}
+// ---- dollars per point of the weekly meter: the one rule (line.mjs rateOf)
+//      on rate.json as it stands: this week's from a rise of 5 points, else
+//      the carried one, else the estimate from this week's transcripts, else
+//      this week's from 2 points. A file without v: 2 holds the raw tokens
+//      per point of 0.9.15 and before: no rate. ----
+const rate = rateOf(readJson(path.join(dataDir, 'rate.json'))).usd;
 
 // ---- prices ----
 // A record carries one total (`tokens`), not the input, output and cache

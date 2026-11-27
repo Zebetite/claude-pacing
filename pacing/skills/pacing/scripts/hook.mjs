@@ -9,8 +9,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MODELS, relabel } from './models.mjs';
-import { dataDir, projectRoot, pendingHandovers, ageText, markSession, unmarkSession, otherSessions, recentHookReading } from './paths.mjs';
+import { relabel, meterLabel } from './models.mjs';
+import { dataDir, projectRoot, pendingHandovers, ageText, markSession, unmarkSession, otherSessions, recentHookReading, isReading } from './paths.mjs';
 import { updateJson } from './safe.mjs';
 
 // The one place that says how a waiting handover is picked up: the skills
@@ -84,7 +84,7 @@ const stateFile = path.join(dataDir, 'state.json');
 let s = null;
 if (fs.existsSync(stateFile)) { try { s = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { s = null; } }
 // a state without a usable time or figures is no reading: say nothing of it
-if (s && (typeof s !== 'object' || Number.isNaN(Date.parse(s.t)) || typeof s.all !== 'number' || typeof s.line !== 'number' || !s.level)) s = null;
+if (s && !(isReading(s) && typeof s.line === 'number' && s.level)) s = null;
 if (!s) {
   if (handoverVisible) out('Pacing: ' + handoverVisible, 'Pacing (skill `pacing`): ' + handoverContext);
   process.exit(0);
@@ -106,7 +106,7 @@ const none = s.premiumOut || s.fableOut
   ? 'No model is left on the ladder until the reset: wrap up, or add a tier or a fallback on another model (`/pacing setup`)'
   : 'This reading names no model: `/pacing usage now` takes a new one';
 const trend = s.trend ? ', trend ' + (s.trend.rate >= 0 ? '+' : '') + s.trend.rate + ' %/day, projected ' + s.trend.projected + ' % at reset' : '';
-const premLabel = s.premiumModel && MODELS[s.premiumModel] ? MODELS[s.premiumModel].label : 'Fable';
+const premLabel = meterLabel(s.premiumModel);
 // the per-model meter, paced on the same line, may have set the level or
 // moved the session off its model
 const facts = 'weekly meter ' + s.all + ' % used, budget line ' + s.line + ' %, level ' + s.level
@@ -123,21 +123,27 @@ const auto = s.source === 'hook' ? ', automatic' : '';
 // the user nor the session is given steps for it. It runs here when the last
 // reading, or any reading of the last 24 h, is one it took.
 const moduleRuns = s.source === 'hook' || recentHookReading() !== null;
+// The user is asked to switch only when the per-model meter's model is out
+// (the user's word: the plugin handles models and effort through subagents;
+// a switch only sometimes)
+const mustSwitch = !!(s.premiumOut || s.fableOut);
 const carriedMs = s.premiumAt && s.premium != null && !(s.premiumOut || s.fableOut) ? Date.now() - Date.parse(s.premiumAt) : NaN;
 const carriedOld = carriedMs >= 3600000;
 const carried = carriedOld ? premLabel + ' was last read ' + span(carriedMs) + ' ago, at ' + s.premium + ' %' : '';
 const visible = stale
   ? 'Pacing (' + ageH + ' h ago' + auto + ', stale): ' + facts + (hasNext ? '. Last recommendation: ' + next : '') + '; the session will take a fresh reading before the first big task.'
-  : 'Pacing (' + ageH + ' h ago' + auto + '): ' + facts + '. ' + (hasNext ? 'Recommended model for this session: ' + next + '.' + (moduleRuns ? '' : ' Check the model menu shows ' + menu + '.') : none + '.')
+  : 'Pacing (' + ageH + ' h ago' + auto + '): ' + facts + '. ' + (hasNext ? (mustSwitch ? premLabel + ' is out until the reset: switch this session to ' + next + '.' : 'Pacing hands work to subagents on the right models by itself.') : none + '.')
     + (carriedOld ? ' ' + carried + ': the session will take a full reading before the first big task.' : '');
 const context = stale
   ? 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago, STALE: the budget line has moved since): ' + facts + (hasNext ? '. Last recommendation: ' + next : '')
     + '. Do not tell the user to switch models on this reading. Before the first big task run the `pacing` skill with `usage` (it takes a reading only where no newer one came: no hooks module, as in a terminal), and follow its do: line; load the `pacing:route` skill once before the first delegation.'
   : 'Pacing (skill `pacing`, last reading ' + ageH + ' h ago): ' + facts + '. '
     + (hasNext ? 'Recommended model for this session: ' + next
-      + (moduleRuns
-        ? '. The pacing hooks module runs here: if you run on another model or effort, its Switch row above the prompt offers the change; do not tell the user to switch, nor how.'
-        : '. If the model and effort you run on (named in your system prompt) differ from that, your first reply starts with one line telling the user to switch the model menu to ' + menu + ' (only the user can).')
+      + (!mustSwitch
+        ? '. Do not tell the user to switch model or effort: the plugin moves work to subagents on the right models by itself (pacing:route).'
+        : moduleRuns
+          ? '. ' + premLabel + ' is out until the reset: the Switch row above the prompt offers ' + next + '; do not give steps.'
+          : '. ' + premLabel + ' is out until the reset: if you run on it, your first reply starts with one line telling the user to switch the model menu to ' + menu + ' (only the user can).')
       : none + '; your first reply starts with one line telling the user so.')
     + (carriedOld ? ' The weekly meter\'s figure is fresh, but ' + carried + ': before the first big task run the `pacing` skill with `usage` (it takes a reading only where no newer one came: no hooks module, as in a terminal).'
       : ' This reading is fresh: use it; take no reading unasked.')

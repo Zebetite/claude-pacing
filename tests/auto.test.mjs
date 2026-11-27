@@ -428,23 +428,23 @@ describe('the tier map for the status line follows the ladder in force', () => {
 });
 
 describe('what the session should run on, for the switch button', () => {
-  test('the recommendation, and at "over" one step less effort on tier 1', () => {
+  test('the recommendation, and never a step less effort', () => {
     const s = sandbox();
     try {
       // 10 % on day 1 of 7: ahead, tier 1 for the session
       const ahead = auto(s, 10);
       assert.deepEqual(ahead.recommend, { model: 'claude-fable-5-2', label: 'Fable 5.2', effort: 'high' });
-      assert.equal(ahead.effortStep, null);
+      assert.equal(ahead.effortStep, undefined);
       assert.equal(ahead.premiumModelId, 'claude-fable-5-2');
-      // just over the line: over, one step less effort on Fable
+      // just over the line: over, and no step less effort (the user's word)
       const over = auto(s, 22, at(1));
       assert.equal(over.level, 'over');
-      assert.deepEqual(over.effortStep, { model: 'claude-fable-5-2', label: 'Fable 5.2', effort: 'medium' });
+      assert.equal(over.effortStep, undefined);
       // far over: throttle, tier 2 for the session, no effort step
       const throttle = auto(s, 40, at(2));
       assert.equal(throttle.level, 'throttle');
       assert.deepEqual(throttle.recommend, { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' });
-      assert.equal(throttle.effortStep, null);
+      assert.equal(throttle.effortStep, undefined);
     } finally { s.cleanup(); }
   });
 });

@@ -21,11 +21,14 @@ needs Node.js 18 or later.
   today's budget still allows will last at your pace, then the weekly
   meters;
 - the pacing pane beside the chat, in the desktop app;
-- a toast when the budget level changes, and now and then a row above the
-  prompt that offers to compact a large session or to switch model
-  (nothing is compacted or switched without your click);
+- a toast when the budget gets far over its line or the week is nearly
+  used, and now and then a row above the prompt that offers to compact a
+  large session or, when Fable is out or far over its line, to switch
+  model (nothing is compacted or switched without your click);
 - one line from Claude when it hands work to a subagent, saying which
   agent, which model and what for, and the result in the same session;
+  independent parts of a task go to several agents at once, so the work
+  is done sooner;
 - two settings written for you: after a reading you ask for, the
   recommended model and effort for *new* sessions go into
   `~/.claude/settings.json` (on Windows also into the desktop app's
@@ -34,7 +37,7 @@ needs Node.js 18 or later.
 The default tiers are Fable 5.2 high for the session, Opus 5.5 medium and
 Sonnet 5.5 medium for subagents; while Fable's own meter is used up, Opus
 5.5 high takes the top place. The budget line is drawn against the weekly
-meter (**Weekly · all models**), and against Fable's meter while Fable
+meter ("Weekly · all models"), and against Fable's meter while Fable
 runs the session. `skills/pacing/GUIDE.md` explains the
 rules; `skills/pacing/SKILL.md` (reports and settings) and
 `skills/route/SKILL.md` (delegating work) are what Claude follows.
@@ -61,9 +64,10 @@ file list: the page shows a README's pictures as their descriptions):
 | `skills/pacing/SKILL.md` | the skill for reports and settings, invoked as `/pacing:pacing` (or by typing "usage") |
 | `skills/route/SKILL.md` | the rules for delegating work, which Claude loads once per session before its first delegation (`/pacing:route`) |
 | `skills/pacing/GUIDE.md`, `BRIEF.md` | the user guide, and the standing brief for subagents, which `config.mjs start` prints for each agent with its notes and the user's own rules |
+| `skills/pacing/INTERNALS.md` | how it works inside: the automatic readings in detail, how the budget in tokens is learned, when a report reuses the last reading, how `/pacing-status` splits use by model, how a new version is found. Nothing loads it automatically |
 | `skills/pacing/SETUP.md`, `HANDOVER.md` | the steps for `setup` and for writing a handover, read only when needed so that `SKILL.md` stays short |
 | `agents/*.md` | the four role agents the session delegates to and keeps for its whole run: `reader`, `verifier`, `implementer`, `researcher` |
-| `skills/pacing/scripts/*.mjs` | `budget.mjs` (the rule), `config.mjs` (the ladder), `hook.mjs` (session start), `models.mjs` (the model table), `paths.mjs` (where a project's notes and handovers live), `safe.mjs` (writes that several sessions can make at once without losing one), `doctor.mjs` (the self-check: is pacing working here, and what to do if not), `saved.mjs` (what handing work to agents on cheaper models saved this week), `estimate.mjs` (what this week's local sessions cost, from their transcripts: the first "Budget tokens" figure before the rate is learned) |
+| `skills/pacing/scripts/*.mjs` | `budget.mjs` (the rule), `config.mjs` (the ladder), `hook.mjs` (session start), `models.mjs` (the model table), `line.mjs` (the budget line, the pace and the trends, without files), `paths.mjs` (every path: Claude Code's folder, the data folder, a project's notes and handovers, the desktop app's files), `safe.mjs` (writes that several sessions can make at once without losing one), `doctor.mjs` (the self-check: is pacing working here, and what to do if not), `saved.mjs` (what handing work to agents on cheaper models saved this week), `estimate.mjs` (what this week's local sessions cost, from their transcripts: the first "Budget tokens" figure before the rate is learned) |
 | `hooks/hooks.json` | a SessionStart hook that shows the last reading and the recommended model, and says when another session has been at work in the project; a SessionEnd hook that takes this session's mark off the project |
 | `hooks/readings.json`, `readings.mjs` | automatic readings after a turn, a status line with what is left of the budget and the weekly meters' usage (both always whole) and how many subagents run (that part shrinks to keep the line within 70 characters in the desktop app), the reports `/pacing-status`, `/pacing-usage`, `/pacing-doctor` and `/pacing-saved` without a model call, and a toast when a large session resumes after an hour's pause, through a hooks module, on a Claude Code version that has them; an older one reads the file's empty `hooks` block and skips the module. `readings.test.ts` tests it (`claude plugin test`) |
 
@@ -103,7 +107,7 @@ folder, which an update replaces:
 
 | file | what |
 |---|---|
-| `config.json` | the ladder, the last-day weight, the per-model meter and its fallback, the reader's model, the next-session switch and the other settings (`compact`, `notify`, `switch`, `reload`) |
+| `config.json` | the ladder, the last-day weight, the per-model meter and its fallback, the reader's model, the next-session switch and the other settings (`compact`, `notify`, `switch`, `reload`, `autocompact`) |
 | `log.jsonl`, `state.json` | the readings, and the last one for the hook |
 | `line.json` | the newest reading's account-wide part (meters, budget line, what is left, the rate), which every session's status line takes in |
 | `rate.json`, `scan.json` | what a point of the weekly meter costs, as learned from the week's sessions, and where the last pass over each session's transcript left off, so the next one reads only what was added |

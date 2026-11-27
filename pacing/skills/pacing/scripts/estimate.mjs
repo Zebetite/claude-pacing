@@ -11,20 +11,15 @@
 // one footing. Use on another device or on the web is not in these files: the
 // estimate errs low, and so shows less left than there is.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { MODELS } from './models.mjs';
+import { MODELS, modelOf } from './models.mjs';
+import { projectsDir } from './paths.mjs';
 import { updateJson } from './safe.mjs';
 
-export const projectsDir = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects');
+export { projectsDir };
 
 // a model id ("claude-opus-5-5", an older "claude-fable-5-1") priced as its family
-const priceOf = id => {
-  if (typeof id !== 'string') return null;
-  for (const m of Object.values(MODELS)) if (id === m.id) return m.price;
-  for (const [k, m] of Object.entries(MODELS)) if (id.includes(k)) return m.price;
-  return null;
-};
+const priceOf = id => { const m = modelOf(id); return m ? MODELS[m].price : null; };
 
 const n = v => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
 

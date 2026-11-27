@@ -1342,3 +1342,56 @@ not in its `git add`). "Meter is full" reads "used up": a newcomer took
 "full" for room left. Still as it was: the rest of the guide's order, the
 rules said twice across the skill and agent files, the other front-page
 bullets.
+
+## Colours by how far over, and the 5-hour window in the pane (0.9.40)
+
+The user's word: a figure a point or two over its line need not shout.
+A text (the time left today, the level's words, a meter's figure, the
+per-model meter's words) keeps its normal colour up to 5 points over its
+budget line; from there it runs yellow, orange, red, red by 30 points
+over (`pane.mjs` OVER_CALM, OVER_RED, overShade). The week nearly used
+(95 % or more) stays red. A bar keeps its normal colours up to its line;
+each cell past it runs yellow, orange, red by how far past the line it
+stands, and the dial's ring and strip do the same. The per-model meter's
+`OVER +N` tag, its line and band take the shade of how far over it is,
+no longer red at one point over.
+
+Under the per-model meter the pane now has the 5-hour window, a bar with
+no line: when it resets, when it would be full first at this pace, and
+from 85 % that heavy work waits for the reset. `budget.mjs` gives the
+hooks module `five`, `fiveReset` and `fiveFull` for it.
+
+The same release has the rest of the review's items: the pane's
+background tasks, a click on an agent opening its transcript, the dial
+that no longer jumps at a redraw, the Compact button in the Context
+section from 300 000 tokens, `CLAUDE_CONFIG_DIR` followed, and the
+guide's account of agents running in parallel.
+
+Pacing now sets where Claude Code compacts a session by itself. The user
+wants 750 000 tokens. `config.json` keeps it as `autoCompact`: a token
+count from 100k to 1M, `auto` (Claude Code's own) or `off` (left alone);
+`/pacing autocompact` sets it. At a session's start, after a `/model`
+and at a main turn's end when the model or the setting changed, the
+hooks module reads the context breakdown (`autocompactSource`,
+`rawMaxTokens`) and runs `/autocompact` only where Claude Code has
+another value. Claude Code keeps the value per model, which is why a
+model change checks again. A window set by
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW` wins over the settings, so it is left
+as it is. A success says nothing; a failure is one toast per load. The
+pane's Context section shows the value, with − and + (50k a step) and
+Auto; a press saves it through `config.mjs` and runs `/autocompact`.
+
+Fewer messages, and no switch steps but rarely (the user's words: do not
+suggest lowering the effort for being a little over; bother the user as
+little as possible; model and effort are the plugin's to handle through
+subagents, a switch only sometimes). The effort step is gone: no
+`effort:` line, no `effortStep`, no Switch row for less effort, and none
+for another model or effort than recommended. The Switch row now comes
+only while the session runs on Fable and Fable is out, or held 20 points
+or more over its line (`HELD_SWITCH_AT`). A level toast comes only when
+the level gets worse, to far over budget or to stop, and not where that
+row says it already; going just over, coming back under, Fable held or
+let back bring none. The toast is short: the change and one step
+(`levelToastText`), where it held the whole `do:` line and was cut off.
+The room-left-over toast is gone (the pane and `/pacing-status` keep the
+note). The session's start line asks for a switch only when Fable is out.

@@ -10,9 +10,9 @@ before the reset. You choose how many tiers there are, and the model and
 effort of each.
 
 <p>
-<img src="docs/images/pane-agents.png" width="260" alt="The pacing pane with sample figures: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, three agents at work, the context at 18% and the models this session">
-<img src="docs/images/pane-within.png" width="260" alt="The pacing pane with sample figures: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, one agent at work">
-<img src="docs/images/pane-week-over.png" width="260" alt="The pacing pane with the week over its budget line: the week at 79% against a line of 73%, 1h 40m over today's budget, Fable 5.2 at 68% under its line, two agents at work">
+<img src="docs/images/pane-agents.png" width="260" alt="The pacing pane with sample figures: the week at 55% with 9h 30m left today, Fable 5.2 at 83% and 10 points over its budget line, the 5-hour window at 46%, three agents at work, the context at 18% and the models this session">
+<img src="docs/images/pane-within.png" width="260" alt="The pacing pane with sample figures: the week at 38% with 14h left today, Fable 5.2 at 44% under its budget line of 57%, the 5-hour window at 18%, one agent at work">
+<img src="docs/images/pane-week-over.png" width="260" alt="The pacing pane with the week over its budget line: the week at 79% against a line of 73%, 1h 40m over today's budget, Fable 5.2 at 68% under its line, the 5-hour window at 71%, two agents at work">
 </p>
 
 The pacing pane, with sample figures.
@@ -36,12 +36,15 @@ It needs Node.js 18 or later on the PATH of the shell Claude Code uses.
   meters.
 - **A pane beside the chat** in the desktop app (the pictures above): the
   week as a dial, the meters, the agents at work, the session's context.
-- **Short messages.** A toast when the budget level changes, and now and
-  then a row above the prompt that offers to compact a large session or
-  to switch model. Nothing is compacted or switched without your click.
+- **Short messages.** A toast when the budget gets far over its line or
+  the week is nearly used, and now and then a row above the prompt that
+  offers to compact a large session or, when Fable is out or far over its
+  line, to switch model. Nothing is compacted or switched without your
+  click.
 - **Work handed to subagents.** Claude says in one line which agent it
   started, on which model, and for what, and gives you the result in the
-  same session.
+  same session. Independent parts of a task go to several agents at once,
+  so the work is done sooner.
 - **Two settings written for you.** After a reading you ask for, the
   recommended model and effort for *new* sessions go into
   `~/.claude/settings.json` (on Windows also into the desktop app's
@@ -78,8 +81,8 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   drawn as a ship's console: a reactor dial for the week, the time left
   today to stay on budget, the meters, the agents at work as small
   robots, the context and the models (`/pacing-pane` reopens it). Past
-  its budget line, Fable's own meter gets a red `OVER` tag and the
-  stretch over the line in red. The pane comes from readings the plugin
+  its budget line, Fable's own meter gets an `OVER` tag; on every bar
+  the stretch over the line runs yellow, orange, red the further over. The pane comes from readings the plugin
   takes by itself after a turn, on a Claude Code version with hooks
   modules; older versions run the rest of the plugin as before. The
   pictures at the top are drawn by the pane's own code with sample
@@ -88,26 +91,20 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
 - **Role agents the session keeps.** A reader (Haiku 5.5 by default) for
   logs, searches and unfamiliar code, a verifier for tests and checks, an
   implementer for specified edits, and a researcher for documentation.
-  Each leaves notes per project for the next agent of its role.
-- **Handover between sessions.** A session that has grown long writes
-  what the next one needs; the next session's start line names the file.
-  From 400 000 tokens the skill suggests compacting at a natural break,
-  and a prompt sent after an hour's pause in a session of 300 000 or more gets one
-  toast that the cache has lapsed.
-- **A start line in every new session** with the last reading and the
-  recommended model, which can also become the default for new sessions.
-- **A switch that knows what it costs.** A row above the prompt offers
-  the recommended model with Switch. In a session of 200 000 tokens or
-  more it says what storing the session again on the new model costs,
-  and offers **Compact, then switch**.
-- **Large results counted.** `/pacing-status` says how many tool results
-  of 10 000 tokens or more the session holds: every later turn sends them
-  again, and the reader agent reads such things for less.
-- **Room left over.** When the trend leaves 10 points or more of the week
-  unused at the reset, one toast and `/pacing-status` say so: the
-  allowance does not carry over.
-- **Weekly summaries** (`/pacing week`), and at "over" a suggestion to
-  lower the session's effort one step before work moves down a tier.
+  Each leaves notes per project for the next agent of its role. Several
+  run at once on independent parts of a task, so it is done sooner; never
+  two on the same files, and the session gives you the combined result.
+- **A long session kept affordable.** From 400 000 tokens a row offers
+  to compact it; a handover is written only when a new session is the only way.
+- **A start line in every new session** with the last reading. It asks
+  you to switch model only when Fable is out until the reset.
+- **A switch that knows what it costs.** In a large session the Switch row
+  offers **Compact, then switch**, since a new model stores it all again.
+- **Large results counted** in `/pacing-status`: every later turn sends
+  them again.
+- **Room left over.** The pane and `/pacing-status` say when the week
+  would end with allowance unused: it does not carry over.
+- **Weekly summaries** with `/pacing week`.
 
 ## Install
 

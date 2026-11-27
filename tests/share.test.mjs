@@ -90,7 +90,7 @@ describe('another session at work in the project', () => {
     start(s, 'session-a');
     s.write('state.json', JSON.stringify({ t: new Date().toISOString(), all: 36, line: 46.7, level: 'ahead', next: { model: 'fable', label: 'Fable 5.2', effort: 'high' }, reset: RESET }));
     const j = start(s, 'session-b');
-    assert.match(j.systemMessage, /^Pacing \(0 h ago\): weekly meter 36 % used.*Check the model menu shows Fable 5\.2, effort high\. Another session has been working in this project \(/);
+    assert.match(j.systemMessage, /^Pacing \(0 h ago\): weekly meter 36 % used.*Pacing hands work to subagents on the right models by itself\. Another session has been working in this project \(/);
     assert.match(j.hookSpecificOutput.additionalContext, /Load the `pacing:route` skill once before the first delegation\. ANOTHER SESSION has been working/);
   }));
 });

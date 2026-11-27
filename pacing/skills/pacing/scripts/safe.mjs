@@ -10,10 +10,11 @@
 //                              is still what was read; else again from the
 //                              fresh content, a few times, then a clear error
 // The last check and the rename happen under a short lock file, since two
-// writers could otherwise both pass the check together. No dependencies.
+// writers could otherwise both pass the check together. The lock file holds
+// its owner's token, and only its owner removes it. No dependencies.
 import fs from 'node:fs';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 // a pause that blocks this process only: the scripts are synchronous
 const sleep = ms => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(1, ms)); };
@@ -23,7 +24,20 @@ const readOrNull = file => { try { return fs.readFileSync(file, 'utf8'); } catch
 // scanner is looking at it: worth a short wait, not an error
 const BUSY = ['EPERM', 'EBUSY', 'EACCES', 'ENOTEMPTY'];
 
-export const atomicWrite = (file, text) => {
+// A target that is a symbolic link (a settings.json kept in a dotfiles
+// folder) is written through: the temporary file goes beside the file the
+// link leads to and is renamed over that one. Renamed over the link, it
+// would leave a regular file in the link's place and the linked file as it
+// was. A link to a file that is not there yet is followed one step.
+const through = file => {
+  try {
+    if (!fs.lstatSync(file).isSymbolicLink()) return file;
+  } catch { return file; /* none yet */ }
+  try { return fs.realpathSync(file); } catch { /* it leads to nothing yet */ }
+  try { return path.resolve(path.dirname(file), fs.readlinkSync(file)); } catch { return file; }
+};
+export const atomicWrite = (target, text) => {
+  const file = through(target);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = file + '.' + process.pid + '.' + Math.random().toString(36).slice(2, 8) + '.tmp';
   fs.writeFileSync(tmp, text);
@@ -67,16 +81,33 @@ const REFUSALS = 10;
 // itself gives up on a busy file within 2 s), and 15 s leaves a script the
 // hooks module runs (20 s) time to write after a takeover.
 // Every round of the loop checks the wait and sleeps: none may spin.
+//
+// The owner's token: the lock file holds the process id and a random part,
+// written when the lock is made, and a lock is removed only by the one whose
+// token it still holds (release). A holder that stalled past the stale age
+// (a laptop asleep inside a write) finds its lock taken over when it wakes:
+// the file under that name is then its successor's, and deleting it would
+// let a third writer in beside the successor.
 export const LOCK_WAIT_MS = 15000, LOCK_STALE_MS = 10000;
+const release = (lock, token) => {
+  let holds = null;
+  try { holds = fs.readFileSync(lock, 'utf8'); } catch { return; /* gone: taken over, and released by its new holder */ }
+  if (holds !== token) return;
+  try { fs.unlinkSync(lock); } catch { /* gone meanwhile, or busy: it goes stale and is taken over */ }
+};
 export const withLock = (file, fn, { waitMs = LOCK_WAIT_MS, staleMs = LOCK_STALE_MS } = {}) => {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const lock = file + '.lock';
+  const token = process.pid + '.' + randomBytes(8).toString('hex');
   const until = Date.now() + waitMs;
   let refused = 0;
   for (;;) {
     let err;
     try {
-      fs.closeSync(fs.openSync(lock, 'wx'));
+      const fd = fs.openSync(lock, 'wx');
+      // a lock without its token would be nobody's: none could release it
+      try { fs.writeSync(fd, token); } catch (e) { fs.closeSync(fd); try { fs.unlinkSync(lock); } catch { /* it goes stale */ } throw e; }
+      fs.closeSync(fd);
       break;
     } catch (e) { err = e; }
     if (err.code !== 'EEXIST' && !BUSY.includes(err.code)) throw err;
@@ -91,13 +122,13 @@ export const withLock = (file, fn, { waitMs = LOCK_WAIT_MS, staleMs = LOCK_STALE
     if (Date.now() > until) throw new Error('could not write ' + path.basename(file) + ': another process holds its lock (' + lock + '); try again');
     sleep(10 + Math.random() * 25);
   }
-  held.add(lock);
-  try { return fn(); } finally { held.delete(lock); try { fs.unlinkSync(lock); } catch { /* taken over as stale: its new holder removes it */ } }
+  held.set(lock, token);
+  try { return fn(); } finally { held.delete(lock); release(lock, token); }
 };
 // a command that ends inside a change (a refusal, process.exit) must not
 // leave its lock for the others to wait out
-const held = new Set();
-process.on('exit', () => { for (const lock of held) { try { fs.unlinkSync(lock); } catch { /* gone */ } } });
+const held = new Map();
+process.on('exit', () => { for (const [lock, token] of held) release(lock, token); });
 
 // change(text) gets the file's text (null when there is none) and returns the
 // new text, or null to leave the file as it is. It may run more than once,

@@ -1,26 +1,30 @@
-// A self-check: is pacing working here, and if not, what to do. Nine checks,
+// A self-check: is pacing working here, and if not, what to do. Ten checks,
 // a line each: ok, warn or fail, a short name, what was found, and for a warn
 // or a fail one plain step after "->". Never a step to change this session's
 // model or effort: the hooks module's Switch row offers that. A summary line
 // ends it.
 //   node doctor.mjs [--json] [--now <ISO>]
 // --json: the same as one JSON line, for the hooks module. --now: the time to
-// check against (the tests). Exit code 1 when a check failed, else 0.
+// check against (the tests); one that is no date is refused in one line, exit
+// code 1. Exit code 1 when a check failed, else 0.
 // It reads the files the other scripts write and changes none of them; the
 // one write is a temp file in each folder, removed at once. A missing or
 // damaged file is a finding, never a crash.
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MODELS, EFFORTS, SETTINGS, RETIRED, checkConfig } from './models.mjs';
-import { dataDir, projectRoot, projectSlug, notesDir, agentsLog, loadConfig, recentHookReading } from './paths.mjs';
+import { MODELS, EFFORTS, SETTINGS, RETIRED, checkConfig, setting } from './models.mjs';
+import { dataDir, settingsFile, logFile, projectRoot, projectSlug, notesDir, agentsLog, loadConfig, recentHookReading, readJsonl, isReading,
+  appDataDir, subdirs, presetTargets } from './paths.mjs';
+import { DAY, HOUR, RATE_V, rateOf, dateOf, badDateText } from './line.mjs';
 
 const argv = process.argv.slice(2);
 const asJson = argv.includes('--json');
-const nowArg = argv.indexOf('--now') >= 0 ? Date.parse(argv[argv.indexOf('--now') + 1]) : NaN;
-const now = Number.isNaN(nowArg) ? Date.now() : nowArg;
-const HOUR = 3600000, DAY = 24 * HOUR;
+// a --now that is no date was taken for the clock's time without a word: refused
+const nowAt = argv.indexOf('--now');
+const nowArg = nowAt >= 0 ? dateOf(argv[nowAt + 1]) : null;
+if (nowAt >= 0 && !nowArg) { console.log(badDateText('--now', argv[nowAt + 1])); process.exit(1); }
+const now = nowArg ? nowArg.getTime() : Date.now();
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = projectRoot(process.env.CLAUDE_PROJECT_DIR || process.cwd());
 
@@ -30,20 +34,9 @@ const readJson = f => {
   try { text = fs.readFileSync(f, 'utf8'); } catch (e) { return e.code === 'ENOENT' ? { missing: true } : { damaged: true }; }
   try { return { value: JSON.parse(text) }; } catch { return { damaged: true }; }
 };
-// the lines of a .jsonl file, and how many of them do not parse
-const readLines = f => {
-  let text;
-  try { text = fs.readFileSync(f, 'utf8'); } catch (e) { return { missing: e.code === 'ENOENT', damaged: e.code !== 'ENOENT', rows: [], bad: 0 }; }
-  const rows = [];
-  let bad = 0;
-  for (const l of text.split('\n')) {
-    if (!l.trim()) continue;
-    try { const v = JSON.parse(l); if (v && typeof v === 'object' && !Array.isArray(v)) rows.push(v); else bad++; } catch { bad++; }
-  }
-  return { missing: false, damaged: false, rows, bad };
-};
-// a reading as budget.mjs logs it: a time and the all-models figure
-const isReading = e => !!e && typeof e === 'object' && !Array.isArray(e) && !Number.isNaN(Date.parse(e.t)) && typeof e.all === 'number';
+// the lines of a .jsonl file, and how many of them do not parse; what a
+// reading is (paths.mjs readJsonl, isReading)
+const readLines = readJsonl;
 
 // ---- texts ----
 const ago = ms => (ms < 60000 ? 'under a minute' : ms < 90 * 60000 ? Math.round(ms / 60000) + ' min' : ms < 2 * DAY ? Math.round(ms / HOUR) + ' h' : Math.round(ms / DAY) + ' days');
@@ -56,7 +49,7 @@ const labelOf = m => (m && MODELS[m] ? MODELS[m].label : 'the per-model meter');
 const USAGE = 'type /pacing usage now';
 
 // ---- what the checks share: the readings, the last one, the settings ----
-const log = readLines(path.join(dataDir, 'log.jsonl'));
+const log = readLines(logFile);
 const readings = log.rows.filter(isReading);
 const logLast = readings.at(-1) || null;
 const stateRead = readJson(path.join(dataDir, 'state.json'));
@@ -69,7 +62,8 @@ const cfg = loaded.cfg || {};
 
 // ---- the plugin's version against the copies the desktop app installed ----
 // The app keeps them under %LOCALAPPDATA%\Claude-Data\<app>\rpm\<a>\<b>\, a
-// manifest.json beside a plugin_<id> folder per plugin. Not found: skipped.
+// manifest.json beside a plugin_<id> folder per plugin (paths.mjs appDataDir:
+// Windows only). Not found: skipped.
 const versionParts = v => String(v).split(/[.+-]/).map(x => (/^\d+$/.test(x) ? Number(x) : x));
 const newer = (a, b) => {
   const x = versionParts(a), y = versionParts(b);
@@ -81,10 +75,10 @@ const newer = (a, b) => {
   }
   return false;
 };
-const subdirs = d => { try { return fs.readdirSync(d, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => path.join(d, e.name)); } catch { return []; } };
 const installedCopies = () => {
-  const base = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Claude-Data');
+  const base = appDataDir();
   const found = [];
+  if (!base) return found;
   for (const app of subdirs(base)) {
     for (const b of subdirs(path.join(app, 'rpm')).flatMap(subdirs)) {
       if (!fs.existsSync(path.join(b, 'manifest.json'))) continue;
@@ -131,7 +125,7 @@ const checkReading = () => {
 // ---- the per-model meter: when it was last read. An automatic reading that
 //      did not read it carries the last figure over (premiumAt says from when) ----
 const checkPremium = () => {
-  const premium = cfg.premium === undefined ? 'fable' : cfg.premium;
+  const premium = setting(cfg, 'premium');
   if (premium === null) return { status: 'ok', found: 'none: the settings say the plan has no per-model meter' };
   if (!last) return { status: 'ok', found: 'no reading yet: nothing to check' };
   const label = labelOf(last.premiumModel || premium);
@@ -171,13 +165,29 @@ const checkSettings = () => {
   }
   const onOff = v => (v === false ? 'off' : 'on');
   return { status: 'ok', found: 'compact ' + onOff(cfg.compactAsk) + ', notify ' + onOff(cfg.agentNotices) + ', switch ' + onOff(cfg.switchAsk)
-    + ', reload ' + onOff(cfg.autoReload) + ', ' + (cfg.tiers ? cfg.tiers.length : 3) + ' tiers' };
+    + ', reload ' + onOff(cfg.autoReload) + ', ' + setting(cfg, 'tiers').length + ' tiers' };
+};
+
+// ---- what new sessions start on: a reading the session takes on purpose
+//      writes the recommended model and effort to settings.json (the
+//      terminal CLI's default) and to the desktop app's preset, the entry of
+//      this session's account (paths.mjs presetTargets). The preset is
+//      written on Windows only: where the app keeps it on macOS or Linux is
+//      not known, so there the line says so. ----
+const checkNext = () => {
+  if (setting(cfg, 'setNextModel') === false) return { status: 'ok', found: 'off: a reading leaves settings.json and the desktop app\'s preset alone' };
+  if (readJson(settingsFile).damaged) return { status: 'warn', found: 'settings.json does not parse: a reading leaves it alone', fix: 'repair ' + settingsFile, settings: settingsFile };
+  const t = presetTargets();
+  const preset = !t ? '; the desktop app\'s preset is written on Windows only'
+    : !t.files.length ? '; no desktop app preset found'
+      : ' and the desktop app\'s preset (' + (t.account === 'this' ? 'this account\'s' : 'every account\'s') + ')';
+  return { status: 'ok', found: 'a reading sets settings.json' + preset, settings: settingsFile, presets: t ? t.files : null, account: t && t.files.length ? t.account : null };
 };
 
 // ---- the token rate (rate.json): dollars per point of the weekly meter, by
-//      budget.mjs's rule: this week's from a rise of 5 points, else the one
-//      carried from last week, else the estimate from this week's
-//      transcripts, else this week's from 2 points. A file
+//      the one rule (line.mjs rateOf): this week's from a rise of 5 points,
+//      else the one carried from last week, else the estimate from this
+//      week's transcripts, else this week's from 2 points. A file
 //      without v: 2 holds 0.9.15's raw tokens per point, which budget.mjs
 //      drops at its next reading. ----
 const usdText = n => '$' + (n >= 1 ? n.toFixed(2) : n.toFixed(4));
@@ -185,21 +195,20 @@ const checkRate = () => {
   const r = readJson(path.join(dataDir, 'rate.json'));
   if (r.missing) return { status: 'ok', found: 'not learned yet', learned: false };
   const v = r.value, fin = x => typeof x === 'number' && Number.isFinite(x);
-  if (!r.damaged && v && typeof v === 'object' && !Array.isArray(v) && v.v !== 2) return { status: 'ok', found: 'not learned yet (an older rate was dropped)', learned: false };
+  if (!r.damaged && v && typeof v === 'object' && !Array.isArray(v) && v.v !== RATE_V) return { status: 'ok', found: 'not learned yet (an older rate was dropped)', learned: false };
   if (r.damaged || !v || typeof v !== 'object' || !fin(v.from) || !fin(v.to) || !fin(v.usd)) {
     return { status: 'warn', found: 'rate.json does not parse', fix: USAGE + ' to start it afresh', learned: false };
   }
-  const rise = Math.round((v.to - v.from) * 10) / 10, carried = fin(v.carried) && v.carried > 0 ? v.carried : null;
+  const rate = rateOf(v), usd = rate.usd, rise = Math.round(rate.rise * 10) / 10;
   const points = rise + (rise === 1 ? ' point' : ' points');
-  const learned = (usd, how, pts) => ({ status: 'ok', found: 'learned, ' + usdText(usd) + ' per point, ' + how, learned: true, usdPerPoint: Math.round(usd * 1e4) / 1e4, points: pts });
-  if (rise >= 5 && v.usd > 0) return learned(v.usd / rise, 'from ' + points + ' this week', rise);
-  if (carried) return learned(carried, 'carried from last week', null);
+  const learned = (how, pts) => ({ status: 'ok', found: 'learned, ' + usdText(usd) + ' per point, ' + how, learned: true, usdPerPoint: Math.round(usd * 1e4) / 1e4, points: pts });
+  if (rate.from === 'week') return learned('from ' + points + ' this week', rise);
+  if (rate.from === 'carried') return learned('carried from last week', null);
   // before that, budget.mjs's estimate from this week's transcripts
-  const e = v.estimate;
-  if (e && fin(e.usd) && e.usd > 0 && fin(e.points) && e.points > 0) {
-    return { status: 'ok', found: 'estimated, ' + usdText(e.usd / e.points) + ' per point, from this week\'s transcripts; learning it: ' + points + ' so far', learned: false, estimated: true, usdPerPoint: Math.round(e.usd / e.points * 1e4) / 1e4, points: rise };
+  if (rate.from === 'estimate') {
+    return { status: 'ok', found: 'estimated, ' + usdText(usd) + ' per point, from this week\'s transcripts; learning it: ' + points + ' so far', learned: false, estimated: true, usdPerPoint: Math.round(usd * 1e4) / 1e4, points: rise };
   }
-  if (rise >= 2 && v.usd > 0) return learned(v.usd / rise, 'from only ' + points + ' so far', rise);
+  if (rate.from === 'early') return learned('from only ' + points + ' so far', rise);
   return { status: 'ok', found: 'not learned yet: ' + points + ' this week so far', learned: false, points: rise };
 };
 
@@ -239,7 +248,7 @@ const checkFolders = () => {
 
 // ---- run them all: a check that throws is a finding too ----
 const CHECKS = [['version', checkVersion], ['hooks', checkHooks], ['reading', checkReading], ['per-model', checkPremium], ['week', checkWeek],
-  ['settings', checkSettings], ['token rate', checkRate], ['agents', checkAgents], ['folders', checkFolders]];
+  ['settings', checkSettings], ['next model', checkNext], ['token rate', checkRate], ['agents', checkAgents], ['folders', checkFolders]];
 const checks = CHECKS.map(([name, fn]) => {
   try { const r = fn(); return { name, status: r.status, found: r.found, fix: r.fix || null, ...Object.fromEntries(Object.entries(r).filter(([k]) => !['status', 'found', 'fix'].includes(k))) }; } catch (e) {
     return { name, status: 'warn', found: 'could not check: ' + (e && e.message ? e.message : String(e)), fix: 'run it again; if it stays, report it' };

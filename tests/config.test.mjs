@@ -86,6 +86,44 @@ describe('the ladder', () => {
     s.writeConfig({ ...cfgOf(s), compactAsk: 'sometimes' });
     assert.match(s.config([]).out, /the offers to compact are not on or off: the default is used/);
   }));
+  test('the auto-compact window: 750k by default; tokens as 600000, 600k or 0.6M, auto or off; kept by reset; refused out of bounds', withHome(s => {
+    s.config(['init']);
+    assert.equal(cfgOf(s).autoCompact, 750000);
+    assert.match(s.config([]).out, /^auto-compact window: 750k tokens \(pacing sets \/autocompact to it\)$/m);
+    for (const v of ['600000', '600k', '0.6M', '600K']) {
+      s.config(['autocompact', '1M']);
+      const r = s.config(['autocompact', v]);
+      assert.equal(r.code, 0, v);
+      assert.equal(cfgOf(s).autoCompact, 600000, v);
+    }
+    assert.match(s.config([]).out, /^auto-compact window: 600k tokens/m);
+    s.config(['autocompact', 'auto']);
+    assert.equal(cfgOf(s).autoCompact, 'auto');
+    assert.match(s.config([]).out, /^auto-compact window: auto \(Claude Code's own\)$/m);
+    s.config(['autocompact', 'off']);
+    assert.equal(cfgOf(s).autoCompact, 'off');
+    assert.match(s.config([]).out, /^auto-compact window: off \(pacing leaves \/autocompact alone\)$/m);
+    s.config(['reset']);
+    assert.equal(cfgOf(s).autoCompact, 'off');
+    // in an apply run, with another setting
+    const ap = s.config(['apply', 'autocompact', '500k', '+', 'compact', 'off']);
+    assert.equal(ap.code, 0);
+    assert.deepEqual([cfgOf(s).autoCompact, cfgOf(s).compactAsk], [500000, false]);
+    // the bounds, and words it does not take: one line, exit 1, nothing written
+    for (const [v, re] of [['50k', /^the auto-compact window must be from 100k to 1M tokens, not 50k$/], ['2M', /^the auto-compact window must be from 100k to 1M tokens, not 2M$/],
+      ['soon', /^autocompact <tokens> \| auto \| off: a window from 100k to 1M, such as 750000, 750k or 0\.75M; not soon$/]]) {
+      const r = s.config(['autocompact', v]);
+      assert.equal(r.code, 1, v);
+      assert.match(r.out.trim(), re);
+      assert.equal(r.err, '');
+    }
+    assert.equal(s.config(['autocompact']).code, 1);
+    assert.equal(cfgOf(s).autoCompact, 500000);
+    // a hand edit it would not write: dropped with a note, the default stands
+    s.writeConfig({ ...cfgOf(s), autoCompact: 5 });
+    assert.match(s.config([]).out, /the auto-compact window is not a token count from 100k to 1M, auto or off: the default is used/);
+    assert.match(s.config([]).out, /^auto-compact window: 750k tokens/m);
+  }));
   test('the notices about running subagents: on by default, off and on again, kept by reset', withHome(s => {
     s.config(['init']);
     assert.match(s.config([]).out, /^toasts about running subagents: on$/m);
@@ -494,4 +532,27 @@ describe('the reload at a new version', () => {
     assert.ok(!guide.includes('**Reload**'));
     assert.ok(!guide.includes('🔄'));
   });
+});
+
+// --project without a folder fell back to the folder the command ran in: a
+// note or an agent record then went to the wrong project without a word
+describe('--project without a folder', () => {
+  const LINE = '--project needs a folder: --project "<project folder>"';
+  test('refused in one line, exit code 1, and nothing is written', withHome(s => {
+    for (const args of [['note', 'reader', 'a fact', '--project'], ['notes', '--project'], ['agents', '--project', ''], ['note', 'reader', '--project', '--replace', 'x', 'y'],
+      ['agent', 'reader', 'a1', 'haiku', 'medium', '9000', '--project'], ['start', 'reader', '--project'], ['handover', 'new', '--project']]) {
+      const r = s.config(args);
+      assert.equal(r.code, 1, args.join(' '));
+      assert.equal(r.out.trim(), LINE, args.join(' '));
+      assert.equal(r.err, '');
+    }
+    assert.ok(!s.exists('notes') && !s.exists('agents') && !s.exists('handover'));
+  }));
+  test('in an apply run: the run stops at that command', withHome(s => {
+    const r = s.config(['apply', 'weight', '2', '+', 'note', 'reader', 'a fact', '--project', '+', 'weight', '3']);
+    assert.equal(r.code, 1);
+    assert.deepEqual(r.out.trim().split(/\r?\n/), ['note reader a fact --project: ' + LINE, 'stopped there: the commands before it were applied, the ones after it were not']);
+    assert.equal(cfgOf(s).lastDayWeight, 2);
+    assert.ok(!s.exists('notes'));
+  }));
 });

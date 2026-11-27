@@ -1,10 +1,8 @@
 # Handover
 
 Read by the session on `/pacing handover`, or when a new session is the
-last resort (the session cannot be compacted, or the user asks for one);
-SKILL.md points here. Never offer one otherwise: all work stays in this
-session. `${CLAUDE_SKILL_DIR}`
-is the skill's folder.
+last resort (the session cannot be compacted, or the user asks for one).
+`${CLAUDE_SKILL_DIR}` is the pacing skill's folder.
 
 When a session must leave its work to a new one:
 

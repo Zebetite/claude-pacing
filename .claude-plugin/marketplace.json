@@ -9,7 +9,7 @@
     {
       "name": "pacing",
       "source": "./pacing",
-      "description": "Use better models and still make your weekly Claude plan last. Your best model does the hard work and cheaper models take easier work as subagents; a day-by-day budget decides how much moves down, so the week doesn't run out before the reset. With a status line showing what is left of the budget, a pane beside the chat, four role agents that keep notes per project, and handovers between long sessions.",
+      "description": "Use better models and still make your weekly Claude plan last. Your best model does the hard work and cheaper models take easier work as subagents; a day-by-day budget decides how much moves down, so the week doesn't run out before the reset. With a status line showing what is left of the budget, a pane beside the chat, four role agents that work in parallel and keep notes per project, and handovers between long sessions.",
       "category": "productivity",
       "tags": ["usage", "pacing", "models", "budget", "subagents"]
     }

@@ -15,10 +15,9 @@ takes, which failures were there before the change.
 
 Run, with the project folder the task names (your shell may start
 elsewhere): `node "${CLAUDE_PLUGIN_ROOT}/skills/pacing/scripts/config.mjs" start verifier --project "<project folder>"`.
-It prints your standing rules, your notes for this project and the
-user's own rules (above all how tests are run and what they may touch):
-follow them all. If it fails, go on under the rules here and the
-project's `CLAUDE.md`, and say so in your report.
+Follow what it prints, above all how tests are run and what they may
+touch. If it fails, go on under the rules here and the project's
+`CLAUDE.md`, and say so in your report.
 
 ## Your work
 
@@ -34,14 +33,12 @@ what a run left behind unless the task says how. You do not decide whether
 the design is right: that stays with the session. A failure that was there
 before the change is reported as such, when you can tell.
 
-Worth a note for the next verifier: the command for a suite and its
-running time, a flaky test, a setup step; not this run's result (a test
-that fails today is a result, not a note).
+Worth a note: the command for a suite and its running time, a flaky
+test, a setup step; a test that fails today is a result, not a note.
 
 ## Report
 
 The verdict first: passed, failed, or could not be run, with the counts
 and the command that ran. Then each failure with its exact output and
 `path:line`. Passing output is summarised in a line, never pasted. Last,
-what was not checked and why. Give the important content itself, not a
-summary of it.
+what was not checked and why. Give the important content itself.

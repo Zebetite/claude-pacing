@@ -71,12 +71,15 @@ const SHOTS = [
       meters: [
         { label: 'Weekly', pct: 55, line: 73.3, note: 'budget line 73%' },
         { label: 'Fable 5.2', pct: 83, line: 73.3, loud: true, over: true, note: '10 points over its budget line 73%: held, kept for hard tasks' },
+        { label: '5-hour', pct: 46, line: null, five: true, note: 'resets in 2h 10m' },
       ],
       running: [
         'reader: reading the test logs · 2m 10s (Haiku 5.5 medium)',
         'implementer: step 2 of 4, the band row · 4m, about 3m left (Opus 5.5 high)',
         'side session 1m 30s, Fix the docs build',
       ],
+      // a shell in the background, as the pane's last section lists it
+      tasks: [{ kind: 'shell', what: 'Run the dev server', state: 'running', time: '12m' }],
     },
   },
   {
@@ -87,6 +90,7 @@ const SHOTS = [
       meters: [
         { label: 'Weekly', pct: 38, line: 57.1, note: 'budget line 57%' },
         { label: 'Fable 5.2', pct: 44, line: 57.1, loud: true, over: false, note: 'budget line 57%' },
+        { label: '5-hour', pct: 18, line: null, five: true, note: 'resets in 3h 40m' },
       ],
       running: ['verifier: running the test suite · 40s (Haiku 5.5 medium)'],
       context: { used: '96k', of: '1M', pct: 10 },
@@ -102,6 +106,7 @@ const SHOTS = [
       meters: [
         { label: 'Weekly', pct: 79, line: 73.3, note: 'budget line 73%' },
         { label: 'Fable 5.2', pct: 68, line: 73.3, loud: true, over: false, note: 'budget line 73%' },
+        { label: '5-hour', pct: 71, line: null, five: true, note: 'resets in 1h 30m · full in 1h 10m at this pace' },
       ],
       running: [
         'researcher: reading the API docs · 1m 20s (Sonnet 5.5 medium)',
