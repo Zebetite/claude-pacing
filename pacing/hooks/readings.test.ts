@@ -5,7 +5,7 @@
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
 import { DIALS, FRAMES, frameSvg, barSvg, barText } from './pane.mjs'
-import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
+import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, unusedText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, BULKY_TOKENS, BULKY_EVERY, tokensOfText, toolLabel, bulkyText, bulkyStatus, newResults, noteResult, whatOf, contextLines, RESULTS_TOP, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -910,14 +910,50 @@ test('Compact now in the desktop app: the direct call is refused, so /compact ru
   expect(runs).toEqual(['/compact ' + COMPACT_INSTRUCTIONS])
   expect(toasts.slice(said)).toEqual([])
   expect((await bandText($)).text).toBe(undefined)
-  // still running after a moment: a toast says it runs when the session is free
+  // no compaction started after a while (the session is busy): a toast says it runs when the session is free
   await clock.advance(RUN_WAIT)
+  expect(toasts.slice(said)).toEqual([])
+  await clock.advance(COMPACT_RUN_WAIT - RUN_WAIT)
   expect(toasts.slice(said)).toEqual(['🗜️ compacting: /compact runs as soon as the session is free.'])
   expect(COMPACT_WAIT_TEXT).toBe('🗜️ compacting: /compact runs as soon as the session is free.')
   done()
   await clock.advance(1)
   expect(fills).toEqual([])
   expect(toasts.slice(said)).toEqual([COMPACT_WAIT_TEXT, '🗜️ compacted.'])
+})
+
+// the user's word: the toast that it soon runs is not wanted when it starts right away
+test('Compact now that starts right away: no toast that it waits, only that it compacted', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  big(on)
+  const toasts: string[] = []
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  on('fs.read', () => ({ value: '{}' }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
+  on('session.compact', () => { throw new Error('pacing: $.session.compact: not available in a headless (-p / SDK) session yet') })
+  let done = () => {}
+  const compacting = new Promise<void>(r => { done = r })
+  on('command.run', async () => { await compacting; return { text: '' } })
+  on('prompt.fill', () => ({ isFilled: true }))
+  on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 320000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const said = toasts.length
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-compact' })
+  await clock.advance(1)
+  await ui.unmount()
+  // the engine starts the compaction at once: the module's hook on it runs
+  try { await $.session.compact({ trigger: 'manual', messages: [] } as any) } catch { /* this engine has none to give */ }
+  // a minute of compacting, and nothing said of waiting
+  await clock.advance(60000)
+  expect(toasts.slice(said)).toEqual([])
+  done()
+  await clock.advance(1)
+  expect(toasts.slice(said)).toEqual(['🗜️ compacted.'])
 })
 
 test('Compact now that the engine refuses both ways: its own reason in the toast, /compact in the box', async ($, on) => {

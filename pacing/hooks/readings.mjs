@@ -1339,6 +1339,10 @@ function later($, work) {
 }
 // a queued command that has not run after this long gets a toast saying it waits
 export const RUN_WAIT = 1500;
+// /compact answers only once the compaction is over, a minute on: its toast
+// waits longer, and is called off as the compaction starts (the user's word:
+// no "runs as soon as" when it starts right away)
+export const COMPACT_RUN_WAIT = 4000;
 export const switchWaitText = target => ICON.switched + ' the switch to ' + target.label + (target.effort ? ' ' + target.effort : '') + ' runs as soon as the session is free.';
 export const COMPACT_WAIT_TEXT = ICON.compacted + ' compacting: /compact runs as soon as the session is free.';
 export const switchedText = (target, nowModel, nowEffort, was = null) => (sameModel(nowModel, target.model)
@@ -1638,6 +1642,8 @@ export const register = on => {
   // the offer to compact: the one in the band ({ level, tokens }) or null, the
   // size at each level's last offer, and whether a person has typed here
   let offer = null;
+  // calls off the toast that a queued /compact waits; set while one is queued
+  let compactWaited = null;
   // the pane drawn since it last opened: its first draw takes fresh figures
   let paneDrawn = false;
   let offered = {};
@@ -1810,19 +1816,22 @@ export const register = on => {
     const stack = row => (agentRow ? Box({ flexDirection: 'column', children: [row, agentRow] }) : row);
     // a toast when a queued command has not run after RUN_WAIT: the session
     // is busy, and the command runs when it is free
-    const whileWaiting = text => {
+    const whileWaiting = (text, wait = RUN_WAIT) => {
       let timer = null;
-      try { timer = $.clock.after(RUN_WAIT, () => { try { $.ui.toast(text); } catch { /* no toast */ } }); } catch { /* no timers: no toast */ }
+      try { timer = $.clock.after(wait, () => { try { $.ui.toast(text); } catch { /* no toast */ } }); } catch { /* no timers: no toast */ }
       return () => { try { if (timer) timer.cancel(); } catch { /* fired already */ } };
     };
     // /compact as if typed (command.run, queued until the session is free);
-    // it resolves once the compaction has run, and throws where none started
+    // it resolves once the compaction has run, and throws where none started.
+    // The toast that it waits is called off as the compaction starts (the
+    // session.compact hook), so it shows only while the session is busy.
     const typedCompact = async () => {
-      const waited = whileWaiting(COMPACT_WAIT_TEXT);
+      const waited = whileWaiting(COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT);
+      compactWaited = waited;
       try {
         const ran = await $.command.run({ command: 'compact', args: COMPACT_INSTRUCTIONS });
         if (commandFailed(ran)) throw new Error((ran && ran.text) || 'the /compact command failed');
-      } finally { waited(); }
+      } finally { waited(); if (compactWaited === waited) compactWaited = null; }
     };
     if (sw && (sw.urgent || !offer)) {
       const target = sw;
@@ -1978,6 +1987,8 @@ export const register = on => {
   // a compaction the person or the engine ran: the offers start over, and
   // the agents are counted again from the engine's list (none without it)
   on('session.compact', async ($, e, next) => {
+    // the session's compaction starts: a queued /compact waits no more
+    if (!e.agentId && compactWaited) { compactWaited(); compactWaited = null; }
     const r = await next(e);
     if (!e.agentId && r && r.messages) {
       forget();

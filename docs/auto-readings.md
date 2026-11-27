@@ -1239,3 +1239,15 @@ draws a `loud` bar loudly only past its line: under it the bar is the
 week's own, a white tick with an arrow and no tag, and the words under it
 are plain like the week's. Past the line nothing changed: the thick red
 line, the `OVER +N` tag, the red cells and band, the red words.
+
+## No "runs as soon as" toast for a compaction that starts at once (0.9.37)
+
+The user's word: the message that the compaction soon runs need not show
+when it starts right away. Compact now runs `/compact` as if typed
+(`$.command.run`), which answers only once the compaction is over, a
+minute on; the toast for a queued command came after `RUN_WAIT` (1.5 s)
+without an answer, so it came every time. Now the module's hook on
+`session.compact` calls the toast off as the session's compaction starts
+(`compactWaited`), and the toast waits `COMPACT_RUN_WAIT` (4 s): it shows
+only while the session is busy and the command really waits. The switch's
+toast is as it was. Not tried live.
