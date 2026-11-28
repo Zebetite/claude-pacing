@@ -34,13 +34,11 @@ const blend = (a, b, k) => {
   return '#' + [16, 8, 0].map(s => c(s).toString(16).padStart(2, '0')).join('');
 };
 // How far a figure is over its budget line, in points, sets its colour (the
-// user's word). A text keeps its normal colour up to OVER_CALM points over;
-// past that it runs yellow, orange, red (the user's word), red at OVER_RED
-// points and beyond. A bar's or the dial's cells keep their normal colours
-// up to OVER_CALM points past the line too (the user's word, 0.9.48: no
-// yellow for a little over); past that each cell takes the same run by how
-// far past the line it stands: yellow from OVER_CALM, orange half way, red
-// from OVER_RED.
+// user's word). From the line it blends from its normal colour to yellow,
+// yellow at OVER_CALM points over (the user's word, 0.9.49: a blend from
+// the line, not a switch at 5); past that it runs on to orange and red, red
+// at OVER_RED points and beyond. A bar's or the dial's cells do the same,
+// each by how far past the line it stands, from its own colour.
 export const OVER_CALM = 5;
 export const OVER_RED = 30;
 export const YELLOW = '#facc15';
@@ -52,18 +50,51 @@ const runAt = k => {
   return blend(OVER_RUN[i], OVER_RUN[i + 1], at - i);
 };
 export const overShade = by => runAt((by - OVER_CALM) / (OVER_RED - OVER_CALM));
-// a text's colour at `by` points over its line: null (its normal colour) up to OVER_CALM
-export const overText = by => (typeof by === 'number' && by > OVER_CALM ? overShade(by) : null);
+// How much of the normal colour (`base`) every shade keeps, to the far end
+// of the run (the user's word, 0.9.49: 30% of the base colour, as the
+// context bar keeps its green); none without a base.
+export const OVER_KEEP = 0.3;
+export const kept = (shade, base) => (base ? blend(shade, base, OVER_KEEP) : shade);
+// the colour at `by` points over its line: null (its normal colour) on or
+// under the line; given `base` (that normal colour, #rrggbb), a blend from
+// it to yellow up to OVER_CALM; without one, null up to OVER_CALM; past it
+// the run
+export const overText = (by, base = null) => (typeof by !== 'number' || by <= 0 ? null
+  : by <= OVER_CALM ? (base ? kept(blend(base, YELLOW, by / OVER_CALM), base) : null) : kept(overShade(by), base));
+// The context (the user's word, 0.9.49): its own green up to CONTEXT_WARM
+// tokens, then blending to yellow, orange and red, red at the bar's end
+// (the model's window). `k`: 0 at CONTEXT_WARM, 1 at the end.
+export const CONTEXT_WARM = 300000;
+export const CONTEXT_RUN = [ACCENTS.context, YELLOW, ORANGE, '#f43f5e'];
+// how much of the context's own green stays in every cell of the blend, to
+// its end (the user's word, 0.9.49: keep the base colour somewhat all the way)
+export const CONTEXT_KEEP = 0.3;
+export const contextShade = k => {
+  const at = clamp(k, 0, 1) * (CONTEXT_RUN.length - 1), i = Math.min(CONTEXT_RUN.length - 2, Math.floor(at));
+  return blend(blend(CONTEXT_RUN[i], CONTEXT_RUN[i + 1], at - i), ACCENTS.context, CONTEXT_KEEP);
+};
+// where on the bar (a share of 100) the blend starts, for a window of `max`
+// tokens; null when the window is no larger than CONTEXT_WARM
+export const contextWarmAt = max => (max > CONTEXT_WARM ? CONTEXT_WARM / max * 100 : null);
+// the context's colour at `pct` of the bar, the blend starting at `warm`
+export const contextTone = (pct, warm) => (warm != null && pct > warm ? contextShade((pct - warm) / (100 - warm)) : ACCENTS.context);
 // The per-model meter (Fable's, `loud`) is used more freely than the week,
-// so it has a scale of its own (the user's word): its normal colours up to
-// PREM_CALM points over, everywhere (cells, line, tag, figure, words); then
+// so it has a scale of its own (the user's word): from the line its normal
+// colours blend to yellow, yellow at PREM_CALM points over, everywhere
+// (cells, line, tag, figure, words; 0.9.49: a blend, not a switch at 20);
 // yellow up to PREM_YELLOW, orange at half way to PREM_RED, red from PREM_RED.
 export const PREM_CALM = 20;
 export const PREM_YELLOW = 40;
 export const PREM_RED = 80;
 export const premShade = by => runAt((by - PREM_YELLOW) / (PREM_RED - PREM_YELLOW));
-// its colour at `by` points over its line: null (its normal colour) up to PREM_CALM
-export const premText = by => (typeof by === 'number' && by > PREM_CALM ? premShade(by) : null);
+// its colour at `by` points over its line, as overText on its own scale:
+// given `base`, a blend from it to yellow up to PREM_CALM
+export const premText = (by, base = null) => (typeof by !== 'number' || by <= 0 ? null
+  : by <= PREM_CALM ? (base ? kept(blend(base, YELLOW, by / PREM_CALM), base) : null) : kept(premShade(by), base));
+// the words' normal colours, as #rrggbb to blend from: the level's words
+// (drawn 'success' on or under the line) and a dim caption
+export const SUCCESS_HEX = '#22c55e';
+export const DIM_HEX = '#94a3b8';
 // the colour at `k` (0 to 1) along a level's run; a colour without a run is itself
 export const sweepAt = (color, k) => {
   const stops = SWEEPS[color];
@@ -155,11 +186,11 @@ export const BAR_CELLS = 36;
 // saying by how much, on a band behind the cells over the line (still: the
 // user's word, a pulse drew too much), in the shade of how far over it is.
 // On every bar with a line the cells past it take overText by how far past
-// the line each stands: their own colours up to OVER_CALM past, then the
-// run from yellow (a loud bar's premText: its own colours up to PREM_CALM
+// the line each stands: from their own colours blending to yellow at
+// OVER_CALM past, then the run (a loud bar's premText: yellow at PREM_CALM
 // past); the cells up to it keep the bar's own colours.
 export const LINE_TAG = 18;
-export const barSvg = memo('bar', (segments, marker = null, w = 480, h = 34, loud = false) => {
+export const barSvg = memo('bar', (segments, marker = null, w = 480, h = 34, loud = false, warm = null) => {
   const total = clamp(segments.reduce((a, s) => a + Math.max(0, s.pct), 0), 0, 100);
   // (not by `loud`: under the line a loud bar is the plain one, name and all)
   const g = 'glow-' + drawingId('bar', segments, marker, w, h);
@@ -175,8 +206,10 @@ export const barSvg = memo('bar', (segments, marker = null, w = 480, h = 34, lou
   const colorAt = i => {
     // (a cell's middle, in points of the bar)
     const mid = (i + 0.5) / n * 100;
-    const past = marker !== null && segments.length === 1 && mid > marker ? (loud ? premText(mid - marker) : overText(Math.min(mid, total) - marker)) : null;
+    const past = marker !== null && segments.length === 1 && mid > marker ? (loud ? premText : overText)(Math.min(mid, total) - marker, sweepAt(segments[0].color, i / (n - 1))) : null;
     if (past) return past;
+    // `warm` (the context's bar): its own colour up to it, the cells past it blending by where they stand
+    if (warm !== null && segments.length === 1) return mid > warm ? contextShade((mid - warm) / (100 - warm)) : segments[0].color;
     if (segments.length === 1) return sweepAt(segments[0].color, i / (n - 1));
     const at = (i + 0.5) / lit * total;
     let run = 0;
@@ -194,8 +227,8 @@ export const barSvg = memo('bar', (segments, marker = null, w = 480, h = 34, lou
     const x = num(clamp(marker, 0, 100) / 100 * (w - slant) + slant / 2);
     // a rect, not a line: a filter on a zero-wide box draws nothing
     // the arrow above it, large and edged dark (the user's word: more visible)
-    tick = '<rect x="' + num(x - 1.75) + '" y="6" width="3.5" height="' + (h - 11) + '" rx="1.5" fill="#f8fafc" filter="url(#' + g + ')"/>'
-      + '<path d="M' + x + ' 12l-7 -11h14z" fill="#f8fafc" stroke="#0b1220" stroke-width="1" stroke-linejoin="round"/>';
+    tick = '<rect x="' + num(x - 1.75) + '" y="6" width="3.5" height="' + (h - 11) + '" rx="1.5" fill="' + BUDGET_LINE + '" filter="url(#' + g + ')"/>'
+      + '<path d="M' + x + ' 12l-7 -11h14z" fill="' + BUDGET_LINE + '" stroke="#0b1220" stroke-width="1" stroke-linejoin="round"/>';
   }
   const by = h - 4;
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">'
@@ -210,9 +243,10 @@ const loudBarSvg = (segments, marker, w, h) => {
   const total = clamp(segments.reduce((a, s) => a + Math.max(0, s.pct), 0), 0, 100);
   const lit = total > 0 ? Math.max(1, Math.round(total / 100 * n)) : 0;
   const m = clamp(marker, 0, 100);
-  // only drawn past the line (barSvg): the line, its tag, its arrow and the
-  // band in the shade of how far over the meter is (HUD up to PREM_CALM)
-  const lineCol = premText(total - m) || HUD;
+  // only drawn past the line (barSvg): the line, its tag and its arrow in
+  // BUDGET_LINE, always; the band over the line in the shade of how far
+  // over the meter is (from HUD, yellow at PREM_CALM)
+  const lineCol = premText(total - m, HUD) || HUD;
   const x = clamp(m / 100 * (w - slant) + slant / 2, 2, w - 2);
   const base = segments.length ? segments[0].color : HUD;
   const cell = (i, fill, extra) => {
@@ -223,7 +257,7 @@ const loudBarSvg = (segments, marker, w, h) => {
   for (let i = 0; i < n; i++) {
     const mid = i * (cw + gap) + slant / 2 + cw / 2;
     if (i >= lit) off += cell(i, '#808080', ' fill-opacity="0.2"');
-    else if (mid > x) hot += cell(i, premText((mid - slant / 2) / (w - slant) * 100 - m) || sweepAt(base, i / (n - 1)), '');
+    else if (mid > x) hot += cell(i, premText(Math.min((mid - slant / 2) / (w - slant) * 100, total) - m, sweepAt(base, i / (n - 1))) || sweepAt(base, i / (n - 1)), '');
     else on += cell(i, sweepAt(base, i / (n - 1)), '');
   }
   // the stretch over the line, as a band behind the cells
@@ -234,11 +268,11 @@ const loudBarSvg = (segments, marker, w, h) => {
   const tw = word.length * 8 + 12, lw = 6;
   const tx = clamp(x - tw / 2, 0, w - tw);
   const tag = '<g>'
-    + '<rect x="' + num(tx) + '" y="0" width="' + num(tw) + '" height="' + LINE_TAG + '" rx="2" fill="' + lineCol + '"/>'
+    + '<rect x="' + num(tx) + '" y="0" width="' + num(tw) + '" height="' + LINE_TAG + '" rx="2" fill="' + BUDGET_LINE + '"/>'
     + '<text x="' + num(tx + tw / 2) + '" y="' + (LINE_TAG - 5) + '" text-anchor="middle" ' + FONT + ' font-size="12.5" font-weight="700" letter-spacing="0.5" fill="#0b1220">' + word + '</text>'
-    + '<rect x="' + num(x - lw / 2) + '" y="' + (LINE_TAG + 6) + '" width="' + lw + '" height="' + (h - 9 - LINE_TAG) + '" rx="1.5" fill="' + lineCol + '" filter="url(#' + g + ')"/>'
+    + '<rect x="' + num(x - lw / 2) + '" y="' + (LINE_TAG + 6) + '" width="' + lw + '" height="' + (h - 9 - LINE_TAG) + '" rx="1.5" fill="' + BUDGET_LINE + '" filter="url(#' + g + ')"/>'
     // an arrow under the tag, as the weekly bar has, larger
-    + '<path d="M' + num(x) + ' ' + (LINE_TAG + 13) + 'l-8 -12h16z" fill="' + lineCol + '" stroke="#0b1220" stroke-width="1" stroke-linejoin="round"/>'
+    + '<path d="M' + num(x) + ' ' + (LINE_TAG + 13) + 'l-8 -12h16z" fill="' + BUDGET_LINE + '" stroke="#0b1220" stroke-width="1" stroke-linejoin="round"/>'
     + '</g>';
   const by = h - 4;
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">'
@@ -263,7 +297,7 @@ export const ringSvg = memo('ring', (pct, color, marker = null, size = 132, labe
     const a = (clamp(marker, 0, 100) / 100) * 2 * Math.PI - Math.PI / 2;
     const at = d => [num(c + Math.cos(a) * d), num(c + Math.sin(a) * d)];
     const [x1, y1] = at(r - sw / 2 - 3), [x2, y2] = at(r + sw / 2 + 7);
-    tick = '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#e5e7eb" stroke-width="2.5" stroke-linecap="round" filter="url(#' + g + ')"/>';
+    tick = '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + BUDGET_LINE + '" stroke-width="2.5" stroke-linecap="round" filter="url(#' + g + ')"/>';
   }
   const outer = c - 4, inner = r - sw / 2 - 7;
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + ' ' + size + '">'
@@ -388,7 +422,7 @@ export const gaugeSvg = memo('gauge', (pct, color, marker = null, size = 132, la
   let mark = '';
   if (marker !== null) {
     const [x1, y1] = polar(c, c, at(marker), r - 8), [x2, y2] = polar(c, c, at(marker), r + 8);
-    mark = '<line x1="' + num(x1) + '" y1="' + num(y1) + '" x2="' + num(x2) + '" y2="' + num(y2) + '" stroke="#e5e7eb" stroke-width="2.5" stroke-linecap="round" filter="url(#' + g + ')"/>';
+    mark = '<line x1="' + num(x1) + '" y1="' + num(y1) + '" x2="' + num(x2) + '" y2="' + num(y2) + '" stroke="' + BUDGET_LINE + '" stroke-width="2.5" stroke-linecap="round" filter="url(#' + g + ')"/>';
   }
   return SVG(size, size, ticks
     + '<path d="' + arc(c, c, r, from, from + sweep) + '" fill="none" stroke="#808080" stroke-opacity="0.2" stroke-width="9" stroke-linecap="round"/>'
@@ -408,8 +442,9 @@ export const gaugeSvg = memo('gauge', (pct, color, marker = null, size = 132, la
 // pointer outside the data ring, and a small word says which side of it the
 // week is on.
 export const AMBER = '#fbbf24';
-// the week's budget line on the dial: white, a colour no ring or bar takes
-export const BUDGET_LINE = '#f8fafc';
+// every budget line, on the bars and the dials: one white, the same
+// however far over (the user's word, 0.9.49: #EEEEEE all the time)
+export const BUDGET_LINE = '#eeeeee';
 // the dial's frame and core marks: fixed colours that differ from one
 // another and stay the same at every level (the user's word: they should
 // not change with the figure); only the data ring and the figure follow it.
@@ -452,7 +487,7 @@ export const reactorSvg = memo('reactor', (pct, color, marker = null, size = 160
     const d = arc(c, c, 56, i * step + 1, (i + 1) * step - 1);
     // past the budget line, a block takes the shade of how far past it stands
     const mid = (i + 0.5) / n * 100;
-    const hue = (marker !== null && mid > marker && overText(Math.min(mid, p) - marker)) || sweepAt(color, i / span);
+    const hue = (marker !== null && mid > marker && overText(Math.min(mid, p) - marker, sweepAt(color, i / span))) || sweepAt(color, i / span);
     if (part > 0) blocks += '<path d="' + d + '" fill="none" ' + stroke(hue, 8, 0.45 + 0.55 * part) + '/>';
     else dark += '<path d="' + d + '" fill="none" ' + stroke('#808080', 8, 0.16) + '/>';
   }
@@ -467,7 +502,7 @@ export const reactorSvg = memo('reactor', (pct, color, marker = null, size = 160
     pointer = line(a, 47, 64, stroke('#0b1220', 4.5)) + line(a, 47, 64, stroke(BUDGET_LINE, 2.5))
       + '<path d="M' + num(tx) + ' ' + num(ty) + 'L' + num(lx) + ' ' + num(ly) + 'L' + num(rx) + ' ' + num(ry) + 'z" fill="' + BUDGET_LINE + '" stroke="#0b1220" stroke-width="1"/>';
     const over = pct > marker;
-    word = '<text x="' + c + '" y="' + (c - 15) + '" text-anchor="middle" ' + FONT + ' font-size="6.5" letter-spacing="1.5" fill="' + (over && overText(pct - marker) || HUD) + '">' + (over ? 'OVER LINE' : 'NOMINAL') + '</text>';
+    word = '<text x="' + c + '" y="' + (c - 15) + '" text-anchor="middle" ' + FONT + ' font-size="6.5" letter-spacing="1.5" fill="' + (over && overText(pct - marker, HUD) || HUD) + '">' + (over ? 'OVER LINE' : 'NOMINAL') + '</text>';
   }
   // the inner ring: three dashed arcs with a white square node at each start
   let inner = '';
@@ -488,7 +523,7 @@ export const reactorSvg = memo('reactor', (pct, color, marker = null, size = 160
   }
   const on = Math.round(p / 100 * 12);
   let strip = '';
-  for (let i = 0; i < 12; i++) strip += '<rect x="' + num(62 + i * 3) + '" y="101" width="2.2" height="3" fill="' + (i < on ? ((marker !== null && (i + 0.5) / 12 * 100 > marker && overText(Math.min((i + 0.5) / 12 * 100, p) - marker)) || sweepAt(color, i / Math.max(1, on - 1))) : '#808080') + '" fill-opacity="' + (i < on ? 1 : 0.25) + '"/>';
+  for (let i = 0; i < 12; i++) strip += '<rect x="' + num(62 + i * 3) + '" y="101" width="2.2" height="3" fill="' + (i < on ? ((marker !== null && (i + 0.5) / 12 * 100 > marker && overText(Math.min((i + 0.5) / 12 * 100, p) - marker, sweepAt(color, i / Math.max(1, on - 1)))) || sweepAt(color, i / Math.max(1, on - 1))) : '#808080') + '" fill-opacity="' + (i < on ? 1 : 0.25) + '"/>';
   const core = '<circle cx="' + c + '" cy="' + c + '" r="31" fill="url(#' + heart + ')"><animate attributeName="opacity" values="0.8;1;0.8" dur="4s" begin="0s" repeatCount="indefinite"/></circle>'
     + cells + ring(29, stroke(FIGURE, 0.8, 0.8));
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '" viewBox="0 0 160 160">'
@@ -531,7 +566,7 @@ export const levelSvg = memo('level', (pct, color, marker = null, size = 132, la
   let mark = '';
   if (marker !== null) {
     const x = num(left + clamp(marker, 0, 100) / 100 * (size - left * 2));
-    mark = '<path d="M' + x + ' ' + (top - 6) + 'V' + (base + 4) + '" stroke="#e5e7eb" stroke-width="2" stroke-dasharray="3 3" stroke-linecap="round"/>';
+    mark = '<path d="M' + x + ' ' + (top - 6) + 'V' + (base + 4) + '" stroke="' + BUDGET_LINE + '" stroke-width="2" stroke-dasharray="3 3" stroke-linecap="round"/>';
   }
   return SVG(size, size,
     '<text x="' + left + '" y="24" ' + FONT + ' font-size="' + num(size / 5.5) + '" font-weight="700" fill="' + color + '">' + Math.round(p) + '%</text>'
@@ -628,18 +663,16 @@ export const DIAL_SIZE = 124;
 //   mix [{ name, share }]
 //   running [text | { text, id }]: with an id (and o.onAgent) the row's words
 //     are a Button, and a press on them asks for that agent's transcript
-//   context { used, of, pct } | null, contextNote
+//   context { used, of, tokens, max, pct } | null, contextNote (max: the bar's end in tokens, for its colours)
 //   compact 'offer' | 'running' | null: a Compact button in the Context
 //     section (o.onCompact), reading "Compacting…" while one runs; on the
 //     terminal a line of text in its place
-//   autoCompact { text, own, less, more, note, back, off } | null: Claude Code's
-//     auto-compact window in the Context section: a row with the on/off
-//     switch for Claude Code's own (to 'auto', or while `own` back to
-//     `back`) at its right end, then on a row of its own the words with
-//     − (to `less`) and + (to `more`) where each is given; while `own`,
-//     `note` under the switch in their place (o.onAutoCompact(value)). The
-//     terminal draws the switch as ◉ on / ○ off. While `off` (pacing leaves
-//     it alone) `text` alone, one dim line, on every surface
+//   autoCompact { text, own, less, more, off } | null: Claude Code's
+//     auto-compact window in the Context section: its words with − (to
+//     `less`) and + (to `more`) where each is given, small (o.onAutoCompact
+//     (value)). While `own` (Claude Code's own auto-compact, set by
+//     /autocompact auto) or `off` (pacing leaves it alone) `text` alone,
+//     one dim line, on every surface
 //   tasks [{ kind, what, state, time }]: the background tasks, the last
 //     section; state 'running', 'done', 'failed' or 'stopped'
 //   running items may also carry tag (the model, ↑ or ↓ against the
@@ -650,18 +683,6 @@ export const DIAL_SIZE = 124;
 // `o`: surface, placement, onRefresh, onAgent(id), onCompact, onAutoCompact(v), dial (a key of
 // DIALS), now (ms: where the animations stand, see phased; absent in a still
 // picture).
-// the switch row's words, left of the switch
-export const AUTO_COMPACT_OWN_LABEL = 'Use Claude Auto Compact';
-// the switch, as an iPhone's: a blue or grey pill, a white knob right or
-// left. Where Svg draws, it is a picture under a plain Button laid over it
-// (a Button holds only text); elsewhere a text track
-export const SWITCH_ON = '#3b82f6';
-export const SWITCH_OFF = '#4b5563';
-export const SWITCH_KNOB = { on: '    ● ', off: ' ●    ' };
-export const SWITCH_W = 46, SWITCH_H = 26;
-export const switchSvg = on => '<svg xmlns="http://www.w3.org/2000/svg" width="' + SWITCH_W + '" height="' + SWITCH_H + '" viewBox="0 0 ' + SWITCH_W + ' ' + SWITCH_H + '">'
-  + '<rect x="1" y="1" width="' + (SWITCH_W - 2) + '" height="' + (SWITCH_H - 2) + '" rx="' + (SWITCH_H / 2 - 1) + '" fill="' + (on ? SWITCH_ON : SWITCH_OFF) + '"/>'
-  + '<circle cx="' + (on ? SWITCH_W - SWITCH_H / 2 : SWITCH_H / 2) + '" cy="' + SWITCH_H / 2 + '" r="' + (SWITCH_H / 2 - 3) + '" fill="#ffffff"/></svg>';
 export const TASK_MARKS = { done: '✓ done', failed: '✗ failed', stopped: '■ stopped' };
 export const paneView = (t, m, o = {}) => {
   const { Box, Text, Button } = t;
@@ -694,20 +715,20 @@ export const paneView = (t, m, o = {}) => {
   const legend = (c, name, value) => between(
     row([dot(c), Text({ wrap: 'truncate-end', children: name })], { flexShrink: 1 }),
     Text({ tabular: true, mono: true, color: c, children: value }));
-  // A bar keeps the normal colours up to OVER_CALM points past its line (the
-  // cells further past are shaded in barSvg); one without a line turns red when full. A figure and
-  // a meter's words keep theirs up to OVER_CALM points over the line, then
-  // take overShade; the per-model meter's (loud) up to PREM_CALM, then
+  // A bar's cells past its line are shaded in barSvg; one without a line
+  // turns red when full. A figure and a meter's words blend from their
+  // normal colours at the line to yellow at OVER_CALM points over, then
+  // take overShade; the per-model meter's (loud) yellow at PREM_CALM, then
   // premShade; a meter used up is red.
   const byOf = x => (x && x.line != null ? x.pct - x.line : null);
-  const shadeOf = x => (x.loud ? premText : overText)(byOf(x));
+  const shadeOf = (x, base = null) => (x.loud ? premText : overText)(byOf(x), base);
   const meterColor = x => (x.line == null && x.pct >= 100 ? LEVEL_COLORS.stop : LEVEL_COLORS.ok);
-  const figureColor = x => (x.pct >= 100 ? LEVEL_COLORS.stop : shadeOf(x) || sweepAt(LEVEL_COLORS.ok, x.pct / 100));
+  const figureColor = x => (x.pct >= 100 ? LEVEL_COLORS.stop : shadeOf(x, sweepAt(LEVEL_COLORS.ok, x.pct / 100)) || sweepAt(LEVEL_COLORS.ok, x.pct / 100));
   // the week's own words at the top: by the week's points over its line; at
   // 'stop' (the week nearly used) red
   const week = m.meters && m.meters[0];
-  const tone = m.level === 'stop' ? LEVEL_COLORS.stop : overText(byOf(week)) || LEVEL_COLORS.ok;
-  const toneText = m.level === 'stop' ? 'error' : overText(byOf(week)) || 'success';
+  const tone = m.level === 'stop' ? LEVEL_COLORS.stop : overText(byOf(week), LEVEL_COLORS.ok) || LEVEL_COLORS.ok;
+  const toneText = m.level === 'stop' ? 'error' : overText(byOf(week), SUCCESS_HEX) || 'success';
   // the dial's colour run: the week's own up to OVER_CALM points over its
   // line (the user's word, 0.9.48: no yellow for a little over), the
   // level's past that; at 'stop' red
@@ -746,9 +767,9 @@ export const paneView = (t, m, o = {}) => {
       between(Text({ weight: 'medium', children: x.label }), Text({ tabular: true, mono: true, weight: 'semibold', color: figureColor(x), children: Math.round(x.pct) + '%' })),
       bar([{ pct: x.pct, color: meterColor(x) }], x.line ?? null, x.label + ' ' + Math.round(x.pct) + '% used'
         + (x.loud && x.line != null ? ', budget line ' + Math.round(x.line) + '%' : ''), !!x.loud),
-      // a loud line's words: plain like the week's up to PREM_CALM points
-      // over, then bold in the shade of how far over
-      x.note ? (x.loud && shadeOf(x) ? Text({ size: 'caption', weight: 'semibold', color: shadeOf(x), children: '▲ ' + x.note }) : cap(x.note)) : null,
+      // a loud line's words: from dim at the line blending to yellow at
+      // PREM_CALM points over, then bold with ▲ in the shade of how far over
+      x.note ? (x.loud && shadeOf(x, DIM_HEX) ? Text({ size: 'caption', weight: shadeOf(x) ? 'semibold' : undefined, color: shadeOf(x, DIM_HEX), children: (shadeOf(x) ? '▲ ' : '') + x.note }) : cap(x.note)) : null,
     ]))], { rowGap: 1 }));
   }
 
@@ -798,49 +819,36 @@ export const paneView = (t, m, o = {}) => {
   const compact = !m.compact ? null
     : o.surface === 'terminal' ? cap(m.compact === 'running' ? 'Compacting…' : '/compact cuts it.')
     : row([Button({ key: 'pacing-pane-compact', label: m.compact === 'running' ? 'Compacting…' : 'Compact', variant: 'secondary', onPress: o.onCompact || (() => {}) })]);
-  // The auto-compact window pacing sets: last a row with an on/off switch
-  // for Claude Code's own auto-compact at its right end (a plain Button
-  // holding a green or grey track with its knob; the terminal's reads
-  // ◉ on or ○ off), above it, while it is off, the window's words with − and +
-  // (a step each) on a row of their own; while on, a short note under the
-  // switch. Left alone ('off'): one dim line, no buttons.
+  // The auto-compact window pacing sets: its words with − and + (a step
+  // each) at the row's right end, small (the user's word, 0.9.49: a
+  // Button has no size, so a caption Text in it, and no label, which the
+  // desktop would draw in its place). Claude Code's own auto-compact
+  // ('auto') or left alone ('off'): one dim line, no buttons (the switch
+  // for Claude Code's own is gone, the user's word, 0.9.49).
   const ac = m.autoCompact;
   const setTo = v => () => (o.onAutoCompact ? o.onAutoCompact(v) : undefined);
-  const knob = ac && !ac.off && (o.surface === 'terminal'
-    ? Button({ key: 'pacing-pane-autocompact-auto', label: ac.own ? '◉ on' : '○ off', plain: true, onPress: setTo(ac.own ? ac.back : 'auto') })
-    // The desktop draws a Button's label where it has one, children or not
-    // (live, 0.9.44: the label ran past the pane), and drops a Text's
-    // backgroundColor inside a Button (live, 0.9.45: the knob alone). So the
-    // switch is the drawn pill, with a Button of blank text and no label laid
-    // over it, both clipped to the pill: one press anywhere on it.
-    : hasSvg ? Box({ position: 'relative', width: SWITCH_W, height: SWITCH_H, flexShrink: 0, overflow: 'hidden', children: [
-      t.Svg({ source: switchSvg(ac.own), alt: AUTO_COMPACT_OWN_LABEL + (ac.own ? ': on' : ': off'), width: SWITCH_W, height: SWITCH_H }),
-      Box({ position: 'absolute', top: 0, left: 0, width: SWITCH_W, height: SWITCH_H, overflow: 'hidden', children: [
-        Button({ key: 'pacing-pane-autocompact-auto', plain: true, onPress: setTo(ac.own ? ac.back : 'auto'), children: [Text({ mono: true, children: '      ' })] })] })] })
-    : Box({ flexShrink: 0, children: [Button({ key: 'pacing-pane-autocompact-auto', plain: true, onPress: setTo(ac.own ? ac.back : 'auto'),
-      children: [Text({ mono: true, color: '#ffffff', backgroundColor: ac.own ? SWITCH_ON : SWITCH_OFF, children: ac.own ? SWITCH_KNOB.on : SWITCH_KNOB.off })] })] }));
+  const step = (key, sign, v) => (v == null ? null : o.surface === 'terminal'
+    ? Button({ key, label: sign, variant: 'secondary', onPress: setTo(v) })
+    : Button({ key, variant: 'secondary', onPress: setTo(v), children: [Text({ size: 'caption', children: sign })] }));
   const autoCompact = !ac ? null
-    : ac.off ? cap(ac.text)
-    : col([
-      // pacing's own limit first; Claude Code's switch at the section's
-      // bottom (the user's word)
-      ac.own ? null : row([
-        Text({ size: 'caption', children: ac.text }),
-        row([
-          ac.less != null ? Button({ key: 'pacing-pane-autocompact-less', label: '−', variant: 'secondary', onPress: setTo(ac.less) }) : null,
-          ac.more != null ? Button({ key: 'pacing-pane-autocompact-more', label: '+', variant: 'secondary', onPress: setTo(ac.more) }) : null,
-        ], { columnGap: 1 }),
-      ], { justifyContent: 'space-between', alignItems: 'center', columnGap: 1 }),
-      col([
-        row([Text({ size: 'caption', wrap: 'wrap', children: AUTO_COMPACT_OWN_LABEL }), knob], { justifyContent: 'space-between', alignItems: 'center', columnGap: 1, minWidth: 0 }),
-        ac.own && ac.note ? cap(ac.note) : null,
-      ]),
-    ], { rowGap: 1, marginTop: 1 });
+    : ac.off || ac.own ? cap(ac.text)
+    : row([
+      Text({ size: 'caption', children: ac.text }),
+      row([step('pacing-pane-autocompact-less', '−', ac.less), step('pacing-pane-autocompact-more', '+', ac.more)], { columnGap: 1 }),
+    ], { justifyContent: 'space-between', alignItems: 'center', columnGap: 1, marginTop: 1 });
   if (m.context) {
     const c = m.context;
+    // its own green up to CONTEXT_WARM tokens, then blending to red at the
+    // bar's end: the drawn bar cell by cell, the figure and a text bar by
+    // where the figure stands
+    const warm = contextWarmAt(c.max);
+    const tone = c.pct != null ? contextTone(c.pct, warm) : ACCENTS.context;
+    const alt = c.pct != null ? 'Context ' + Math.round(c.pct) + '% full' : '';
     sections.push(panel('context', [head('Context', ACCENTS.context),
-      between(Text({ weight: 'medium', children: c.used + (c.of ? ' of ' + c.of : '') }), c.pct != null ? Text({ tabular: true, mono: true, weight: 'semibold', color: ACCENTS.context, children: Math.round(c.pct) + '%' }) : null),
-      c.pct != null ? bar([{ pct: c.pct, color: c.pct >= 50 ? LEVEL_COLORS.over : ACCENTS.context }], null, 'Context ' + Math.round(c.pct) + '% full') : null,
+      between(Text({ weight: 'medium', children: c.used + (c.of ? ' of ' + c.of : '') }), c.pct != null ? Text({ tabular: true, mono: true, weight: 'semibold', color: tone, children: Math.round(c.pct) + '%' }) : null),
+      c.pct == null ? null
+        : hasSvg ? t.Svg({ source: barSvg([{ pct: c.pct, color: ACCENTS.context }], null, 480, 34, false, warm), alt })
+        : bar([{ pct: c.pct, color: tone }], null, alt),
       compact,
       autoCompact,
     ]));

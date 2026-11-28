@@ -4,8 +4,8 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { OUT_FILL, stepsSvg, stepsText, STEPS_MAX, STEPS_H, DIALS, FRAMES, frameSvg, barSvg, overShade, overText, OVER_CALM, OVER_RED, ORANGE, YELLOW, HUD, breakable, BREAK_AT, PREM_CALM, PREM_YELLOW, PREM_RED, premShade, premText, LEVEL_COLORS, barText, robotSvg, reactorSvg, rulerSvg, drawingId, builtCount, buildsDone, MEMO_MAX, phased, phaseOf, DIAL_SIZE, paneView, AUTO_COMPACT_OWN_LABEL } from './pane.mjs'
-import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_LAST, AUTO_COMPACT_OWN_NOTE, AUTO_COMPACT_OFF_TEXT, autoCompactLastOf, autoCompactOf, autoCompactFailedText, AUTO_COMPACT_BUFFER, autoCompactBuffer, autoCompactWindow, autoCompactHas, stepBarOf, modelArrow, modelIdOf, outLine, commandWhat, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN, OUT_MAIN, OUT_MAIN_CHARS, doneLine, finishedOut, changedLine, changedFile, runKind, runLine, noteMeaning, meaningOf } from './readings.mjs'
+import { OUT_FILL, stepsSvg, stepsText, STEPS_MAX, STEPS_H, DIALS, FRAMES, frameSvg, barSvg, overShade, overText, OVER_CALM, OVER_RED, ORANGE, YELLOW, HUD, breakable, BREAK_AT, PREM_CALM, PREM_YELLOW, PREM_RED, premShade, premText, LEVEL_COLORS, barText, robotSvg, reactorSvg, rulerSvg, drawingId, builtCount, buildsDone, MEMO_MAX, phased, phaseOf, DIAL_SIZE, paneView, ACCENTS, CONTEXT_WARM, CONTEXT_KEEP, contextShade, contextWarmAt, contextTone, SUCCESS_HEX, DIM_HEX, BUDGET_LINE, OVER_KEEP, kept, sweepAt } from './pane.mjs'
+import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_OWN_TEXT, AUTO_COMPACT_OFF_TEXT, autoCompactOf, autoCompactFailedText, AUTO_COMPACT_BUFFER, autoCompactBuffer, autoCompactWindow, autoCompactHas, stepBarOf, modelArrow, modelIdOf, outLine, commandWhat, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN, OUT_MAIN, OUT_MAIN_CHARS, doneLine, finishedOut, changedLine, changedFile, runKind, runLine, noteMeaning, meaningOf } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -1189,11 +1189,51 @@ const PANE = {
 } as const
 
 test('the context figure: against the model window, not the auto-compact window pacing sets', () => {
-  expect(paneModel({ bd: BREAKDOWN }).context).toEqual({ used: '183k', of: '1M', pct: 18 })
+  expect(paneModel({ bd: BREAKDOWN }).context).toEqual({ used: '183k', of: '1M', tokens: 182700, max: 1000000, pct: 18 })
   const set = { ...BREAKDOWN, autocompactSource: 'settings', rawMaxTokens: 433000, maxTokens: 433000, autoCompactThreshold: 400000, totalTokens: 198000, percentage: 46 }
-  expect(paneModel({ bd: { ...set, modelWindow: 1000000 } }).context).toEqual({ used: '198k', of: '1M', pct: 20 })
+  expect(paneModel({ bd: { ...set, modelWindow: 1000000 } }).context).toEqual({ used: '198k', of: '1M', tokens: 198000, max: 1000000, pct: 20 })
   // the model window not known: the breakdown's own
-  expect(paneModel({ bd: set }).context).toEqual({ used: '198k', of: '433k', pct: 46 })
+  expect(paneModel({ bd: set }).context).toEqual({ used: '198k', of: '433k', tokens: 198000, max: 433000, pct: 46 })
+})
+
+test('the context bar: its own green up to 300k tokens, then blending to yellow, orange and red at the bar\'s end, some of the green kept all the way', () => {
+  expect(CONTEXT_WARM).toBe(300000)
+  expect(contextWarmAt(1000000)).toBe(30)
+  expect(contextWarmAt(300000)).toBe(null)
+  expect(contextWarmAt(null)).toBe(null)
+  expect(contextShade(0)).toBe(ACCENTS.context)
+  // each stop with 30% of the green kept in it (CONTEXT_KEEP): yellow, orange, red tinted green
+  expect(CONTEXT_KEEP).toBe(0.3)
+  expect(contextShade(1 / 3)).toBe('#bfce3d')
+  expect(contextShade(2 / 3)).toBe('#bfa658')
+  expect(contextShade(1)).toBe('#ba6b70')
+  expect(contextTone(25, 30)).toBe(ACCENTS.context)
+  expect(contextTone(65, 30)).toBe(contextShade(0.5))
+  expect(contextTone(100, 30)).toBe(contextShade(1))
+  expect(contextTone(90, null)).toBe(ACCENTS.context)
+  const view = (tokens: number, surface = 'desktop') => nodes(paneView(TABLE, paneModel({ bd: { totalTokens: tokens, maxTokens: 1000000, rawMaxTokens: 1000000, percentage: tokens / 10000, categories: [], modelWindow: 1000000 } }), { surface }))
+  const at = (tokens: number) => {
+    const v = view(tokens)
+    return { figure: v.find(n => n.type === 'Text' && n.props.children === Math.round(tokens / 10000) + '%').props.color, svg: String(v.find(n => n.type === 'Svg' && String(n.props.alt).startsWith('Context')).props.source) }
+  }
+  // 250k: all its own green, none of the blend
+  const low = at(250000)
+  expect(low.figure).toBe(ACCENTS.context)
+  expect(low.svg).toContain(ACCENTS.context)
+  expect(low.svg).not.toContain(contextShade(((11 + 0.5) / 36 * 100 - 30) / 70))
+  // 650k: green up to 300k, the cells past it blending; the figure half way along the blend
+  const mid = at(650000)
+  expect(mid.figure).toBe(contextShade(0.5))
+  expect(mid.svg).toContain(ACCENTS.context)
+  expect(mid.svg).toContain(contextShade(((11 + 0.5) / 36 * 100 - 30) / 70))
+  expect(mid.svg).not.toContain('#f43f5e')
+  // full: the last cell all but the end's colour, the figure the end's colour
+  const full = at(1000000)
+  expect(full.figure).toBe(contextShade(1))
+  expect(full.svg).toContain(contextShade(((35 + 0.5) / 36 * 100 - 30) / 70))
+  // the terminal's text bar in the figure's colour
+  const bar = view(650000, 'terminal').find(n => n.type === 'Text' && /█/.test(String(n.props.children)) && n.props.color === contextShade(0.5))
+  expect(bar).toBeTruthy()
 })
 
 test('the pane: /pacing-pane opens it; it shows the budget, what to do and the context, with Refresh', async ($, on) => {
@@ -1227,7 +1267,7 @@ test('the pane: /pacing-pane opens it; it shows the budget, what to do and the c
   for (const s of ['▸ CONTEXT', '183k of 1M', '18%']) expect(texts).toContain(s)
   // drawn, on a surface with Svg: the pane's two edges, the week's dial, the ruler under it, and for the week, the models and the context an edge above, one below and their bars, and the auto-compact switch
   const svgs = await ui.findAll({ type: 'Svg' })
-  expect(svgs.length).toBe(15)
+  expect(svgs.length).toBe(14)
   for (const s of svgs) { expect(s.props.source.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true); expect(s.props.alt.length).toBeGreaterThan(0) }
   await ui.press({ key: 'pacing-pane-refresh' })
   await clock.advance(1)
@@ -1279,7 +1319,7 @@ test('a pane the engine does not place: /pacing-pane says why', async ($, on) =>
   expect((await $.command.run({ command: 'pacing-pane', args: '' } as any)).text).toBe('Pacing pane: not shown (no surface attached).')
   // the pane before any reading or turn
   const ui = await $.ui.mount(PANE)
-  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', '▸ CONTEXT', 'Not measured yet; it shows after the next turn.', 'Compact at 750k', 'Use Claude Auto Compact', '      '])
+  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', '▸ CONTEXT', 'Not measured yet; it shows after the next turn.', 'Compact at 750k', '−', '+'])
   await ui.unmount()
 })
 
@@ -3781,9 +3821,9 @@ test('the pane says the budget as time left today, never in tokens or dollars; p
   expect(paneModel({ j: { ...base, all: 20, line: 20, level: 'over', weekLevel: 'over' } }).levelText).toBe('Within budget')
   expect(paneModel({ j: { ...base, all: 18, line: 20, level: 'throttle', weekLevel: 'throttle' } }).levelText).toBe('Within budget')
   expect(paneModel({ j: { ...base, all: 96, line: 80, level: 'stop', weekLevel: 'stop' } }).levelText).toBe('The week is nearly used')
-  // drawn beside the dial, in the normal colour up to 5 over
+  // drawn beside the dial, on the way from green to yellow (yellow at 5 over)
   const dot = nodes(paneView(TABLE, raised, { surface: 'desktop' })).find(n => n.type === 'Text' && n.props.children === '● Over the budget line · +3')
-  expect(dot.props.color).toBe('success')
+  expect(['success', YELLOW]).not.toContain(dot.props.color)
   // the model held by its own meter: the week's words stay; its meter has its
   // line, drawn loud, and says by how much it is over
   const held = paneModel({ j: { ...base, level: 'ahead', weekLevel: 'ahead', all: 55, line: 73.3, premium: 83, premiumHeld: true, premiumLabel: 'Fable 5.2' } })
@@ -3802,7 +3842,7 @@ test('the pane says the budget as time left today, never in tokens or dollars; p
   // a terminal: the line as ┃ in its place
   expect(barText([{ pct: 50, color: '#fff' }], 10, 80)).toBe('█████░░┃░░')
   // the context: one figure
-  expect(paneModel({ bd: { totalTokens: 171000, maxTokens: 1000000, percentage: 17.1, categories: [] } }).context).toEqual({ used: '171k', of: '1M', pct: 17.1 })
+  expect(paneModel({ bd: { totalTokens: 171000, maxTokens: 1000000, percentage: 17.1, categories: [] } }).context).toEqual({ used: '171k', of: '1M', tokens: 171000, max: 1000000, pct: 17.1 })
 })
 
 test('every dial draws the figure, the label and a mark at the budget line', () => {
@@ -3812,7 +3852,7 @@ test('every dial draws the figure, the label and a mark at the budget line', () 
     expect(svg.endsWith('</svg>')).toBe(true)
     expect(svg).toContain('>50%</text>')
     expect(svg).toMatch(/>WEEK( USED)?<\/text>/)
-    expect(svg).toMatch(/#e5e7eb|#fbbf24|#f8fafc/)
+    expect(svg).toContain(BUDGET_LINE)
     expect(svg).not.toContain('NaN')
     expect(dial(0, '#22d3ee'), name).not.toContain('NaN')
     expect(dial(140, '#22d3ee', 100), name).not.toContain('NaN')
@@ -4756,13 +4796,20 @@ test('the pane\'s Compact where the direct call is refused: /compact as if typed
 // a colour of the yellow, orange, red run (the white #f8fafc is not one)
 const RUN_HUE = /#f[4-79ab][0-9a-f]{4}/
 
-test('colours by points over the line: a text, a bar and the dial keep their colours up to 5 over, then yellow, orange, red at 30', () => {
+test('colours by points over the line: from the normal colour at the line blending to yellow at 5 over, then orange and red at 30; a bar\'s and the dial\'s cells the same', () => {
   expect(OVER_CALM).toBe(5)
   expect(OVER_RED).toBe(30)
+  const X = '#22d3ee'
   expect(overText(null)).toBe(null)
-  expect(overText(-10)).toBe(null)
-  expect(overText(5)).toBe(null)
+  expect(overText(-10, X)).toBe(null)
+  expect(overText(0, X)).toBe(null)
+  // without a colour to blend from: none up to 5
+  expect(overText(2.5)).toBe(null)
+  // with one: a blend from it to yellow at 5, 30% of it kept in every shade (OVER_KEEP)
+  expect([X, YELLOW, null]).not.toContain(overText(2.5, X))
+  expect(OVER_KEEP).toBe(0.3); expect(kept(YELLOW, null)).toBe(YELLOW); expect(overText(5, X)).toBe(kept(YELLOW, X))
   expect(overText(6)).toBe(overShade(6))
+  expect(overText(6, X)).toBe(kept(overShade(6), X))
   expect(overShade(5)).toBe(YELLOW)
   expect(overShade(0)).toBe(YELLOW)
   expect(overShade(17.5)).toBe(ORANGE)
@@ -4771,58 +4818,78 @@ test('colours by points over the line: a text, a bar and the dial keep their col
   // between the stops: blends
   expect([YELLOW, ORANGE, '#f43f5e']).not.toContain(overShade(10))
   expect([YELLOW, ORANGE, '#f43f5e']).not.toContain(overShade(25))
-  // a bar under its line: no orange, no red
-  const under = barSvg([{ pct: 60, color: LEVEL_COLORS.ok }], 73.3)
-  expect(under).not.toContain(YELLOW)
-  expect(under).not.toContain(ORANGE)
-  expect(under).not.toContain('#f43f5e')
-  // up to 5 past it the cells keep their own colours (0.9.48): the same
-  // cells as a bar with no line, none of the run
   const lit = (s: string) => [...s.matchAll(/z" fill="(#[0-9a-f]{6})"\/>/g)].map(m => m[1])
   const plain = lit(barSvg([{ pct: 100, color: LEVEL_COLORS.ok }], null))
+  // a bar under its line: its own colours, none of the run
+  const under = barSvg([{ pct: 60, color: LEVEL_COLORS.ok }], 73.3)
+  expect(lit(under)).toEqual(plain.slice(0, lit(under).length))
+  for (const c of [YELLOW, ORANGE, '#f43f5e']) expect(under).not.toContain(c)
+  // 4 past it: the cells up to the line their own, the one past it on the way to yellow
   const four = barSvg([{ pct: 64, color: LEVEL_COLORS.ok }], 60)
-  expect(four).not.toMatch(RUN_HUE)
-  expect(lit(four)).toEqual(plain.slice(0, lit(four).length))
-  // further past: from yellow at the first cell past 5, red at the far end
+  expect(lit(four).slice(0, 22)).toEqual(plain.slice(0, 22))
+  expect(lit(four)[22]).toBe(overText(2.5, plain[22]))
+  for (const c of [YELLOW, ORANGE, '#f43f5e']) expect(four).not.toContain(c)
+  // far past: the blend, then from yellow at 5 past to red at the far end
   const far = barSvg([{ pct: 100, color: LEVEL_COLORS.ok }], 60)
-  expect(lit(far).slice(0, 23)).toEqual(plain.slice(0, 23))
-  expect(lit(far)[23]).toBe(overShade((23 + 0.5) / 36 * 100 - 60))
-  expect(far).toContain('#f43f5e')
-  // the loud bar (the per-model meter) has a scale of its own: its tag and
-  // line calm when a little over, yellow from 20 over, red from 80
-  expect(barSvg([{ pct: 76, color: LEVEL_COLORS.ok }], 73.3, 480, 34, true)).toContain('fill="' + HUD + '"/><text')
-  expect(barSvg([{ pct: 100, color: LEVEL_COLORS.ok }], 70, 480, 34, true)).toContain('fill="' + YELLOW + '"/><text')
-  expect(barSvg([{ pct: 100, color: LEVEL_COLORS.ok }], 20, 480, 34, true)).toContain('fill="#f43f5e"/><text')
-  // the dial: none of the run in the ring under the line or up to 5 past
-  // it; further past, from yellow to red
+  expect(lit(far).slice(0, 22)).toEqual(plain.slice(0, 22))
+  expect(lit(far)[22]).toBe(overText(2.5, plain[22]))
+  expect(lit(far)[23]).toBe(kept(overShade((23 + 0.5) / 36 * 100 - 60), plain[23]))
+  expect(far).toContain(kept('#f43f5e', plain[35]))
+  // the loud bar (the per-model meter) on its own scale: the band over its
+  // line from HUD at the line, yellow at 20 over, red from 80; the line, its tag and arrow always BUDGET_LINE
+  expect(barSvg([{ pct: 76, color: LEVEL_COLORS.ok }], 73.3, 480, 34, true)).toContain('fill="' + premText(76 - 73.3, HUD) + '" fill-opacity="0.22"/>')
+  expect(barSvg([{ pct: 100, color: LEVEL_COLORS.ok }], 70, 480, 34, true)).toContain('fill="' + premText(30, HUD) + '" fill-opacity="0.22"/>')
+  expect(barSvg([{ pct: 100, color: LEVEL_COLORS.ok }], 20, 480, 34, true)).toContain('fill="' + premText(80, HUD) + '" fill-opacity="0.22"/>')
+  // every budget line one white, however far over: #eeeeee (0.9.49)
+  expect(BUDGET_LINE).toBe('#eeeeee')
+  for (const [pct, line] of [[76, 73.3], [100, 70], [100, 20]]) {
+    const svg = barSvg([{ pct, color: LEVEL_COLORS.ok }], line, 480, 34, true)
+    expect(svg).toContain('rx="2" fill="' + BUDGET_LINE + '"/><text')
+    expect((svg.match(new RegExp('fill="' + BUDGET_LINE + '"', 'g')) || []).length).toBe(3)
+  }
+  for (const [pct, line] of [[50, 73.3], [64, 60], [100, 20]]) expect(barSvg([{ pct, color: LEVEL_COLORS.ok }], line)).toContain('fill="' + BUDGET_LINE + '" filter=')
+  for (const dial of Object.values(DIALS)) for (const pct of [30, 90]) expect((dial as any)(pct, LEVEL_COLORS.ok, 50)).toContain(BUDGET_LINE)
+  // the dial: none of the run under the line; 4 past it on the way to
+  // yellow, its OVER LINE word too; further past, from yellow to red
   expect(reactorSvg(50, LEVEL_COLORS.ok, 73)).not.toMatch(RUN_HUE)
-  expect(reactorSvg(54, LEVEL_COLORS.ok, 50)).not.toMatch(RUN_HUE)
-  expect(reactorSvg(100, LEVEL_COLORS.ok, 50)).toContain(overShade((26 + 0.5) / 48 * 100 - 50))
-  expect(reactorSvg(100, LEVEL_COLORS.ok, 50)).toContain('#f43f5e')
+  const dial4 = reactorSvg(54, LEVEL_COLORS.ok, 50)
+  for (const c of [YELLOW, ORANGE, '#f43f5e']) expect(dial4).not.toContain(c)
+  expect(dial4).toContain('fill="' + overText(4, HUD) + '">OVER LINE<')
+  expect(reactorSvg(100, LEVEL_COLORS.ok, 50)).toContain(overText((26 + 0.5) / 48 * 100 - 50, sweepAt(LEVEL_COLORS.ok, 26 / 47)))
+  expect(reactorSvg(100, LEVEL_COLORS.ok, 50)).toContain(kept('#f43f5e', sweepAt(LEVEL_COLORS.ok, 1)))
 })
 
-test('the pane\'s texts by points over: the week 3 over and Fable 4 over in their normal colours; the week 10 over orange-red, Fable 40 over yellow', () => {
+test('the pane\'s texts by points over: the week 3 over and Fable 4 over on the way to yellow; the week 10 over orange-red, Fable 40 over yellow', () => {
   const base = { all: 50, line: 60, level: 'ok', premiumLabel: 'Fable 5.2' }
   const texts = (j: any) => nodes(paneView(TABLE, paneModel({ j }), { surface: 'desktop' })).filter(n => n.type === 'Text')
-  const colorOf = (j: any, what: string) => { const n = texts(j).find(n => String(n.props.children).includes(what)); return n && n.props.color }
-  // a little over: the level text and the time stay normal, Fable's words plain
+  const find = (j: any, what: string) => texts(j).find(n => String(n.props.children).includes(what))
+  const colorOf = (j: any, what: string) => { const n = find(j, what); return n && n.props.color }
+  // on the line: the normal colours
+  const on = { ...base, all: 60, level: 'ok', weekLevel: 'ok', premium: 60 }
+  expect(colorOf(on, 'Within budget')).toBe('success')
+  // a little over: the week's words 3/5 of the way from green to yellow; Fable's 4/20 from dim, not bold
   const little = { ...base, all: 63, level: 'over', weekLevel: 'over', premium: 64 }
-  expect(colorOf(little, 'Over the budget line')).toBe('success')
-  expect(colorOf(little, 'points over its budget line')).toBe(undefined)
-  // over by 10: the week's words orange toward red; Fable's plain (its own scale)
+  expect(colorOf(little, 'Over the budget line')).toBe(overText(3, SUCCESS_HEX))
+  const note = find(little, 'points over its budget line')
+  expect([note.props.color, note.props.weight, String(note.props.children).startsWith('▲')]).toEqual([premText(4, DIM_HEX), undefined, false])
+  // over by 10: the week's words orange toward red; Fable's on its own scale, half way to yellow
   const ten = { ...base, all: 70, level: 'throttle', weekLevel: 'throttle', premium: 70 }
-  expect(colorOf(ten, 'Far over the budget line')).toBe(overShade(10))
-  expect(colorOf(ten, 'points over its budget line')).toBe(undefined)
-  expect(colorOf(ten, '70%')).toBe(overShade(10))
-  // Fable 40 over: on its own scale, yellow
-  expect(colorOf({ ...base, premium: 100 }, 'points over its budget line')).toBe(YELLOW)
+  expect(colorOf(ten, 'Far over the budget line')).toBe(overText(10, SUCCESS_HEX))
+  expect(colorOf(ten, 'points over its budget line')).toBe(premText(10, DIM_HEX))
+  expect(colorOf(ten, '70%')).toBe(overText(10, sweepAt(LEVEL_COLORS.ok, 0.7)))
+  // Fable 40 over: yellow, bold, with its mark
+  const forty = find({ ...base, premium: 100 }, 'points over its budget line')
+  expect([forty.props.color, forty.props.weight, String(forty.props.children).startsWith('▲')]).toEqual([premText(40, DIM_HEX), 'semibold', true])
 })
 
-test('Fable\'s own colours: normal up to 20 over, yellow to 40, orange by 60, red from 80; the weekly meter keeps its scale', () => {
+test('Fable\'s own colours: from its normal colours at the line blending to yellow at 20 over, yellow to 40, orange by 60, red from 80; the weekly meter keeps its scale', () => {
   expect([PREM_CALM, PREM_YELLOW, PREM_RED]).toEqual([20, 40, 80])
+  const X = '#22d3ee'
   expect(premText(null)).toBe(null)
+  expect(premText(0, X)).toBe(null)
   expect(premText(10)).toBe(null)
-  expect(premText(20)).toBe(null)
+  expect([X, YELLOW, null]).not.toContain(premText(10, X))
+  expect(premText(20, X)).toBe(kept(YELLOW, X))
   expect(premText(21)).toBe(YELLOW)
   expect(premShade(30)).toBe(YELLOW)
   expect(premShade(40)).toBe(YELLOW)
@@ -4842,54 +4909,60 @@ test('Fable\'s own colours: normal up to 20 over, yellow to 40, orange by 60, re
     const svg = view.find(n => n.type === 'Svg' && String(n.props.alt).startsWith('Fable 5.2')).props.source
     return { figure: figure.props.color, note, svg }
   }
-  // 10 over: calm everywhere, the tag and line in HUD, no cell of the run
+  // 10 over: half way to yellow everywhere, none of the run itself, the words not bold
   const ten = at(10)
   expect(ten.svg).toContain('>OVER +10<')
-  expect(ten.svg).toContain('fill="' + HUD + '"/><text')
+  expect(ten.svg).toContain('fill="' + premText(10, HUD) + '" fill-opacity="0.22"/>')
   for (const c of run) expect(ten.svg).not.toContain(c)
   expect(run).not.toContain(ten.figure)
-  expect(ten.note.props.color).toBe(undefined)
+  expect(ten.note.props.color).toBe(premText(10, DIM_HEX))
   expect(ten.note.props.weight).toBe(undefined)
   expect(String(ten.note.props.children).startsWith('▲')).toBe(false)
   // 30 over: yellow
   const thirty = at(30)
-  expect(thirty.figure).toBe(YELLOW)
-  expect(thirty.note.props.color).toBe(YELLOW)
+  expect(thirty.figure).toBe(premText(30, sweepAt(LEVEL_COLORS.ok, 0.35)))
+  expect(thirty.note.props.color).toBe(premText(30, DIM_HEX))
   expect(thirty.note.props.weight).toBe('semibold')
-  expect(thirty.svg).toContain('fill="' + YELLOW + '"/><text')
+  expect(thirty.svg).toContain('fill="' + premText(30, HUD) + '" fill-opacity="0.22"/>')
   // 50: between yellow and orange; 60: orange; 70: between orange and red
-  expect(at(50).figure).toBe(premShade(50))
+  expect(at(50).figure).toBe(premText(50, sweepAt(LEVEL_COLORS.ok, 0.55)))
   expect(run).not.toContain(at(50).figure)
-  expect(at(60).figure).toBe(ORANGE)
-  expect(at(60).svg).toContain('fill="' + ORANGE + '"/><text')
-  expect(at(70).figure).toBe(premShade(70))
+  expect(at(60).figure).toBe(premText(60, sweepAt(LEVEL_COLORS.ok, 0.65)))
+  expect(at(60).svg).toContain('fill="' + premText(60, HUD) + '" fill-opacity="0.22"/>')
+  expect(at(70).figure).toBe(premText(70, sweepAt(LEVEL_COLORS.ok, 0.75)))
   expect(run).not.toContain(at(70).figure)
   // 80 and 95: red
-  expect(at(80).figure).toBe('#f43f5e')
-  expect(at(80).svg).toContain('fill="#f43f5e"/><text')
-  expect(at(95).note.props.color).toBe('#f43f5e')
-  // the weekly meter keeps its own scale: 10 over is overShade(10)
+  expect(at(80).figure).toBe(premText(80, sweepAt(LEVEL_COLORS.ok, 0.85)))
+  expect(at(80).svg).toContain('fill="' + premText(80, HUD) + '" fill-opacity="0.22"/>')
+  expect(at(95).note.props.color).toBe(premText(95, DIM_HEX))
+  // the weekly meter keeps its own scale: 10 over is overShade(10), 30% of the base kept
   const week = nodes(paneView(TABLE, paneModel({ j: { all: 70, line: 60, level: 'throttle', weekLevel: 'throttle' } }), { surface: 'desktop' }))
-  expect(week.find(n => n.type === 'Text' && n.props.children === '70%').props.color).toBe(overShade(10))
+  expect(week.find(n => n.type === 'Text' && n.props.children === '70%').props.color).toBe(overText(10, sweepAt(LEVEL_COLORS.ok, 0.7)))
   // (the bar, 480 wide; the dial's alt starts with Weekly too)
-  expect(week.find(n => n.type === 'Svg' && String(n.props.alt).startsWith('Weekly') && String(n.props.source).includes('width="480"')).props.source).toContain(overShade((23 + 0.5) / 36 * 100 - 60))
+  expect(week.find(n => n.type === 'Svg' && String(n.props.alt).startsWith('Weekly') && String(n.props.source).includes('width="480"')).props.source).toContain(overText((23 + 0.5) / 36 * 100 - 60, sweepAt(LEVEL_COLORS.ok, 23 / 35)))
 })
 
-test('the week up to 5 over its line keeps its colours in the pane: the bar, the dial, the figure and the words; 6 over starts yellow', () => {
+test('the week over its line in the pane: its colours on the line, blending to yellow by 5 over (the bar, the dial, the figure and the words), past that the run', () => {
   const view = (all: number, level: string, dial?: string) => nodes(paneView(TABLE, paneModel({ j: { all, line: 60, level, weekLevel: level } }), { surface: 'desktop', dial }))
   const svgs = (v: any[]) => v.filter(n => n.type === 'Svg' && /^Weekly/.test(String(n.props.alt))).map(n => String(n.props.source))
   const texts = (v: any[]) => v.filter(n => n.type === 'Text' && typeof n.props.color === 'string').map(n => n.props.color)
-  // 5 over: the dial (in the level 'over') and the bar draw none of the run;
-  // no text takes a run colour
+  // on the line: none of the run, the words 'success'
+  const at = view(60, 'ahead')
+  for (const s of svgs(at)) expect(s).not.toMatch(RUN_HUE)
+  expect(texts(at)).toContain('success')
+  // 2.5 over: the words on the way, not yet yellow
+  const half = view(62.5, 'over')
+  expect(texts(half)).toContain(overText(2.5, SUCCESS_HEX))
+  expect(texts(half)).not.toContain(YELLOW)
+  // 5 over: the words and the figure yellow, 30% of their base kept; the bar and the dial with no orange or red
   const five = view(65, 'over')
   expect(svgs(five).length).toBe(2)
-  for (const s of svgs(five)) expect(s).not.toMatch(RUN_HUE)
-  for (const c of texts(five)) expect(c).not.toMatch(RUN_HUE)
-  // the other dials too: the week's own colour run, not the level's yellow
+  expect(texts(five)).toContain(overText(5, SUCCESS_HEX))
+  for (const s of svgs(five)) for (const c of [ORANGE, '#f43f5e']) expect(s).not.toContain(c)
+  // the other dials: the week's own colour run up to 5 over, not the level's yellow
   for (const d of ['ring', 'gauge', 'level']) expect(svgs(view(65, 'over', d))[0]).not.toContain(LEVEL_COLORS.over)
-  // 6 over: the figure and the words start yellow
-  const six = view(66, 'throttle')
-  expect(texts(six)).toContain(overShade(6))
+  // 6 over: on along the run
+  expect(texts(view(66, 'throttle'))).toContain(overText(6, SUCCESS_HEX))
 })
 
 test('the 5-hour window: a bar under the per-model meter, with when it resets, when it fills first, and from 85% that heavy work waits', () => {
@@ -5092,66 +5165,50 @@ test('a refused /autocompact at a start is one toast, at most one per load; the 
   expect(autoCompactFailedText('auto', '')).toBe('❌ Claude Code\'s auto-compact was not set to its default. /autocompact auto sets it.')
 })
 
-test('the pane\'s auto-compact rows: the switch for Claude Code\'s own first, then its words with − and + by 50k; none past the bounds; one dim line when off', () => {
+test('the pane\'s auto-compact row: its words with small − and + by 50k; none past the bounds; one dim line for Claude Code\'s own or when off; no switch', () => {
   expect(AUTO_COMPACT_STEP).toBe(50000)
-  expect(AUTO_COMPACT_OWN_LABEL).toBe('Use Claude Auto Compact')
-  expect(AUTO_COMPACT_OWN_NOTE).toBe('It compacts near the end of the window.')
   expect(paneModel({}).autoCompact).toBe(null)
   expect(AUTO_COMPACT_OFF_TEXT).toBe('Auto-compact: pacing leaves it alone (/pacing autocompact 750k or auto turns it back on)')
+  expect(AUTO_COMPACT_OWN_TEXT).toBe('Auto-compact: Claude Code\'s own (/pacing autocompact 750k sets pacing\'s window again)')
   expect(paneModel({ autoCompact: 'off' }).autoCompact).toEqual({ text: AUTO_COMPACT_OFF_TEXT, off: true })
+  expect(paneModel({ autoCompact: 'auto' }).autoCompact).toEqual({ text: AUTO_COMPACT_OWN_TEXT, own: true })
   expect(paneModel({ autoCompact: 750000 }).autoCompact).toEqual({ text: 'Compact at 750k', own: false, less: 700000, more: 800000 })
-  // Claude Code's own: no − and +, the note, and the count the toggle returns to (the last kept, else the default)
-  expect(paneModel({ autoCompact: 'auto' }).autoCompact).toEqual({ text: 'Auto-compact: Claude Code\'s default', own: true, note: AUTO_COMPACT_OWN_NOTE, back: 750000 })
-  expect(paneModel({ autoCompact: 'auto', autoCompactLast: 600000 }).autoCompact.back).toBe(600000)
-  expect(paneModel({ autoCompact: 'auto', autoCompactLast: 50 }).autoCompact.back).toBe(750000)
-  expect(autoCompactLastOf(undefined)).toBe(750000)
   expect(paneModel({ autoCompact: 100000 }).autoCompact).toEqual({ text: 'Compact at 100k', own: false, less: null, more: 150000 })
   expect(paneModel({ autoCompact: 1000000 }).autoCompact).toEqual({ text: 'Compact at 1M', own: false, less: 950000, more: null })
   // off the 50k grid: the next step on it
   expect(paneModel({ autoCompact: 120000 }).autoCompact).toEqual({ text: 'Compact at 120k', own: false, less: 100000, more: 150000 })
   const bd = { totalTokens: 100000, maxTokens: 1000000, percentage: 10, categories: [] }
-  const keys = (m: any, surface: string) => nodes(paneView(TABLE, m, { surface })).filter(n => n.type === 'Button').map(n => n.props.key + ': ' + (n.props.label ?? [n.props.children].flat().map((c: any) => (c && c.props ? c.props.children : c)).join('')))
-  // − and + first, the switch at the section's bottom (its row: the words left, the switch at the right end)
-  expect(keys(paneModel({ bd, autoCompact: 750000 }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-more: +', 'pacing-pane-autocompact-auto:       ', 'pacing-pane-refresh: Refresh'])
-  // on: the switch alone, the value and − and + hidden
-  expect(keys(paneModel({ bd, autoCompact: 'auto' }), 'desktop')).toEqual(['pacing-pane-autocompact-auto:       ', 'pacing-pane-refresh: Refresh'])
-  expect(keys(paneModel({ autoCompact: 1000000 }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-auto:       ', 'pacing-pane-refresh: Refresh'])
-  // the switch: the drawn pill, blue with the knob right when on, grey with it left when off; over it a Button of blank text with no label (a desktop draws a label over its children), both clipped to the pill
-  const knobOf = (m: any, surface: string) => nodes(paneView(TABLE, m, { surface })).find(n => n.props && n.props.key === 'pacing-pane-autocompact-auto')
-  const pic = (m: any) => { const b = knobOf(m, 'desktop'); const svg = nodes(paneView(TABLE, m, { surface: 'desktop' })).find(n => n.type === 'Svg' && String(n.props.alt).startsWith('Use Claude Auto Compact')); return [b.props.plain, b.props.label, svg.props.alt, svg.props.source.includes(m.autoCompact.own ? '#3b82f6' : '#4b5563'), svg.props.source.includes(m.autoCompact.own ? 'cx="33"' : 'cx="13"')] }
-  expect(pic(paneModel({ bd, autoCompact: 750000 }))).toEqual([true, undefined, 'Use Claude Auto Compact: off', true, true])
-  expect(pic(paneModel({ bd, autoCompact: 'auto' }))).toEqual([true, undefined, 'Use Claude Auto Compact: on', true, true])
-  const over = nodes(paneView(TABLE, paneModel({ bd, autoCompact: 750000 }), { surface: 'desktop' })).find(n => n.type === 'Box' && n.props.position === 'absolute')
-  expect([over.props.width, over.props.height, over.props.overflow, nodes(over).some((n: any) => n.props && n.props.key === 'pacing-pane-autocompact-auto')]).toEqual([46, 26, 'hidden', true])
-  // the switch's row spans the section: the words left, the switch right; the limit's row the same, on a line of its own
-  const rowOf = (m: any, key: string) => nodes(paneView(TABLE, m, { surface: 'desktop' })).find(n => n.type === 'Box' && n.props.justifyContent === 'space-between' && nodes(n).some((c: any) => c && c.props && c.props.key === key))
-  const sw = rowOf(paneModel({ bd, autoCompact: 750000 }), 'pacing-pane-autocompact-auto')
-  expect([sw.props.justifyContent, sw.props.children[0].props.children]).toEqual(['space-between', 'Use Claude Auto Compact'])
-  const limits = nodes(paneView(TABLE, paneModel({ bd, autoCompact: 750000 }), { surface: 'desktop' })).find(n => n.type === 'Box' && n.props.justifyContent === 'space-between' && [n.props.children].flat().some((c: any) => c && c.props && c.props.children === 'Compact at 750k'))
-  expect(limits).toBeTruthy()
-  expect(limits === sw).toBe(false)
-  const words = (m: any, surface: string) => nodes(paneView(TABLE, m, { surface })).filter(n => n.type === 'Text').map(n => n.props.children)
-  expect(words(paneModel({ bd, autoCompact: 750000 }), 'desktop')).toContain('Compact at 750k')
-  expect(words(paneModel({ bd, autoCompact: 'auto' }), 'desktop')).toContain('It compacts near the end of the window.')
-  expect(words(paneModel({ bd, autoCompact: 'auto' }), 'desktop').some((w: any) => String(w).startsWith('Compact at'))).toBe(false)
-  // the switch's press: 'auto' when off, the count to return to when on; the same on the terminal
-  const pressOf = (m: any, surface = 'desktop') => { const got: any[] = []; const b = nodes(paneView(TABLE, m, { surface, onAutoCompact: (v: any) => got.push(v) })).find(n => n.props && n.props.key === 'pacing-pane-autocompact-auto'); b.props.onPress(); return got }
-  expect(pressOf(paneModel({ bd, autoCompact: 750000 }))).toEqual(['auto'])
-  expect(pressOf(paneModel({ bd, autoCompact: 'auto', autoCompactLast: 450000 }))).toEqual([450000])
-  expect(pressOf(paneModel({ bd, autoCompact: 750000 }), 'terminal')).toEqual(['auto'])
-  // the terminal: the switch reads ○ off or ◉ on
-  expect(keys(paneModel({ bd, autoCompact: 750000 }), 'terminal')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-more: +', 'pacing-pane-autocompact-auto: ○ off', 'pacing-pane-refresh: Refresh'])
-  expect(keys(paneModel({ bd, autoCompact: 'auto' }), 'terminal')).toEqual(['pacing-pane-autocompact-auto: ◉ on', 'pacing-pane-refresh: Refresh'])
-  expect(words(paneModel({ bd, autoCompact: 750000 }), 'terminal')).toContain('Compact at 750k')
-  // off: one dim line, the same on both surfaces, and no button
-  const texts = (m: any, surface: string) => nodes(paneView(TABLE, m, { surface })).filter(n => n.type === 'Text' && String(n.props.children).includes('Auto-compact'))
+  const view = (m: any, surface: string, extra: any = {}) => nodes(paneView(TABLE, m, { surface, ...extra }))
+  const keys = (m: any, surface: string) => view(m, surface).filter(n => n.type === 'Button').map(n => n.props.key + ': ' + (n.props.label ?? [n.props.children].flat().map((c: any) => (c && c.props ? c.props.children : c)).join('')))
   for (const surface of ['desktop', 'terminal']) {
-    expect(keys(paneModel({ bd, autoCompact: 'off' }), surface)).toEqual(['pacing-pane-refresh: Refresh'])
-    expect(texts(paneModel({ bd, autoCompact: 'off' }), surface).map(n => [n.props.children, n.props.dimColor, n.props.size])).toEqual([[AUTO_COMPACT_OFF_TEXT, true, 'caption']])
+    expect(keys(paneModel({ bd, autoCompact: 750000 }), surface)).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-more: +', 'pacing-pane-refresh: Refresh'])
+    expect(keys(paneModel({ autoCompact: 1000000 }), surface)).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-refresh: Refresh'])
+    // no switch anywhere, in no state
+    for (const ac of [750000, 'auto', 'off']) {
+      expect(keys(paneModel({ bd, autoCompact: ac }), surface).some(k => k.startsWith('pacing-pane-autocompact-auto'))).toBe(false)
+      expect(view(paneModel({ bd, autoCompact: ac }), surface).some(n => n.type === 'Svg' && /Auto Compact/.test(String(n.props.alt)))).toBe(false)
+    }
+    // Claude Code's own and off: one dim line, and no button
+    for (const [ac, text] of [['auto', AUTO_COMPACT_OWN_TEXT], ['off', AUTO_COMPACT_OFF_TEXT]]) {
+      expect(keys(paneModel({ bd, autoCompact: ac }), surface)).toEqual(['pacing-pane-refresh: Refresh'])
+      expect(view(paneModel({ bd, autoCompact: ac }), surface).filter(n => n.type === 'Text' && String(n.props.children).includes('Auto-compact')).map(n => [n.props.children, n.props.dimColor, n.props.size])).toEqual([[text, true, 'caption']])
+    }
   }
+  // small on the desktop: no label (a desktop draws a label in place of its children), a caption Text in it; the terminal keeps its label
+  const sign = (surface: string) => view(paneModel({ bd, autoCompact: 750000 }), surface).find(n => n.props && n.props.key === 'pacing-pane-autocompact-less')
+  const d = sign('desktop')
+  expect([d.props.label, d.props.variant, d.props.children[0].props.size, d.props.children[0].props.children]).toEqual([undefined, 'secondary', 'caption', '−'])
+  expect(sign('terminal').props.label).toBe('−')
+  // one row: the words left, − and + at its right end
+  const rowOf = view(paneModel({ bd, autoCompact: 750000 }), 'desktop').find(n => n.type === 'Box' && n.props.justifyContent === 'space-between' && [n.props.children].flat().some((c: any) => c && c.props && c.props.children === 'Compact at 750k'))
+  expect(nodes(rowOf).filter((n: any) => n.type === 'Button').length).toBe(2)
+  // a press gives the step's value
+  const pressOf = (key: string, surface = 'desktop') => { const got: any[] = []; view(paneModel({ bd, autoCompact: 750000 }), surface, { onAutoCompact: (v: any) => got.push(v) }).find(n => n.props && n.props.key === key).props.onPress(); return got }
+  expect(pressOf('pacing-pane-autocompact-less')).toEqual([700000])
+  expect(pressOf('pacing-pane-autocompact-more', 'terminal')).toEqual([800000])
 })
 
-test('a press on −, + or the toggle in the pane: config.mjs stores it, then /autocompact runs with it, and the row shows it; off again returns to the last count', async ($, on) => {
+test('a press on − or + in the pane: config.mjs stores it, then /autocompact runs with it, and the row shows it', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
   let config = '{}'
@@ -5177,65 +5234,32 @@ test('a press on −, + or the toggle in the pane: config.mjs stores it, then /a
   expect(seen.runs).toEqual(['/autocompact 733000'])
   ui = await $.ui.mount(PANE)
   expect(await texts(ui)).toContain('Compact at 700k')
-  await ui.press({ key: 'pacing-pane-autocompact-auto' })
-  await clock.settle()
-  await ui.unmount()
-  expect(seen.runs).toEqual(['/autocompact 733000', '/autocompact auto'])
-  // the count left is kept
-  expect(seen.store[AUTO_COMPACT_LAST]).toBe(700000)
-  ui = await $.ui.mount(PANE)
-  // on: the toggle and the note, no value and no − or +
-  expect(await texts(ui)).toContain('It compacts near the end of the window.')
-  expect((await texts(ui)).some((t: any) => String(t).startsWith('Auto-compact'))).toBe(false)
-  const buttons = (await ui.findAll({ type: 'Button' })).map((b: any) => b.key ?? b.props?.key)
-  expect(buttons).toContain('pacing-pane-autocompact-auto')
-  expect(buttons).not.toContain('pacing-pane-autocompact-less')
-  expect(buttons).not.toContain('pacing-pane-autocompact-more')
-  // off again: back to 700k, saved and run
-  await ui.press({ key: 'pacing-pane-autocompact-auto' })
-  await clock.settle()
-  await ui.unmount()
-  expect(seen.scripts.filter(a => a[2] === 'autocompact').map(a => a[3])).toEqual(['700000', 'auto', '700000'])
-  expect(seen.runs).toEqual(['/autocompact 733000', '/autocompact auto', '/autocompact 733000'])
-  ui = await $.ui.mount(PANE)
-  expect(await texts(ui)).toContain('Compact at 700k')
   await ui.press({ key: 'pacing-pane-autocompact-more' })
   await clock.settle()
   await ui.unmount()
-  expect(seen.runs).toEqual(['/autocompact 733000', '/autocompact auto', '/autocompact 733000', '/autocompact 783000'])
+  expect(seen.scripts.filter(a => a[2] === 'autocompact').map(a => a[3])).toEqual(['700000', '750000'])
+  expect(seen.runs).toEqual(['/autocompact 733000', '/autocompact 783000'])
   // the turn's end after a press has nothing more to run
   await $.turn.complete(turn('claude-opus-5-5', 1))
   await clock.settle()
-  expect(seen.runs.length).toBe(4)
+  expect(seen.runs.length).toBe(2)
   // a success says nothing
   expect(seen.toasts).toEqual([])
 })
 
-test('toggled off with no count kept: the default, saved and run', async ($, on) => {
+test('Claude Code\'s own auto-compact set by /autocompact auto: the pane says so in one dim line, with nothing to press', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: T0 })
-  let config = '{"autoCompact":"auto"}'
-  const seen = autoEngine(on, { config: () => config, has: () => ({ autocompactSource: 'auto', rawMaxTokens: 1000000 }), run: argv => {
-    if (argv[2] !== 'autocompact') return null
-    const v = argv[3]
-    config = JSON.stringify({ autoCompact: v === 'auto' || v === 'off' ? v : Number(v) })
-    return { exitCode: 0, stdout: 'auto-compact window: ...\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
-  } })
+  const seen = autoEngine(on, { config: () => '{"autoCompact":"auto"}', has: () => ({ autocompactSource: 'auto', rawMaxTokens: 1000000 }) })
   await start($)
   await clock.settle()
-  expect(seen.runs).toEqual([])
-  let ui = await $.ui.mount(PANE)
-  await ui.press({ key: 'pacing-pane-autocompact-auto' })
-  await clock.settle()
-  await ui.unmount()
-  expect(seen.scripts.filter(a => a[2] === 'autocompact').map(a => a[3])).toEqual(['750000'])
-  expect(seen.runs).toEqual(['/autocompact 783000'])
-  expect(seen.store[AUTO_COMPACT_LAST]).toBe(750000)
-  ui = await $.ui.mount(PANE)
+  const ui = await $.ui.mount(PANE)
   const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
-  expect(texts).toContain('Compact at 750k')
-  expect(texts).not.toContain('It compacts near the end of the window.')
+  expect(texts).toContain(AUTO_COMPACT_OWN_TEXT)
+  const buttons = (await ui.findAll({ type: 'Button' })).map((b: any) => b.key ?? b.props?.key)
+  expect(buttons.filter((k: any) => String(k).startsWith('pacing-pane-autocompact'))).toEqual([])
   await ui.unmount()
+  expect(seen.runs).toEqual([])
 })
 
 // ---- the agents' rows in the pane: model tags, step bars, output ----

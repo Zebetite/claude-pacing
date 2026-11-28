@@ -1704,3 +1704,60 @@ yellow from the line itself. Now:
   the week's own colour up to 5 points over and the level's past that
   (`dialColor`); 'stop' stays red. The reactor, the default, kept its own
   colour already.
+
+## No auto-compact switch; blends from the line; the context warms from 300k (0.9.49)
+
+- **The switch is gone.** The user's word: remove Claude Auto Compact from
+  the pane. The Use Claude Auto Compact row, its drawn pill and its
+  overlay Button (0.9.44 to 0.9.46) are removed, with what only it used:
+  the model's `note` and `back`, the count kept in `$.store` as
+  `autoCompactLast` to toggle back to, and `AUTO_COMPACT_OWN_NOTE`. The
+  pane keeps "Compact at 750k" with − and +. Claude Code's own
+  auto-compact, set by `/autocompact auto` or `/pacing autocompact auto`,
+  is one dim line (`AUTO_COMPACT_OWN_TEXT`, saying how to set pacing's
+  window again) with no buttons, as 'off' is.
+- **Smaller − and +.** A Button has no size prop, so on the desktop each
+  holds a caption-size Text and no label (a desktop draws a label in
+  place of the children, seen live in 0.9.44); the terminal keeps its
+  label.
+- **Blends from the line.** The user's word: instead of switching to
+  yellow at 5 (the week) or 20 points over (Fable), start blending to
+  yellow at the budget line. `overText(by, base)` and `premText(by, base)`
+  take the normal colour they blend from: null on or under the line, a
+  blend from `base` to yellow up to OVER_CALM (PREM_CALM), the old run
+  past it; without a `base` the old none-up-to-the-calm-point holds (the
+  ring, gauge and level dials' `dialColor` keep it). The bar's cells blend
+  from their own sweep colour, the reactor's ring and strip the same, its
+  OVER LINE word and the loud bar's line and tag from HUD, the figure
+  from its sweep colour, the big figure from the level's cyan, the level
+  words from SUCCESS_HEX (they are 'success' on the line, a theme token
+  that cannot be blended) and Fable's words from DIM_HEX, bold with ▲ only
+  past PREM_CALM.
+- **The context warms from 300k.** The user's word: from about 300k
+  tokens the context blends to yellow, then orange, then red at the max.
+  The model gives the pane `tokens` and `max` (the bar's end, the
+  model's window). `contextWarmAt(max)` is where on the bar 300k stands
+  (none for a window no larger); `barSvg` takes it as `warm`: cells up to
+  it the context's green, past it `contextShade` along green, yellow,
+  orange, red by where each stands (the last cell, at 98.6%, all but
+  red). The figure and the terminal's text bar take `contextTone` at the
+  figure. It replaces the bar's switch to yellow at 50%. Every cell of
+  the blend keeps CONTEXT_KEEP (30%) of the green (the user's word: keep
+  the base colour somewhat all the way), so its end is a green-tinted red
+  (#ba6b70), not #f43f5e.
+- **30% of the base kept in every shade.** After a before/after preview
+  (drawn by the pane's own code), the user's word: keep 30% of the base
+  colour in the weekly and Fable shades too, as in the context bar.
+  `kept(shade, base)` blends OVER_KEEP (0.3) of `base` into the shade;
+  `overText` and `premText` apply it whenever they are given a base, in
+  the blend up to the calm point and in the run past it. So the cells
+  keep 30% of their own sweep colour, the figure of its sweep colour, the
+  level words of SUCCESS_HEX, Fable's words of DIM_HEX, the band behind
+  Fable's cells and the dial's OVER LINE word of HUD. Without a base
+  (`dialColor`, the old callers) the pure run holds.
+- **The budget line white, always.** The user's word: keep the budget
+  line white all the time, #EEEEEE. BUDGET_LINE is #eeeeee and draws every
+  line: the weekly bar's tick and arrow, the reactor's pointer, the ring,
+  gauge and level dials' marks, and Fable's loud line, its OVER tag and
+  arrow (they took the shade of how far over before). Only the band behind
+  the cells over Fable's line keeps that shade.

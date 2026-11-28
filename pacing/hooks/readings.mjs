@@ -499,18 +499,6 @@ export const autoCompactHas = (bd, want, window = null) => {
   const set = autoCompactWindow(want, autoCompactBuffer(bd));
   return source === 'settings' && bd.rawMaxTokens === (window > 0 ? Math.min(set, window) : set);
 };
-// The last token count the setting held ($.store, across sessions), so the
-// pane's toggle back from Claude Code's own auto-compact returns to it;
-// none kept is the default.
-export const AUTO_COMPACT_LAST = 'autoCompactLast';
-export const autoCompactLastOf = v => (Number.isInteger(v) && v >= AUTO_COMPACT_MIN && v <= AUTO_COMPACT_MAX ? v : AUTO_COMPACT_DEFAULT);
-async function autoCompactLast($) {
-  try { return autoCompactLastOf(await $.store.get(AUTO_COMPACT_LAST)); } catch { return AUTO_COMPACT_DEFAULT; }
-}
-async function autoCompactKeep($, v) {
-  if (!Number.isInteger(v)) return;
-  try { await $.store.set(AUTO_COMPACT_LAST, v); } catch { /* the default then */ }
-}
 // the pane's words for the setting
 export const autoCompactText = v => (v === 'auto' ? 'Auto-compact: Claude Code\'s default' : 'Compact at ' + kText(v));
 // `arg`: what /autocompact was given (the window, a buffer above `want`)
@@ -550,7 +538,6 @@ async function autoCompactCheck($, ac, model) {
     const want = autoCompactOf(await configOf($));
     const same = !model || !ac.model || sameModel(ac.model, model) || sameModel(model, ac.model);
     if (!ac.due && want === ac.want && same) return;
-    if (want !== ac.want) await autoCompactKeep($, want);
     if (want === 'off') { ac.want = want; ac.due = false; return; }
     let u = null;
     try { u = await $.session.usage({ breakdown: 'summary' }); } catch { /* none */ }
@@ -563,14 +550,12 @@ async function autoCompactCheck($, ac, model) {
     if (!autoCompactHas(bd, want, u.context.window)) await autoCompactRun($, ac, want, true, bd);
   } catch { /* the next start or change */ } finally { ac.busy = false; }
 }
-// A press on the pane's −, + or its toggle for Claude Code's own: config.json
-// first, through config.mjs, then /autocompact with the new value. The token
-// count it leaves for 'auto' is kept (autoCompactKeep). One press at a time.
+// A press on the pane's − or +: config.json first, through config.mjs, then
+// /autocompact with the new value. One press at a time.
 async function autoCompactPress($, ac, v) {
   if (ac.pressing) return;
   ac.pressing = true;
   try {
-    if (v === 'auto') { try { await autoCompactKeep($, autoCompactOf(await configOf($))); } catch { /* the last kept */ } }
     let r = null;
     try { r = await $.process.run(autoCompactArgv($.plugin.root, v), { timeoutMs: 20000 }); } catch { /* said below */ }
     if (!r || r.exitCode !== 0) {
@@ -579,7 +564,6 @@ async function autoCompactPress($, ac, v) {
       return;
     }
     configStale();
-    await autoCompactKeep($, v);
     // the check at the next turn's end has nothing more to do
     ac.want = v;
     redraw($);
@@ -615,14 +599,13 @@ export const closedByPerson = e => !!e && e.id === PANE_ID && !!e.origin && e.or
 // `autoCompact`: the setting (autoCompactOf), drawn in the Context section
 // as its words, the values a press on − and + gives (a step of
 // AUTO_COMPACT_STEP on the step's grid, none past the bounds) and `own`,
-// whether Claude Code's own auto-compact is on ('auto'): then no − and +,
-// a short `note` instead, and `back`, the token count the switch returns
-// to (`autoCompactLast`, the last one kept, else the default). For 'off'
-// (pacing leaves /autocompact alone) one dim line, `off` and its `text`,
+// whether Claude Code's own auto-compact is on ('auto', set by
+// /autocompact auto: the pane has no switch for it since 0.9.49): then, as
+// for 'off' (pacing leaves /autocompact alone), one dim line, its `text`,
 // with no buttons; nothing when none is given.
 export const PANE_COMPACT_AT = 300000;
-// the pane's note under the switch while Claude Code's own auto-compact is on
-export const AUTO_COMPACT_OWN_NOTE = 'It compacts near the end of the window.';
+// the pane's one line while Claude Code's own auto-compact is on ('auto')
+export const AUTO_COMPACT_OWN_TEXT = 'Auto-compact: Claude Code\'s own (/pacing autocompact 750k sets pacing\'s window again)';
 // the pane's one line while pacing leaves /autocompact alone ('off')
 export const AUTO_COMPACT_OFF_TEXT = 'Auto-compact: pacing leaves it alone (/pacing autocompact 750k or auto turns it back on)';
 // the 5-hour window's figure from which heavy work waits (budget.mjs says HOLD there too)
@@ -792,10 +775,10 @@ export const stepBarOf = (a, now) => {
 // is drawn with its model as a tag (`tag`: `on`, ↑ or ↓ before it against
 // the session's model), its step bar (`bar`, stepBarOf) and its output box
 // (`out`, for the OUT_SHOWN agents with the newest output).
-export const paneModel = ({ j = null, mix = [], running = [], bd = null, now = Date.now(), busy = false, failing = false, tasks = [], tokens = null, compacting = false, autoCompact = null, autoCompactLast = null, session = null } = {}) => {
+export const paneModel = ({ j = null, mix = [], running = [], bd = null, now = Date.now(), busy = false, failing = false, tasks = [], tokens = null, compacting = false, autoCompact = null, session = null } = {}) => {
   const m = { level: 'ok', levelText: '', budget: null, meters: [], notes: [], mix, running, context: null, contextNote: '', empty: '', tasks, compact: null, autoCompact: null };
   if (autoCompact === 'off') m.autoCompact = { text: AUTO_COMPACT_OFF_TEXT, off: true };
-  else if (autoCompact === 'auto') m.autoCompact = { text: autoCompactText(autoCompact), own: true, note: AUTO_COMPACT_OWN_NOTE, back: autoCompactLastOf(autoCompactLast) };
+  else if (autoCompact === 'auto') m.autoCompact = { text: AUTO_COMPACT_OWN_TEXT, own: true };
   else if (typeof autoCompact === 'number') {
     const n = autoCompact;
     const less = Math.max(AUTO_COMPACT_MIN, Math.ceil(n / AUTO_COMPACT_STEP) * AUTO_COMPACT_STEP - AUTO_COMPACT_STEP);
@@ -876,7 +859,7 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, now = D
     // not known.
     const win = bd.modelWindow > 0 ? bd.modelWindow : 0;
     const max = win || bd.rawMaxTokens || bd.maxTokens;
-    m.context = { used: kText(bd.totalTokens), of: max ? kText(max) : '', pct: max ? (win && win !== bd.rawMaxTokens ? Math.round(bd.totalTokens / win * 100) : bd.percentage) : null };
+    m.context = { used: kText(bd.totalTokens), of: max ? kText(max) : '', tokens: bd.totalTokens, max: max || null, pct: max ? (win && win !== bd.rawMaxTokens ? Math.round(bd.totalTokens / win * 100) : bd.percentage) : null };
   } else m.contextNote = 'Not measured yet; it shows after the next turn.';
   // the agents' rows: the model as a tag, the step bar, the rung
   // the output box (`out`, `outAt` its newest line's time) for the
@@ -2865,7 +2848,7 @@ export const register = on => {
   // the app's usage tool answers; else it says why and where to measure.
   // the pane: what /pacing-status says, a row each, then the context
   // (`session`: the session's model and effort, for the agents' model tags)
-  const paneNow = (now, autoCompact = null, session = null, autoCompactLast = null) => {
+  const paneNow = (now, autoCompact = null, session = null) => {
     const j = reading ? liveLeft(reading, spend.total - liveFrom) : null;
     return paneModel({
       j,
@@ -2882,7 +2865,7 @@ export const register = on => {
         text: finishedText(f.a, f.state, f.endedAt - f.a.startedAt),
         model: f.a.model || null, effort: f.a.effort || null, on: runOn(f.a), bar: null, out: f.out, outAt: f.endedAt }))],
       bd: ctxNow, now, busy: rd.running || loading, failing: readingsFail(rd.health),
-      tasks: taskRows(tasks.values(), now), tokens: contextTokens, compacting: pr.compacting, autoCompact, autoCompactLast, session,
+      tasks: taskRows(tasks.values(), now), tokens: contextTokens, compacting: pr.compacting, autoCompact, session,
     });
   };
   // a person's close keeps it closed in later sessions; a plugin's own, or an
@@ -2928,13 +2911,11 @@ export const register = on => {
     // Compact, in the Context section: the row's Compact now (compactNow),
     // one at a time; the pause's timers end with it, as at the row's press
     const size = typeof contextTokens === 'number' ? contextTokens : ctxNow && ctxNow.totalTokens;
-    // the auto-compact window, with its −, + and the toggle for Claude
-    // Code's own (autoCompactPress), which returns to the last count kept
+    // the auto-compact window, with its − and + (autoCompactPress)
     let autoCompact = null;
     try { autoCompact = autoCompactOf(await configOf($)); } catch { /* no row */ }
-    const autoCompactBack = autoCompact === 'auto' ? await autoCompactLast($) : null;
     const session = { model: modelNow(), effort: await effortNow($, ss) };
-    return paneView($.ui.resolve(e), paneNow(now, autoCompact, session, autoCompactBack), { surface: e.surface, placement: e.props && e.props.placement, now, onRefresh: () => refreshPane(false),
+    return paneView($.ui.resolve(e), paneNow(now, autoCompact, session), { surface: e.surface, placement: e.props && e.props.placement, now, onRefresh: () => refreshPane(false),
       // only where a main view can show the transcript: the desktop app has
       // none ("no main view here", seen live in 0.9.41), so its rows are text
       onAgent: e.surface === 'terminal' && !viewNone ? id => openAgent($, id) : null,

@@ -84,9 +84,10 @@ has the details, its [GUIDE](pacing/skills/pacing/GUIDE.md) the rules.
   robots with their model, a bold bar of their steps and a box of their main
   tasks, the context and the models (`/pacing-pane` reopens it). Past
   its budget line, Fable's own meter gets an `OVER` tag; on every bar
-  the stretch more than 5 points over the line runs yellow, orange, red
-  the further over (Fable's meter stays in its normal colours up to 20 points over, red
-  only from 80). The pane comes from readings the plugin
+  the stretch over the line blends to yellow by 5 points over, then
+  orange and red the further over (Fable's meter is yellow only at 20
+  points over, red from 80); the context bar turns from green to red
+  past 300k tokens. The pane comes from readings the plugin
   takes by itself after a turn, on a Claude Code version with hooks
   modules; older versions run the rest of the plugin as before. The
   pictures at the top are drawn by the pane's own code with sample
