@@ -1796,3 +1796,37 @@ then the size after; a `precompute` (a summary made ahead, nothing
 installed) changes nothing. /pacing-status still waits for a real breakdown.
 `node scripts/pane-images.mjs --html <file> [--before <pane.mjs>]` draws the
 samples side by side to one page, to see a layout change.
+
+## Small buttons that are small; an agent's figures in their own places (0.9.51)
+
+The user's word: the row says Auto Compact, but the buttons are not small.
+0.9.50's small button was a Button holding a footnote-size Text. The
+desktop app's stylesheet shows why that did nothing: its own button is
+2rem high with 0.75rem at each side and draws the label at body size,
+whatever Text it holds, and it has no size to ask for (and `footnote`,
+0.8125rem, is larger than `caption`, 0.75rem). The one smaller button a
+plugin can draw there is a `plain` one: a line high, 0.375rem at each
+side, no outline. So `small()` now draws a plain Button with its label in
+a Box that draws the outline (`borderStyle: 'round'`, the dim colour at
+`SMALL_EDGE`): about 22 px high where the app's own is 32, for Compact,
+Refresh, − and +. The label stays at body size; nothing a plugin passes
+changes that. The terminal is as it was.
+
+The user's word: a subagent's % progress can be next to its progress bar
+instead of in the text, and the time in a more static place, so it does
+not jump around when the text changes. On a desktop an agent's row now
+has:
+
+- its words without either figure (`words`: "reader: read the logs,
+  searching"),
+- its bar with the progress at the bar's right end (`prog`, from
+  `progFigure`: "2/4" for the steps it said, else "~60%" by time), padded
+  to `PROG_CELLS` characters in the mono face so every row's bar ends at
+  one place,
+- the tag's line with the time run at its right end (`time`); a figure
+  without a bar (an estimate the run has passed) goes before the time, and
+  a row without a tag (a side session) has the time alone, at the right.
+
+`paneNow` hands the three beside the row's `text`, which the terminal
+still draws whole, as does a row given without them. A finished run's row
+is as it was: its words no longer change.

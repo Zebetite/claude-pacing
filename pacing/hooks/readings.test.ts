@@ -4,8 +4,8 @@
 // the status line it sets. budget.mjs itself is tested under tests/ with
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
-import { OUT_FILL, stepsSvg, stepsText, STEPS_MAX, STEPS_H, DIALS, FRAMES, frameSvg, barSvg, overShade, overText, OVER_CALM, OVER_RED, ORANGE, YELLOW, HUD, breakable, BREAK_AT, PREM_CALM, PREM_YELLOW, PREM_RED, premShade, premText, LEVEL_COLORS, barText, robotSvg, reactorSvg, rulerSvg, drawingId, builtCount, buildsDone, MEMO_MAX, phased, phaseOf, DIAL_SIZE, paneView, ACCENTS, CONTEXT_WARM, CONTEXT_KEEP, contextShade, contextWarmAt, contextTone, SUCCESS_HEX, DIM_HEX, BUDGET_LINE, OVER_KEEP, kept, sweepAt } from './pane.mjs'
-import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_OWN_TEXT, AUTO_COMPACT_OFF_TEXT, autoCompactOf, autoCompactFailedText, AUTO_COMPACT_BUFFER, autoCompactBuffer, autoCompactWindow, autoCompactHas, stepBarOf, modelArrow, modelIdOf, outLine, commandWhat, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN, OUT_MAIN, OUT_MAIN_CHARS, doneLine, finishedOut, changedLine, changedFile, runKind, runLine, noteMeaning, meaningOf, contextAt } from './readings.mjs'
+import { PROG_CELLS, OUT_FILL, stepsSvg, stepsText, STEPS_MAX, STEPS_H, DIALS, FRAMES, frameSvg, barSvg, overShade, overText, OVER_CALM, OVER_RED, ORANGE, YELLOW, HUD, breakable, BREAK_AT, PREM_CALM, PREM_YELLOW, PREM_RED, premShade, premText, LEVEL_COLORS, barText, robotSvg, reactorSvg, rulerSvg, drawingId, builtCount, buildsDone, MEMO_MAX, phased, phaseOf, DIAL_SIZE, paneView, ACCENTS, CONTEXT_WARM, CONTEXT_KEEP, contextShade, contextWarmAt, contextTone, SUCCESS_HEX, DIM_HEX, BUDGET_LINE, OVER_KEEP, kept, sweepAt } from './pane.mjs'
+import { progFigure, pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_OWN_TEXT, AUTO_COMPACT_OFF_TEXT, autoCompactOf, autoCompactFailedText, AUTO_COMPACT_BUFFER, autoCompactBuffer, autoCompactWindow, autoCompactHas, stepBarOf, modelArrow, modelIdOf, outLine, commandWhat, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN, OUT_MAIN, OUT_MAIN_CHARS, doneLine, finishedOut, changedLine, changedFile, runKind, runLine, noteMeaning, meaningOf, contextAt } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -1319,7 +1319,9 @@ test('a pane the engine does not place: /pacing-pane says why', async ($, on) =>
   expect((await $.command.run({ command: 'pacing-pane', args: '' } as any)).text).toBe('Pacing pane: not shown (no surface attached).')
   // the pane before any reading or turn
   const ui = await $.ui.mount(PANE)
-  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', '▸ CONTEXT', 'Not measured yet; it shows after the next turn.', 'Auto Compact at 750k', '−', '+', 'Refresh'])
+  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', '▸ CONTEXT', 'Not measured yet; it shows after the next turn.', 'Auto Compact at 750k'])
+  // (the small buttons are plain Buttons with a label since 0.9.51, no Text in them)
+  expect((await ui.findAll({ type: 'Button' })).map((b: any) => b.key ?? b.props?.key)).toEqual(['pacing-pane-autocompact-less', 'pacing-pane-autocompact-more', 'pacing-pane-refresh'])
   await ui.unmount()
 })
 
@@ -1672,7 +1674,10 @@ test('notify off: no toasts; the line still shows the agents', async ($, on) => 
   expect(seen.toasts).toEqual([])
 })
 
-test('an older engine without the agents list or timers: the line still counts, and a background agent is let go after two hours', async ($, on) => {
+// (two hours of the mock clock take about 2 s alone and passed 5 s while the
+// release ran its three checks at once, at 0.9.50 and twice at 0.9.51: its
+// own, longer, time)
+test('an older engine without the agents list or timers: the line still counts, and a background agent is let go after two hours', { timeoutMs: 20000 }, async ($, on) => {
   const status = engine(on)
   big(on)
   const clock = mock.clock(on, { now: T0 })
@@ -4649,7 +4654,9 @@ test('the agents\' rows on a desktop are text, no Button; after a "no main view 
   // the desktop: the row as text
   let ui = await $.ui.mount(PANE)
   expect(await agentButtons(ui)).toEqual([])
-  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text).filter((t: string) => String(t).includes('read the logs'))).toEqual(['reader is running: read the logs 20s'])
+  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text).filter((t: string) => String(t).includes('read the logs'))).toEqual(['reader: read the logs'])
+  // (its time has its own place, at the right under the words)
+  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toContain('20s')
   await ui.unmount()
   // the terminal: a Button, until the engine says it draws no main view
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' } as any)
@@ -5195,19 +5202,24 @@ test('the pane\'s auto-compact row: its words with small − and + by 50k; none 
       expect(view(paneModel({ bd, autoCompact: ac }), surface).filter(n => n.type === 'Text' && String(n.props.children).includes('Auto-compact')).map(n => [n.props.children, n.props.dimColor, n.props.size])).toEqual([[text, true, 'caption']])
     }
   }
-  // small on the desktop: no label (a desktop draws a label in place of its children), a footnote Text in it (the smallest); the terminal keeps its label
+  // small on the desktop (0.9.51): a plain Button, which alone is smaller than the app's own, with its label, in a Box that draws its outline; the terminal keeps its label and variant
   const sign = (surface: string) => view(paneModel({ bd, autoCompact: 750000 }), surface).find(n => n.props && n.props.key === 'pacing-pane-autocompact-less')
+  const edged = (tree: any[], key: string) => tree.find(n => n.type === 'Box' && n.props.borderStyle === 'round' && [n.props.children].flat().some((c: any) => c && c.props && c.props.key === key))
   const d = sign('desktop')
-  expect([d.props.label, d.props.variant, d.props.children[0].props.size, d.props.children[0].props.children]).toEqual([undefined, 'secondary', 'footnote', '−'])
-  expect(sign('terminal').props.label).toBe('−')
+  expect([d.props.label, d.props.plain, d.props.variant, d.props.children]).toEqual(['−', true, undefined, undefined])
+  expect([sign('terminal').props.label, sign('terminal').props.plain, sign('terminal').props.variant]).toEqual(['−', undefined, 'secondary'])
+  expect(edged(view(paneModel({ bd, autoCompact: 750000 }), 'terminal'), 'pacing-pane-autocompact-less')).toBeUndefined()
   // Compact and Refresh the same small size (0.9.50), Compact with a line of room above it
   const big = { totalTokens: 400000, maxTokens: 1000000, rawMaxTokens: 1000000, percentage: 40, categories: [], modelWindow: 1000000 }
   const desk = view(paneModel({ bd: big, tokens: 400000, autoCompact: 750000 }), 'desktop', { onRefresh: () => {} })
-  for (const key of ['pacing-pane-compact', 'pacing-pane-refresh']) {
+  for (const [key, label] of [['pacing-pane-compact', 'Compact'], ['pacing-pane-refresh', 'Refresh'], ['pacing-pane-autocompact-less', '−'], ['pacing-pane-autocompact-more', '+']]) {
     const b = desk.find(n => n.props && n.props.key === key)
-    expect([key, b.props.label, b.props.children[0].props.size]).toEqual([key, undefined, 'footnote'])
+    expect([key, b.props.label, b.props.plain, b.props.variant]).toEqual([key, label, true, undefined])
+    // its outline: a Box round it alone, which does not shrink
+    const box = edged(desk, key)
+    expect([key, [box.props.children].flat().length, box.props.flexShrink, typeof box.props.borderColor]).toEqual([key, 1, 0, 'string'])
   }
-  expect(desk.find(n => n.type === 'Box' && [n.props.children].flat().some((c: any) => c && c.props && c.props.key === 'pacing-pane-compact')).props.marginTop).toBe(1)
+  expect(desk.find(n => n.type === 'Box' && !n.props.borderStyle && [n.props.children].flat().some((c: any) => c && c.type === 'Box' && [c.props.children].flat().some((k: any) => k && k.props && k.props.key === 'pacing-pane-compact'))).props.marginTop).toBe(1)
   const term = view(paneModel({ bd: big, tokens: 400000, autoCompact: 750000 }), 'terminal', { onRefresh: () => {} })
   expect(term.find(n => n.props && n.props.key === 'pacing-pane-refresh').props.label).toBe('Refresh')
   // one row: the words left, − and + at its right end
@@ -5411,6 +5423,41 @@ test('the box\'s main tasks: the files it changes, a test, check, build or lint 
   expect(finishedOut({}, 'stopped', '')).toEqual([])
 })
 
+test('an agent\'s figures have places of their own on the desktop: the progress at its bar\'s right end, the time at the right of the tag\'s line, the words without both', () => {
+  // the figure: the parts said, else the estimate by time, else none
+  const T = 1000000
+  expect(progFigure({ part: { done: 2, total: 4 }, startedAt: T }, T + 60000)).toBe('2/4')
+  expect(progFigure({ part: { done: 9, total: 4 }, startedAt: T }, T + 60000)).toBe('4/4')
+  expect(progFigure({ startedAt: T, runs: [600000, 600000, 600000] }, T + 150000)).toBe('~25%')
+  expect(progFigure({ startedAt: T }, T + 1000)).toBe('')
+  expect(PROG_CELLS).toBe(5)
+  const m = paneModel({ running: [
+    { id: 'a1', text: 'reader: read the logs, searching step 2 of 4, 3m', words: 'reader: read the logs, searching', prog: '2/4', time: '3m', model: null, on: 'Haiku 5.5 medium', bar: { done: 2, total: 4 } },
+    { id: 'a2', text: 'verifier: the suite, running ~60%, 40s', words: 'verifier: the suite, running', prog: '~60%', time: '40s', model: null, on: 'Haiku 5.5 medium', bar: { frac: 0.6 } },
+    // past its estimate: a figure and no bar; a side session: no model, no figure
+    { id: 'a3', text: 'tester: the build, running ~95%, 9m', words: 'tester: the build, running', prog: '~95%', time: '9m', model: null, on: 'Sonnet 5.5 medium', bar: null },
+    { id: null, text: 'side session Fix the docs 1m', words: 'side session Fix the docs', prog: '', time: '1m', model: null, on: '', bar: null },
+    // a row without the fields: as before
+    { id: 'a5', text: 'researcher: the API, on the web 2m', model: null, on: 'Sonnet 5.5 medium', bar: { frac: 0.5 } },
+  ] as any })
+  expect(m.running.map((x: any) => [x.words, x.prog, x.time])).toEqual([['reader: read the logs, searching', '2/4', '3m'], ['verifier: the suite, running', '~60%', '40s'], ['tester: the build, running', '~95%', '9m'], ['side session Fix the docs', '', '1m'], [undefined, undefined, undefined]])
+  const tree = nodes(paneView(TABLE, m, { surface: 'desktop', onAgent: () => {} }))
+  // the words say neither figure
+  expect(tree.filter(n => n.type === 'Button' && String(n.props.key).startsWith('pacing-agent-')).map(n => n.props.label)).toEqual(['reader: read the logs, searching', 'verifier: the suite, running', 'tester: the build, running', 'researcher: the API, on the web 2m'])
+  expect(tree.filter(n => n.type === 'Text').map(n => n.props.children)).toContain('side session Fix the docs')
+  // the bar and its figure in one row: the bar takes the room, the figure is PROG_CELLS wide in the mono face
+  const barRows = tree.filter(n => n.type === 'Box' && n.props.flexDirection === 'row' && [n.props.children].flat().some((c: any) => c && c.type === 'Box' && [c.props.children].flat().length === 1 && [c.props.children].flat().some((k: any) => k && k.type === 'Svg' && /^(Step|About)/.test(k.props.alt))))
+  expect(barRows.map(r => [r.props.children[0].props.flexGrow, r.props.children[0].props.minWidth, r.props.children[1].props.flexShrink, r.props.children[1].props.children[0].props.children, r.props.children[1].props.children[0].props.mono, r.props.children[1].props.children[0].props.tabular, r.props.children[1].props.children[0].props.wrap])).toEqual([[1, 0, 0, '  2/4', true, true, undefined], [1, 0, 0, ' ~60%', true, true, undefined]])
+  // the time at the right of the tag's line; a figure without a bar goes before it; without a tag the time alone, at the right
+  const timeRows = tree.filter(n => n.type === 'Box' && n.props.flexDirection === 'row' && [n.props.children].flat().some((c: any) => c && c.type === 'Box' && c.props.flexShrink === 0 && [c.props.children].flat().some((k: any) => k && k.type === 'Text' && k.props.tabular && k.props.dimColor)))
+  expect(timeRows.map(r => [r.props.justifyContent, r.props.children.length, r.props.children[r.props.children.length - 1].props.children[0].props.children])).toEqual([['space-between', 2, '3m'], ['space-between', 2, '40s'], ['space-between', 2, '~95% · 9m'], ['flex-end', 1, '1m']])
+  // the row without the fields: its bar alone under the words, its tag alone
+  expect(tree.filter(n => n.type === 'Svg' && /^About 50%/.test(n.props.alt)).length).toBe(1)
+  expect(barRows.length).toBe(2)
+  // the terminal keeps the whole words
+  const term = nodes(paneView(TABLE, m, { surface: 'terminal', onAgent: () => {} }))
+  expect(term.filter(n => n.type === 'Button' && n.props.plain).map(n => n.props.label)[0]).toBe('🤖 reader: read the logs, searching step 2 of 4, 3m (Haiku 5.5 medium)')
+})
 test('Agents at work never draws past the pane: every Box gives way, the words wrap with long runs made breakable, tags and output lines cut, the step bar scales', () => {
   const LONG = 'x'.repeat(200)
   expect(BREAK_AT).toBe(24)
@@ -5546,7 +5593,8 @@ test('an agent\'s box in the pane from what the engine hands the module: the fil
     return texts
   }
   // the box's lines: the Texts between the agent's model tag and the next section
-  const box = async () => { const t = await paneTexts(); return t.slice(t.indexOf('Haiku 5.5') + 1, t.indexOf('▸ CONTEXT')) }
+  // (the text right after the tag is the row's time, at the right of the tag's line since 0.9.51)
+  const box = async () => { const t = await paneTexts(); return t.slice(t.indexOf('Haiku 5.5') + 1, t.indexOf('▸ CONTEXT')).filter((x: string, i: number) => !(i === 0 && /^\d+[smh]$/.test(String(x)))) }
   const step = async (text: string) => { say = text; for await (const _ of ($.turn as any).step({ turnId: 't', index: 0, messageCount: 1, model: 'claude-haiku-5-5', agentId: 'ag1' })) { /* drained */ } }
   await $.session.measure(measure(10))
   await spawn($, 'pacing:reader', 'haiku', true, 'read the logs')

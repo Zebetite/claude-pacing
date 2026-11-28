@@ -886,8 +886,11 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, now = D
   m.running = running.map(a => {
     if (!a || typeof a !== 'object' || !('on' in a || 'bar' in a || 'model' in a || 'out' in a)) return a;
     const arrow = session && session.model ? modelArrow(a.model, session.model, prices) : '';
+    // (words, prog and time: the row's words without its figures, and the
+    // figures, which the desktop's row draws in places of their own)
     return { id: a.id ?? null, text: a.text, tag: a.on ? (arrow ? arrow + ' ' : '') + a.on : '', bar: a.bar || null,
-      out: shown.has(a) ? a.out : null, ...(a.done ? { done: true } : {}) };
+      out: shown.has(a) ? a.out : null, ...(a.done ? { done: true } : {}),
+      ...(typeof a.words === 'string' ? { words: a.words, prog: a.prog || '', time: a.time || '' } : {}) };
   });
   return m;
 };
@@ -1195,6 +1198,8 @@ export const partOf = (e, was = null) => {
 export const partText = a => (a && a.part ? 'step ' + a.part.done + ' of ' + a.part.total : '');
 // what shows of an agent's progress: its parts, else the estimate
 const progText = (a, now) => partText(a) || estText(a, now);
+// the same as a figure for the pane, beside the agent's bar: "2/4", else "~60%"
+export const progFigure = (a, now) => (a && a.part && a.part.total >= 1 ? Math.min(a.part.done, a.part.total) + '/' + a.part.total : estText(a, now));
 // ---- an estimate of the time left ----
 // For the 5-minute toast, from what the module has already:
 //   with parts said and one or more done: the time run so far, per part
@@ -2899,6 +2904,10 @@ export const register = on => {
       running: [...runningAgents().map(a => ({ id: a.kind === 'session' || a.provisional ? null : a.id,
         text: (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { task: TASK_MAX, time: 1, est: 1, step: 1 })
           + (a.kind === 'session' && a.description ? ', ' + a.description : ''),
+        // the same without the progress and the time, and those two apart
+        words: (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { task: TASK_MAX, step: 1 })
+          + (a.kind === 'session' && a.description ? ', ' + a.description : ''),
+        prog: progFigure(a, now), time: dur(now - a.startedAt),
         model: a.model || null, effort: a.effort || null, on: runOn(a), bar: stepBarOf(a, now), out: a.out || [], outAt: a.outAt || 0 })),
       // the runs that ended in the last TASK_DONE_FOR, after them
       ...[...finished.entries()].filter(([, f]) => now - f.endedAt < TASK_DONE_FOR).map(([id, f]) => ({ id, done: true,

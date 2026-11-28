@@ -95,6 +95,11 @@ export const premText = (by, base = null) => (typeof by !== 'number' || by <= 0 
 // (drawn 'success' on or under the line) and a dim caption
 export const SUCCESS_HEX = '#22c55e';
 export const DIM_HEX = '#94a3b8';
+// a small button's outline: the dim colour at this strength
+export const SMALL_EDGE = 0.45;
+// the width, in characters, of an agent's progress figure beside its bar
+// ("2/4", "~60%", "12/24"): shorter ones are padded, so the bars line up
+export const PROG_CELLS = 5;
 // the colour at `k` (0 to 1) along a level's run; a colour without a run is itself
 export const sweepAt = (color, k) => {
   const stops = SWEEPS[color];
@@ -800,11 +805,33 @@ export const paneView = (t, m, o = {}) => {
         return steps || out ? col([words(said, '🤖 '), steps ? Text({ color: c, wrap: 'truncate-end', children: '   ' + stepsText(steps) }) : null, ...(out || []).map(l => cap('   │ ' + l, { wrap: 'truncate-end' }))], { minWidth: 0 }) : words(said, '🤖 ');
       }
       // the words, then the step bar right under them (the most visible
-      // part), then the model tag and the box
+      // part), then the model tag and the box.
+      // The figures have places of their own (the user's word, 0.9.51): the
+      // progress ("2/4", "~60%": x.prog) at the bar's right end, the time
+      // run (x.time) at the right end of the tag's line, so neither moves
+      // when the words change; the words (x.words) then say neither. A
+      // figure is PROG_CELLS wide in the mono face, so the bars of all the
+      // rows end at one place. A row without those fields (x.text alone)
+      // is drawn as before. A figure is short and never gives way (`fixed`):
+      // cut to "…" it would say nothing; the bar and the tag give way.
+      const own = x && typeof x === 'object' && x.words != null;
+      const prog = own && x.prog ? x.prog : '';
+      const time = own && x.time ? x.time : '';
+      const fixed = text => Box({ flexDirection: 'row', flexShrink: 0, minWidth: 0, children: [text] });
+      const figure = s => Text({ size: 'caption', mono: true, tabular: true, color: c, children: s.padStart(PROG_CELLS, ' ') });
+      const stepsAlt = steps ? (steps.total ? 'Step ' + steps.done + ' of ' + steps.total : 'About ' + Math.round(100 * steps.frac) + '% of its time') : '';
+      const stepsDrawn = steps ? t.Svg({ source: stepsSvg(steps, c), alt: stepsAlt }) : null;
+      const tagged = tag ? Text({ size: 'caption', mono: true, color: c, wrap: 'truncate-end', children: tag }) : null;
+      const timed = [prog && !steps ? prog : '', time].filter(Boolean).join(' · ');
       return row([t.Svg({ source: moving(robotSvg(c, i)), alt: 'An agent at work', width: 36, height: 36 }), Box({ flexDirection: 'column', flexShrink: 1, flexGrow: 1, minWidth: 0, justifyContent: 'center', children: [
-        words(x, ''),
-        steps ? t.Svg({ source: stepsSvg(steps, c), alt: steps.total ? 'Step ' + steps.done + ' of ' + steps.total : 'About ' + Math.round(100 * steps.frac) + '% of its time' }) : null,
-        tag ? Text({ size: 'caption', mono: true, color: c, wrap: 'truncate-end', children: tag }) : null,
+        words(own ? { ...x, text: x.words } : x, ''),
+        steps && prog ? row([Box({ flexDirection: 'column', flexGrow: 1, flexShrink: 1, minWidth: 0, children: [stepsDrawn] }), fixed(figure(prog))], { alignItems: 'center', columnGap: 1, minWidth: 0 }) : stepsDrawn,
+        // (a figure without a bar, an estimate the run has passed, goes
+        // before the time)
+        timed ? row([
+          tagged ? Box({ flexDirection: 'column', flexShrink: 1, minWidth: 0, children: [tagged] }) : null,
+          fixed(Text({ size: 'caption', mono: true, tabular: true, dimColor: true, children: timed })),
+        ], { justifyContent: tagged ? 'space-between' : 'flex-end', columnGap: 1, minWidth: 0 }) : tagged,
         // its latest output, or its report's first lines once done: a small
         // dim box, each line cut at the pane's width
         out ? Box({ flexDirection: 'column', minWidth: 0, overflow: 'hidden', paddingX: 1, borderStyle: 'round', borderColor: tint(c, 0.35), backgroundColor: OUT_FILL, children: out.map(l => Text({ size: 'caption', mono: true, dimColor: true, wrap: 'truncate-end', children: l })) }) : null,
@@ -816,14 +843,17 @@ export const paneView = (t, m, o = {}) => {
   // worth cutting (m.compact) a button that compacts it. A second press
   // while one runs does nothing (o.onCompact sees to that); the terminal
   // gets the words, since /compact is typed there.
-  // A desktop Button has no size: a small one holds a footnote-size Text and
-  // no label (a desktop draws a label in place of its children). The
-  // smallest text there is (the user's word, 0.9.50: Compact, − and +
-  // smaller, Refresh the same; 0.9.49's caption was not small enough); the terminal keeps
-  // its labels.
+  // A small button (the user's word, 0.9.50: Compact, − and + smaller,
+  // Refresh the same). A desktop's own button cannot be made smaller: it is
+  // 2rem high with 0.75rem at each side and draws its label at body size,
+  // whatever Text it holds (the app's stylesheet; 0.9.49's caption Text and
+  // 0.9.50's footnote Text changed nothing, and footnote is the larger of
+  // the two). A `plain` one is a line high with 0.375rem at each side and
+  // no outline, so the small button is a plain one in a Box that draws the
+  // outline (0.9.51); the terminal keeps its labels.
   const small = (key, words, onPress) => (o.surface === 'terminal'
     ? Button({ key, label: words, variant: 'secondary', onPress })
-    : Button({ key, variant: 'secondary', onPress, children: [Text({ size: 'footnote', children: words })] }));
+    : Box({ flexDirection: 'row', flexShrink: 0, borderStyle: 'round', borderColor: tint(DIM_HEX, SMALL_EDGE), children: [Button({ key, plain: true, label: words, onPress })] }));
   // a line of room above it (the user's word, 0.9.50)
   const compact = !m.compact ? null
     : o.surface === 'terminal' ? cap(m.compact === 'running' ? 'Compacting…' : '/compact cuts it.')

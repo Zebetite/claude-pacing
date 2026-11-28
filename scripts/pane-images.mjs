@@ -38,7 +38,7 @@ const el = html => ({ html });
 const kids = c => (Array.isArray(c) ? c : c == null ? [] : [c]).flat(Infinity).filter(x => x != null && x !== false).map(x => (x && typeof x === 'object' ? x.html : esc(x))).join('');
 const CELL = 8;
 const COLOR = { success: '#4ade80', warning: '#fbbf24', error: '#f87171' };
-const SIZE = { title: 28, caption: 12, footnote: 11 };
+const SIZE = { title: 28, caption: 12, footnote: 13 };
 const WEIGHT = { medium: 500, semibold: 600, bold: 700 };
 // the element table the pane is drawn with
 const t = {
@@ -59,7 +59,7 @@ const t = {
     if (p.flexWrap) st.push('flex-wrap:' + p.flexWrap);
     if (p.flexGrow != null) st.push('flex-grow:' + p.flexGrow);
     // a border: 'round' with round corners, 'dashed' broken, any other plain
-    if (p.borderStyle) st.push('border:1px ' + (p.borderStyle === 'dashed' ? 'dashed' : 'solid') + ' ' + (p.borderColor || '#4b5563'), 'border-radius:' + (p.borderStyle === 'round' ? 6 : 2) + 'px', 'padding:4px ' + (p.paddingX || 1) * CELL + 'px');
+    if (p.borderStyle) st.push('border:1px ' + (p.borderStyle === 'dashed' ? 'dashed' : 'solid') + ' ' + (p.borderColor || '#4b5563'), 'border-radius:' + (p.borderStyle === 'round' ? 6 : 2) + 'px', 'padding:' + (p.paddingX != null ? '4px ' + p.paddingX * CELL + 'px' : '0'));
     return el('<div style="' + st.join(';') + '">' + kids(p.children) + '</div>');
   },
   Text: p => {
@@ -73,10 +73,13 @@ const t = {
     if (p.wrap === 'truncate-end') st.push('white-space:nowrap;overflow:hidden;text-overflow:ellipsis');
     return el('<div style="' + st.join(';') + '">' + kids(p.children) + '</div>');
   },
-  // a plain Button with children: the children alone; a small one (no
-  // label, a footnote Text in it): a smaller button round its text
+  // a plain Button with children: the children alone; a plain one with a
+  // label alone: the app's plain button, a line (20px) high with 6px at each
+  // side and the label at body size (14px); any other: the app's own
+  // button, 32px high with 12px at each side
   Button: p => (p.plain && p.children ? el('<div style="display:flex;cursor:pointer">' + kids(p.children) + '</div>')
-    : p.label == null && p.children ? el('<div style="display:flex"><span style="display:inline-flex;padding:2px 9px;border:1px solid #4b5563;border-radius:6px;background:#2b2b2a">' + kids(p.children) + '</span></div>')
+    : p.plain ? el('<span style="display:inline-flex;align-items:center;min-height:20px;padding:0 6px;font-size:14px;line-height:20px;color:#e5e7eb;cursor:pointer">' + esc(p.label) + '</span>')
+    : p.label == null && p.children ? el('<div style="display:flex"><span style="display:inline-flex;align-items:center;height:32px;box-sizing:border-box;padding:0 12px;border:1px solid #4b5563;border-radius:6px;background:#2b2b2a;font-size:14px">' + kids(p.children).replace(/<[^>]+>/g, '') + '</span></div>')
     : el('<div><span style="display:inline-block;padding:5px 14px;border:1px solid #4b5563;border-radius:6px;font-size:13px;color:#e5e7eb">' + esc(p.label) + '</span></div>')),
   Svg: p => el('<div style="' + (p.width ? 'width:' + p.width + 'px;height:' + p.height + 'px;flex-shrink:0' : 'width:100%') + '">'
     + p.source.replace('<svg ', '<svg style="display:block;width:100%;height:auto" ') + '</div>'),
@@ -108,12 +111,12 @@ const SHOTS = [
       { model: 'claude-opus-5-5', effort: 'high' }, [
         // (the two with the newest output show its box: the implementer and the
         // researcher that just finished; the reviewer's is older)
-        { id: 'a1', text: 'reviewer: the release notes, step 1 of 3 · 6m', model: 'claude-fable-5-2', effort: 'high', on: 'Fable 5.2 high', bar: { done: 1, total: 3 },
+        { id: 'a1', text: 'reviewer: the release notes, step 1 of 3 · 6m', words: 'reviewer: the release notes, reading', prog: '1/3', time: '6m', model: 'claude-fable-5-2', effort: 'high', on: 'Fable 5.2 high', bar: { done: 1, total: 3 },
           out: ['Checks: 12 pass'], outAt: 10 },
-        { id: 'a2', text: 'implementer: step 2 of 4, the band row · 4m, about 3m left', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: { done: 2, total: 4 },
+        { id: 'a2', text: 'implementer: step 2 of 4, the band row · 4m, about 3m left', words: 'implementer: the band row, editing', prog: '2/4', time: '4m', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: { done: 2, total: 4 },
           out: ['Tests: 448 pass', 'Changing readings.mjs and pane.mjs'], outAt: 30 },
-        { id: 'a3', text: 'reader: reading the test logs · 2m 10s, about 1m left', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { frac: 0.65 } },
-        { id: null, text: 'side session 1m 30s, Fix the docs build', model: null, effort: null, on: '', bar: null },
+        { id: 'a3', text: 'reader: reading the test logs · 2m 10s, about 1m left', words: 'reader: the test logs, reading', prog: '~65%', time: '2m', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { frac: 0.65 } },
+        { id: null, text: 'side session 1m 30s, Fix the docs build', words: 'side session, Fix the docs build', prog: '', time: '2m', model: null, effort: null, on: '', bar: null },
         { id: 'a4', done: true, text: 'researcher: the hooks API ✓ done · 3m', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: null,
           out: ['Done: the hooks API hands over each call and its result'], outAt: 20 },
       ]),
@@ -135,8 +138,8 @@ const SHOTS = [
       mix: [{ name: 'Opus 5.5 high', share: 58 }, { name: 'Fable 5.2 xhigh', share: 30 }, { name: 'Haiku 5.5 medium', share: 12 }],
       ...made({ all: 38, line: 57.1, premium: 44, premiumLabel: 'Fable 5.2' },
       { model: 'claude-opus-5-5', effort: 'high' }, [
-        { id: 'a1', text: 'reviewer: the settings page, step 3 of 5 · 7m', model: 'claude-fable-5-2', effort: 'xhigh', on: 'Fable 5.2 xhigh', bar: { done: 3, total: 5 } },
-        { id: 'a2', text: 'verifier: running the test suite · 40s, about 2m left', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { frac: 0.25 } },
+        { id: 'a1', text: 'reviewer: the settings page, step 3 of 5 · 7m', words: 'reviewer: the settings page, reading', prog: '3/5', time: '7m', model: 'claude-fable-5-2', effort: 'xhigh', on: 'Fable 5.2 xhigh', bar: { done: 3, total: 5 } },
+        { id: 'a2', text: 'verifier: running the test suite · 40s, about 2m left', words: 'verifier: the test suite, running', prog: '~25%', time: '40s', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { frac: 0.25 } },
       ]),
       context: { used: '96k', of: '1M', pct: 10 },
       // the auto-compact row: the window pacing sets, with − and +
@@ -158,8 +161,8 @@ const SHOTS = [
       ],
       ...made({ all: 77, line: 73.3, premium: 68, premiumLabel: 'Fable 5.2', level: 'over', weekLevel: 'over' },
       { model: 'claude-fable-5-2', effort: 'high' }, [
-        { id: 'a1', text: 'researcher: reading the API docs · 1m 20s, about 2m left', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: { frac: 0.4 } },
-        { id: 'a2', text: 'implementer: step 1 of 3, the settings page · 2m', model: 'claude-opus-5-5', effort: 'medium', on: 'Opus 5.5 medium', bar: { done: 1, total: 3 } },
+        { id: 'a1', text: 'researcher: reading the API docs · 1m 20s, about 2m left', words: 'researcher: the API docs, on the web', prog: '~40%', time: '1m', model: 'claude-sonnet-5-5', effort: 'medium', on: 'Sonnet 5.5 medium', bar: { frac: 0.4 } },
+        { id: 'a2', text: 'implementer: step 1 of 3, the settings page · 2m', words: 'implementer: the settings page, editing', prog: '1/3', time: '2m', model: 'claude-opus-5-5', effort: 'medium', on: 'Opus 5.5 medium', bar: { done: 1, total: 3 } },
       ]),
       mix: [{ name: 'Fable 5.2 high', share: 48 }, { name: 'Opus 5.5 medium', share: 34 }, { name: 'Sonnet 5.5 medium', share: 18 }],
       context: { used: '312k', of: '1M', pct: 31 },
