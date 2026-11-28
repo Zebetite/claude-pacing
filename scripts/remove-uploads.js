@@ -13,7 +13,11 @@
 await (async () => {
   const wait = ms => new Promise(r => setTimeout(r, ms));
   const until = async (fn, ms = 8000) => { for (let t = 0; t < ms; t += 200) { const v = fn(); if (v) return v; await wait(200); } return null; };
-  const heading = text => [...document.querySelectorAll('h3')].find(h => h.textContent.trim() === text);
+  // the page's labels as plain text: the menu's "Ta bort" starts with an
+  // icon font's character (U+E101, seen at 0.9.50, where the exact match
+  // stopped the first real run); those, and odd spaces, are dropped
+  const norm = s => String(s || '').normalize('NFC').replace(/[-­​-‍﻿]/g, '').replace(/\s+/g, ' ').trim();
+  const heading = text => [...document.querySelectorAll('h3')].find(h => norm(h.textContent) === text);
   const own = await until(() => heading('Skapad av dig') || (heading('Från din organisation') && 'none'));
   if (!own) return 'stopped: the page shows neither section';
   if (own === 'none') return 'nothing to remove: no "Skapad av dig" section';
@@ -22,19 +26,21 @@ await (async () => {
   const after = el => own.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING;
   const rowOf = b => { let r = b; for (let i = 0; i < 8 && r && !/Pacing/.test(r.textContent); i++) r = r.parentElement; return r; };
   const ours = [...document.querySelectorAll('button[aria-label="Fler åtgärder för Pacing"]')]
-    .filter(b => after(b) && before(b) && /Lokala uppladdningar/.test(rowOf(b)?.textContent || ''));
+    .filter(b => after(b) && before(b) && /Lokala uppladdningar/.test(norm(rowOf(b)?.textContent)));
   if (ours.length !== 1) return 'stopped: ' + ours.length + ' uploads rows found';
-  ours[0].click();
-  const items = await until(() => { const m = [...document.querySelectorAll('[role="menuitem"]')]; return m.length ? m : null; }, 3000);
-  const names = (items || []).map(i => i.textContent.trim());
+  // (a menu left open by an earlier run is used as it is)
+  const menu = () => { const m = [...document.querySelectorAll('[role="menuitem"]')]; return m.length ? m : null; };
+  if (!menu()) ours[0].click();
+  const items = await until(menu, 3000);
+  const names = (items || []).map(i => norm(i.textContent));
   if (!names.includes('Stäng av') || !names.includes('Ta bort')) {
     document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     return 'stopped: the menu was ' + JSON.stringify(names);
   }
-  items.find(i => i.textContent.trim() === 'Ta bort').click();
-  const dialog = await until(() => [...document.querySelectorAll('[role="dialog"],[role="alertdialog"]')].find(d => /Ta bort pluginet\?/.test(d.textContent)), 3000);
+  items.find(i => norm(i.textContent) === 'Ta bort').click();
+  const dialog = await until(() => [...document.querySelectorAll('[role="dialog"],[role="alertdialog"]')].find(d => /Ta bort pluginet\?/.test(norm(d.textContent))), 3000);
   if (!dialog) return 'stopped: no "Ta bort pluginet?" dialog';
-  const confirm = [...dialog.querySelectorAll('button')].find(b => b.textContent.trim() === 'Ta bort');
+  const confirm = [...dialog.querySelectorAll('button')].find(b => norm(b.textContent) === 'Ta bort');
   if (!confirm) return 'stopped: the dialog has no Ta bort button';
   confirm.click();
   const gone = await until(() => !heading('Skapad av dig') || ![...document.querySelectorAll('button[aria-label="Fler åtgärder för Pacing"]')].some(b => after(b) && before(b)), 6000);
