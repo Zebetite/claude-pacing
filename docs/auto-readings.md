@@ -1848,3 +1848,63 @@ is opened neither at the start nor at an attach. An engine without
 `$.session.surfaces` opens at the start as before, and /pacing-pane opens
 it whenever asked. A run that never has a surface (`claude -p`, the SDK)
 never opens one, and says nothing.
+
+## What a review found (0.9.53)
+
+A review of the hooks module and the pane's drawing (four readers, each
+finding checked against the code and the engine's types, then written as a
+test that fails on 0.9.52) found twelve defects. Fixed:
+
+- **A waiting agent is at work** (`AT_WORK`). `liveAgents` took only
+  `pending` and `running` for running; a background agent `waiting` on its
+  own background work, a plan's approval or an agent it started was
+  dropped from the line and the pane, and its end got no toast and no
+  record.
+- **A compaction pacing hears** (`session.compact`) now also ends the
+  pause timers and lets go of a switch row that said "compact first", as a
+  compaction seen at a measure did. The timers held the old size and
+  raised "This session is 450k tokens…" 50 and 60 minutes after "Compact,
+  then switch"; the switch row came up at the old size once the compact
+  offer was gone, and a press compacted again.
+- **A poll of the side sessions that fails is no news** (`sessionList`).
+  A tool call that fails or is refused resolves, and its answer has no
+  list; read as an empty list it said every side session had ended.
+- **Loud a whole point past the line** (`overBy`). The per-model bar went
+  loud past its line by any amount and wrote "OVER +0" above words that
+  said it was not over; the tag is now from the figure itself (104
+  against 90 is +14, though the bar ends at 100).
+- **One failure a reading.** With the app's usage tool a reading runs
+  budget.mjs twice, and both failing counted two: the toast came a reading
+  early and said "4 tries" after two.
+- **An agent given its next task within its done row's minute** has one
+  row (its done row goes as it starts again: two rows of one id were two
+  Buttons with one key), and its later run's done row is no longer taken
+  by the earlier run's timer.
+- **The tick stops by one rule** (`idleAt`): not while a side session
+  just started is watched for. Stopped as the last agent ended, that side
+  session was never seen.
+- **The arrows stay inside the drawing** (`arrowLeft`): on the week's
+  last day the line is at 100 and the right half of its arrow was cut off.
+- **The progress toast** is not sent for a list that emptied while it
+  was built ("still running: .").
+- **Compact, then switch, skipped**: a compaction another plugin's hook
+  skips is said, and nothing is switched; typed in its place, the switch
+  could run on the session as it was.
+- A comment said the usage tool is asked every 30 minutes; it is
+  `MIN_GAP`, 10.
+
+Not covered by a test of its own: the progress toast's race, and the tick
+at each of its three stops (the rule itself is).
+
+The pane's buttons are the app's own again (also 0.9.53). 0.9.51's small
+button, a `plain` Button in a Box that drew its outline, came out larger
+in the app than the button it replaced: in a pane the app draws a plain
+button as large as its own, and the outline's Box adds its padding round
+it. Reading the app's stylesheet had said otherwise, three times. So the
+user was shown nine ways to draw Compact, − and + side by side in a
+sample pane in the app (the app's own button, plain ones with and without
+an outline, outlines cut to one and two cells, small text, links in a
+line of text), and chose the app's own. `small()` draws
+`Button({ key, label, variant: 'secondary' })` on every surface; the line
+of room above Compact stays. Nothing a plugin passes makes that button
+smaller.

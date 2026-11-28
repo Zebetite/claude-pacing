@@ -59,7 +59,7 @@ const t = {
     if (p.flexWrap) st.push('flex-wrap:' + p.flexWrap);
     if (p.flexGrow != null) st.push('flex-grow:' + p.flexGrow);
     // a border: 'round' with round corners, 'dashed' broken, any other plain
-    if (p.borderStyle) st.push('border:1px ' + (p.borderStyle === 'dashed' ? 'dashed' : 'solid') + ' ' + (p.borderColor || '#4b5563'), 'border-radius:' + (p.borderStyle === 'round' ? 6 : 2) + 'px', 'padding:' + (p.paddingX != null ? '4px ' + p.paddingX * CELL + 'px' : '0'));
+    if (p.borderStyle) st.push('border:1px ' + (p.borderStyle === 'dashed' ? 'dashed' : 'solid') + ' ' + (p.borderColor || '#4b5563'), 'border-radius:' + (p.borderStyle === 'round' ? 6 : 2) + 'px', 'padding:' + (p.paddingX != null ? '4px ' + p.paddingX * CELL + 'px' : '6px'));
     return el('<div style="' + st.join(';') + '">' + kids(p.children) + '</div>');
   },
   Text: p => {
@@ -73,14 +73,14 @@ const t = {
     if (p.wrap === 'truncate-end') st.push('white-space:nowrap;overflow:hidden;text-overflow:ellipsis');
     return el('<div style="' + st.join(';') + '">' + kids(p.children) + '</div>');
   },
-  // a plain Button with children: the children alone; a plain one with a
-  // label alone: the app's plain button, a line (20px) high with 6px at each
-  // side and the label at body size (14px); any other: the app's own
-  // button, 32px high with 12px at each side
+  // a plain Button with children: the children alone. Any other is drawn
+  // at the app's one button size, 32px high with 12px at each side and the
+  // label at body size (14px), whatever it holds: a plain one with a label
+  // without the outline (seen in the app at 0.9.51: as large as the app's
+  // own in a pane), the rest with it
   Button: p => (p.plain && p.children ? el('<div style="display:flex;cursor:pointer">' + kids(p.children) + '</div>')
-    : p.plain ? el('<span style="display:inline-flex;align-items:center;min-height:20px;padding:0 6px;font-size:14px;line-height:20px;color:#e5e7eb;cursor:pointer">' + esc(p.label) + '</span>')
-    : p.label == null && p.children ? el('<div style="display:flex"><span style="display:inline-flex;align-items:center;height:32px;box-sizing:border-box;padding:0 12px;border:1px solid #4b5563;border-radius:6px;background:#2b2b2a;font-size:14px">' + kids(p.children).replace(/<[^>]+>/g, '') + '</span></div>')
-    : el('<div><span style="display:inline-block;padding:5px 14px;border:1px solid #4b5563;border-radius:6px;font-size:13px;color:#e5e7eb">' + esc(p.label) + '</span></div>')),
+    : el('<div style="display:flex"><span style="display:inline-flex;align-items:center;height:32px;box-sizing:border-box;padding:0 12px;' + (p.plain ? '' : 'border:1px solid #4b5563;background:#2b2b2a;') + 'border-radius:6px;font-size:14px;color:#e5e7eb">'
+      + (p.label != null ? esc(p.label) : kids(p.children).replace(/<[^>]+>/g, '')) + '</span></div>')),
   Svg: p => el('<div style="' + (p.width ? 'width:' + p.width + 'px;height:' + p.height + 'px;flex-shrink:0' : 'width:100%') + '">'
     + p.source.replace('<svg ', '<svg style="display:block;width:100%;height:auto" ') + '</div>'),
 };

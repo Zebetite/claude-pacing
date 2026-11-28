@@ -253,8 +253,8 @@ async function storedReading($) {
 // absent, fails or reads as nothing (a terminal session without the app),
 // the reading is the plain one from the two windows the engine gave, the
 // figure carried and the note included, as before.
-// No more often than before: when the weekly window moved a whole point, 30
-// minutes passed, or the module loaded; and once when a subagent's run ends,
+// No more often than before: when the weekly window moved a whole point,
+// MIN_GAP (10 minutes) passed, or the module loaded; and once when a subagent's run ends,
 // if the last reading is AGENT_GAP old (its work moved the meters, and no
 // response of the main thread has said so yet).
 export const USAGE_TOOL = 'mcp__ccd_session_mgmt__get_usage';
@@ -335,29 +335,37 @@ async function limitsNow($) {
 async function runReading($, week, five, session, spend = null, health = null) {
   const total = spend ? spend.total : 0;
   const spent = spend ? total - spend.sent : 0;
+  // One reading counts one failure at most (0.9.53): with the app's usage
+  // tool there are two runs, the one with every meter and the plain one,
+  // and both failing counted two, so the toast came a reading early and
+  // said "4 tries" after two. (failed: why the last run failed.)
+  let failed = null, came = false;
+  const fail = why => { failed = typeof why === 'string' ? why : ''; };
   const run = async argv => {
     let r, j = null;
-    try { r = await $.process.run(argv, { timeoutMs: 20000 }); } catch (err) { readingFailed(health, err && err.message); throw err; }
+    try { r = await $.process.run(argv, { timeoutMs: 20000 }); } catch (err) { fail(err && err.message); throw err; }
     if (r.exitCode !== 0) {
       // budget.mjs refuses a reset that has passed. The engine holds the last
       // response's windows, so between the weekly reset and the next response
       // the one it names has: there is nothing to read then, and nothing failed
       const why = lastLineOf(r.stderr) || lastLineOf(r.stdout);
-      if (!RESET_PASSED.test(why)) readingFailed(health, why);
-    } else { try { j = JSON.parse(r.stdout.trim().split('\n').pop()); } catch (err) { readingFailed(health, 'its answer could not be read'); throw err; } }
-    if (j) { readingCame(health); if (spend) spend.sent = total; }
+      if (!RESET_PASSED.test(why)) fail(why);
+    } else { try { j = JSON.parse(r.stdout.trim().split('\n').pop()); } catch (err) { fail('its answer could not be read'); throw err; } }
+    if (j) { came = true; readingCame(health); if (spend) spend.sent = total; }
     return j;
   };
   const plain = () => (week && week.resetsAt
     ? run(readingArgv($.plugin.root, week.percentUsed, week.resetsAt, five && five.percentUsed, five && five.resetsAt, false, null, null, spent)) : null);
-  const m = await metersNow($);
-  if (!m) return plain();
-  const own = m.five !== null;
-  let j = null;
   try {
-    j = await run(readingArgv($.plugin.root, m.all, m.reset, own ? m.five : five && five.percentUsed, own ? m.fiveReset : five && five.resetsAt, false, m, session, spent));
-  } catch { /* the plain one */ }
-  return j || plain();
+    const m = await metersNow($);
+    if (!m) return await plain();
+    const own = m.five !== null;
+    let j = null;
+    try {
+      j = await run(readingArgv($.plugin.root, m.all, m.reset, own ? m.five : five && five.percentUsed, own ? m.fiveReset : five && five.resetsAt, false, m, session, spent));
+    } catch { /* the plain one */ }
+    return j || (await plain());
+  } finally { if (!came && failed !== null) readingFailed(health, failed); }
 }
 // How the readings go, in `health` ({ fails, why, told }): a run of budget.mjs
 // that failed (an exit code, a timeout, an answer that does not parse) is
@@ -1342,11 +1350,16 @@ export const backgroundText = (agents, now, room = MSG_MAX) => {
   ], Math.min(room, MSG_MAX));
 };
 // the session's own agents still running, by the engine's list; null where
-// the engine has no list
+// the engine has no list. 'waiting' is at work too (0.9.53): held on
+// background work it owns, a plan's approval or, in a background agent, an
+// Agent call; taken for ended, a working agent left the line and the pane
+// and its end got no toast and no record. 'idle' is between turns: its
+// turn's end has taken it off already.
+export const AT_WORK = ['pending', 'running', 'waiting'];
 async function liveAgents($) {
   try {
     const list = await $.agent.list();
-    return new Map(list.filter(a => a.status === 'pending' || a.status === 'running').map(a => [a.id, a]));
+    return new Map(list.filter(a => AT_WORK.includes(a.status)).map(a => [a.id, a]));
   } catch { return null; }
 }
 // drop the agents the engine no longer runs; without its list, those of the
@@ -1448,10 +1461,11 @@ export const SESSIONS_TOOL = 'mcp__ccd_session_mgmt__list_sessions';
 // the rows of a list_sessions answer, or [] when it reads as nothing
 // (a live answer: `text`, the rows as JSON, and `result`, the tool's content
 // as an array of { type, text })
-export const sessionRows = res => {
+export const sessionList = res => {
   for (const t of textsOf(res)) { try { const v = JSON.parse(t); if (Array.isArray(v)) return v; } catch { /* not this one */ } }
-  return [];
+  return null;
 };
+export const sessionRows = res => sessionList(res) || [];
 // the side sessions of `host` that are working now, as running entries
 export const workingSessions = (rows, host) => (host ? rows.filter(r => r && r.startedBy === host && r.isRunning === true && !r.isArchived) : []);
 export const startedBy = (rows, host) => (host ? rows.filter(r => r && r.startedBy === host && !r.isArchived).length : 0);
@@ -1478,6 +1492,11 @@ function startTick($, st) {
   if (st.timer) return;
   st.timer = $.clock.every(REFRESH_EVERY, () => { tick($, st).catch(() => { /* a refresh never disturbs the session */ }); });
 }
+// Whether the tick has nothing left to do: no agent at work, and no side
+// session being watched for (st.watchUntil: one just started may not show
+// as running yet; stopped then, it was never seen: 0.9.53). The tick's own
+// rule, for every place that stops it.
+export const idleAt = (st, t) => !st.agents.size && t >= (st.watchUntil || 0);
 function stopTickOf(st) { if (st.timer) { try { st.timer.cancel(); } catch { /* gone */ } st.timer = null; } }
 async function tick($, st) {
   const t = await $.clock.now();
@@ -1486,12 +1505,14 @@ async function tick($, st) {
   if (st.stepMoved) await keepAgents($, st);
   const watching = t < st.watchUntil || [...st.agents.values()].some(a => a.kind === 'session');
   if (watching && t - st.polledAt >= POLL_EVERY) await pollSessions($, st, t);
-  if (!st.agents.size && t >= st.watchUntil) stopTickOf(st);
+  if (idleAt(st, t)) stopTickOf(st);
   $.ui.status(st.lineNow(t));
   redraw($);
   if (st.agents.size && t - st.progressAt >= PROGRESS_EVERY) {
     st.progressAt = t;
-    if ((await noticesOn($)) && !(await paneShown($, st))) $.ui.toast(progressText(st.list(), t));
+    // (the list as it is after the awaits: emptied meanwhile, the toast read
+    // "still running: .")
+    if ((await noticesOn($)) && !(await paneShown($, st)) && st.list().length) $.ui.toast(progressText(st.list(), t));
   }
 }
 // the room for the status line, from the surfaces that draw the session
@@ -1538,7 +1559,14 @@ async function hostOf($, st) {
 async function pollSessions($, st, t) {
   st.polledAt = t;
   let rows;
-  try { rows = sessionRows(await $.tool.call({ tool: SESSIONS_TOOL, linked: true })); } catch { return; }
+  // (a call that failed or was refused resolves, with isError or deny, and
+  // an answer without a list is no list: neither says the side sessions
+  // ended, as an empty list does: 0.9.53)
+  try {
+    const res = await $.tool.call({ tool: SESSIONS_TOOL, linked: true });
+    rows = res && !res.deny && !res.isError ? sessionList(res) : null;
+  } catch { return; }
+  if (!rows) return;
   const host = await hostOf($, st);
   if (!host) return;
   const live = workingSessions(rows, host);
@@ -2308,7 +2336,10 @@ async function runSwitch($, pr, target) {
 async function compactThenSwitch($, pr, target) {
   try {
     const r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS });
-    if (r && r.skip) throw new Error(r.skip);
+    // skipped (another plugin's hook answered): said, and no switch, as
+    // Compact now does; typed instead, the switch could run on the session
+    // as it was (0.9.53)
+    if (r && r.skip) { $.ui.toast(ICON.failed + ' the compaction did not run: ' + r.skip + '. Not switched.', { timeoutMs: TOAST_LONG }); return; }
     pr.compacted((r && r.tokensAfter) || null);
   } catch (err) {
     if (!(await compactTyped($, pr, err))) return;
@@ -2576,6 +2607,9 @@ export const register = on => {
         // a fresh agent of a role is what a waiting line about one asked for
         if (!e.resume && roleFor(type)) fresh.delete(roleFor(type));
         if (!agents.size) st.progressAt = now;
+        // at work again: its earlier run's done row goes (two rows of one id
+        // were two Buttons with one key)
+        finished.delete(a.id);
         agents.set(a.id, a);
         keepAgents($, st);
         startTick($, st);
@@ -2685,6 +2719,12 @@ export const register = on => {
     try { r = await next(e); } finally { if (main) { compactingNow = false; redraw($); } }
     if (main && r && r.messages) {
       forget();
+      // as at a compaction seen at a measure (0.9.53): the pause timers
+      // held the old size and raised "this session is 450k tokens" an hour
+      // after "Compact, then switch", and a switch that said "compact
+      // first" came up at the old size once the compact offer was gone
+      clearTimers();
+      if (sw && sw.compactFirst) { switchSeen.delete(sw.key); sw = null; }
       contextTokens = r.tokensAfter || null;
       // the pane's bar at the new size at once, not at the turn's end
       try { const bd = await breakdownNow($); if (bd) ctxNow = bd; } catch { /* the next measure */ }
@@ -2695,8 +2735,9 @@ export const register = on => {
         // next poll took each for a new one and said it started again)
         for (const [id, a] of [...agents]) if (a.kind !== 'session' && (!live || !live.has(id))) agents.delete(id);
         keepAgents($, st);
-        if (!agents.size) stopTick();
-        $.ui.status(lineNow(await $.clock.now()));
+        const t = await $.clock.now();
+        if (idleAt(st, t)) stopTick();
+        $.ui.status(lineNow(t));
       } catch { /* the line is redrawn at the next measure */ }
       redraw($);
     }
@@ -3165,12 +3206,14 @@ export const register = on => {
         agents.delete(e.agentId);
         keepAgents($, st);
         const now = await $.clock.now();
-        if (!agents.size) stopTick();
+        if (idleAt(st, now)) stopTick();
         // its row stays its minute with how it ended and its report's first lines
         try {
           const state = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done';
           finished.set(e.agentId, { a, endedAt: now, state, out: finishedOut(a, state, e.answer) });
-          $.clock.after(TASK_DONE_FOR, () => { finished.delete(e.agentId); redraw($); });
+          // (the row of this run alone: resumed and ended again within the
+          // minute, the earlier run's timer took the later run's row)
+          $.clock.after(TASK_DONE_FOR, () => { const f = finished.get(e.agentId); if (f && f.endedAt === now) finished.delete(e.agentId); redraw($); });
         } catch { /* no row kept */ }
         $.ui.status(lineNow(now));
         redraw($);
@@ -3215,8 +3258,9 @@ export const register = on => {
         const before = agents.size;
         for (const [id, a] of agents) if (!a.background) agents.delete(id);
         if (agents.size !== before) keepAgents($, st);
-        await settleAgents($, st, await $.clock.now());
-        if (!agents.size) stopTick();
+        const t = await $.clock.now();
+        await settleAgents($, st, t);
+        if (idleAt(st, t)) stopTick();
         redraw($);
       } catch { /* the count is settled at the next refresh */ }
     }

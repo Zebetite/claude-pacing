@@ -95,8 +95,6 @@ export const premText = (by, base = null) => (typeof by !== 'number' || by <= 0 
 // (drawn 'success' on or under the line) and a dim caption
 export const SUCCESS_HEX = '#22c55e';
 export const DIM_HEX = '#94a3b8';
-// a small button's outline: the dim colour at this strength
-export const SMALL_EDGE = 0.45;
 // the width, in characters, of an agent's progress figure beside its bar
 // ("2/4", "~60%", "12/24"): shorter ones are padded, so the bars line up
 export const PROG_CELLS = 5;
@@ -195,13 +193,24 @@ export const BAR_CELLS = 36;
 // OVER_CALM past, then the run (a loud bar's premText: yellow at PREM_CALM
 // past); the cells up to it keep the bar's own colours.
 export const LINE_TAG = 18;
-export const barSvg = memo('bar', (segments, marker = null, w = 480, h = 34, loud = false, warm = null) => {
+// how many whole points a bar's figure is past its line: of the figure as
+// it is, not as the bar draws it (a bar ends at 100; 104 against a line at
+// 90 is 14 over, as the words say, not 10)
+export const overBy = (segments, marker) => Math.round(segments.reduce((a, s) => a + Math.max(0, s.pct), 0) - marker);
+// an arrow's top edge, `half` to each side of the line at x, kept inside a
+// drawing w wide: its tip stays on the line (on the week's last day the
+// line is at 100 and the arrow's right half was cut off: 0.9.53)
+const arrowLeft = (x, half, w) => num(clamp(x, half + 0.5, w - half - 0.5) - half);
+export const barSvg = memo('bar',(segments, marker = null, w = 480, h = 34, loud = false, warm = null) => {
   const total = clamp(segments.reduce((a, s) => a + Math.max(0, s.pct), 0), 0, 100);
   // (not by `loud`: under the line a loud bar is the plain one, name and all)
   const g = 'glow-' + drawingId('bar', segments, marker, w, h);
   // loud only past the line: under it, the week's own tick and arrow (the
   // user's word: Fable's line like the weekly one)
-  if (loud && marker !== null && total > clamp(marker, 0, 100)) return loudBarSvg(segments, marker, w, h + LINE_TAG + 10);
+  // (past it by a whole point, rounded as the words under the bar round it:
+  // by any amount, less than half a point over drew the tag "OVER +0"
+  // above words that said it was not over: 0.9.53)
+  if (loud && marker !== null && overBy(segments, marker) >= 1) return loudBarSvg(segments, marker, w, h + LINE_TAG + 10);
   // with a marker, room above the cells for its arrow
   if (marker !== null) h += 5;
   const n = BAR_CELLS, gap = 3, slant = 5, top = marker !== null ? 13 : 8, ch = 14;
@@ -233,7 +242,7 @@ export const barSvg = memo('bar', (segments, marker = null, w = 480, h = 34, lou
     // a rect, not a line: a filter on a zero-wide box draws nothing
     // the arrow above it, large and edged dark (the user's word: more visible)
     tick = '<rect x="' + num(x - 1.75) + '" y="6" width="3.5" height="' + (h - 11) + '" rx="1.5" fill="' + BUDGET_LINE + '" filter="url(#' + g + ')"/>'
-      + '<path d="M' + x + ' 12l-7 -11h14z" fill="' + BUDGET_LINE + '" stroke="#0b1220" stroke-width="1" stroke-linejoin="round"/>';
+      + '<path d="M' + x + ' 12L' + arrowLeft(+x, 7, w) + ' 1h14z" fill="' + BUDGET_LINE + '" stroke="#0b1220" stroke-width="1" stroke-linejoin="round"/>';
   }
   const by = h - 4;
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">'
@@ -269,7 +278,7 @@ const loudBarSvg = (segments, marker, w, h) => {
   const xEnd = lit / n * (w - slant) + slant / 2;
   const band = xEnd > x
     ? '<rect x="' + num(x) + '" y="' + (top - 3) + '" width="' + num(xEnd - x) + '" height="' + (ch + 6) + '" fill="' + lineCol + '" fill-opacity="0.22"/>' : '';
-  const word = 'OVER +' + Math.round(total - m);
+  const word = 'OVER +' + overBy(segments, marker);
   const tw = word.length * 8 + 12, lw = 6;
   const tx = clamp(x - tw / 2, 0, w - tw);
   const tag = '<g>'
@@ -277,7 +286,7 @@ const loudBarSvg = (segments, marker, w, h) => {
     + '<text x="' + num(tx + tw / 2) + '" y="' + (LINE_TAG - 5) + '" text-anchor="middle" ' + FONT + ' font-size="12.5" font-weight="700" letter-spacing="0.5" fill="#0b1220">' + word + '</text>'
     + '<rect x="' + num(x - lw / 2) + '" y="' + (LINE_TAG + 6) + '" width="' + lw + '" height="' + (h - 9 - LINE_TAG) + '" rx="1.5" fill="' + BUDGET_LINE + '" filter="url(#' + g + ')"/>'
     // an arrow under the tag, as the weekly bar has, larger
-    + '<path d="M' + num(x) + ' ' + (LINE_TAG + 13) + 'l-8 -12h16z" fill="' + BUDGET_LINE + '" stroke="#0b1220" stroke-width="1" stroke-linejoin="round"/>'
+    + '<path d="M' + num(x) + ' ' + (LINE_TAG + 13) + 'L' + arrowLeft(x, 8, w) + ' ' + (LINE_TAG + 1) + 'h16z" fill="' + BUDGET_LINE + '" stroke="#0b1220" stroke-width="1" stroke-linejoin="round"/>'
     + '</g>';
   const by = h - 4;
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">'
@@ -843,17 +852,16 @@ export const paneView = (t, m, o = {}) => {
   // worth cutting (m.compact) a button that compacts it. A second press
   // while one runs does nothing (o.onCompact sees to that); the terminal
   // gets the words, since /compact is typed there.
-  // A small button (the user's word, 0.9.50: Compact, − and + smaller,
-  // Refresh the same). A desktop's own button cannot be made smaller: it is
-  // 2rem high with 0.75rem at each side and draws its label at body size,
-  // whatever Text it holds (the app's stylesheet; 0.9.49's caption Text and
-  // 0.9.50's footnote Text changed nothing, and footnote is the larger of
-  // the two). A `plain` one is a line high with 0.375rem at each side and
-  // no outline, so the small button is a plain one in a Box that draws the
-  // outline (0.9.51); the terminal keeps its labels.
-  const small = (key, words, onPress) => (o.surface === 'terminal'
-    ? Button({ key, label: words, variant: 'secondary', onPress })
-    : Box({ flexDirection: 'row', flexShrink: 0, borderStyle: 'round', borderColor: tint(DIM_HEX, SMALL_EDGE), children: [Button({ key, plain: true, label: words, onPress })] }));
+  // The pane's buttons (Compact, − and +, Refresh): the surface's own
+  // button with its label, on every surface. The user asked for smaller
+  // ones (0.9.50), and three tries did not give one: a caption Text in it
+  // (0.9.49) and a footnote Text (0.9.50) changed nothing, since a desktop
+  // draws its button at one size whatever it holds, and a `plain` one in a
+  // Box that drew an outline (0.9.51) came out larger, the plain button as
+  // large as the app's own in a pane and the outline's padding round it.
+  // Shown nine ways to draw them side by side in the app, the user chose
+  // the app's own (0.9.53). Nothing a plugin passes makes it smaller.
+  const small = (key, words, onPress) => Button({ key, label: words, variant: 'secondary', onPress });
   // a line of room above it (the user's word, 0.9.50)
   const compact = !m.compact ? null
     : o.surface === 'terminal' ? cap(m.compact === 'running' ? 'Compacting…' : '/compact cuts it.')
