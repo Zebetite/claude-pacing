@@ -5986,3 +5986,148 @@ test('review 0.9.53: a compaction pacing hears ends the pause timers and a switc
   await clock.advance(11 * 60000)
   expect((await bandText($)).text).toBe(undefined)
 })
+
+// ---- five suspicions a review left (0.9.54) ----
+
+test('a workflow\'s agents, which no list of the engine names, stay in the line through the main turn\'s end, the settles and a compaction; their end is told; one that never ends goes when stale', async ($, on) => {
+  const status = engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  // $.agent.list: "a workflow's are not" in it
+  const seen = agentEngine(on, { list: () => [] })
+  on('session.compact', () => ({ messages: [{ role: 'assistant', text: 's', toolUses: [] }], tokensAfter: 40000 }))
+  const wf = (agentIndex: number, description: string) => $.agent.spawn({ prompt: 'p', description, subagentType: 'general-purpose', model: 'haiku', background: false, workflow: { runId: 'wf_abc123', agentIndex } } as any)
+  await $.session.measure(measure(10))
+  await wf(1, 'review a file')
+  await wf(2, 'review another')
+  expect(String(status.at(-1)).startsWith('⏳ 2 ')).toBe(true)
+  // the Workflow call answered at once: the main turn ends, and the settles pass
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  await clock.advance(65000)
+  expect(String(status.at(-1)).startsWith('⏳ 2 ')).toBe(true)
+  // one ends: told, and one left
+  await $.turn.complete(turn('claude-haiku-5-5', 1, 'ag1'))
+  expect(seen.toasts.at(-1)).toMatch(/is done with "review a file"/)
+  expect(String(status.at(-1)).startsWith('⏳ 1 ')).toBe(true)
+  // a compaction counts the agents again from the engine's list: not these
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'all of it', toolUses: [] }] } as any)
+  await clock.advance(65000)
+  expect(String(status.at(-1)).startsWith('⏳ 1 ')).toBe(true)
+  // no row to press for a transcript the engine cannot show
+  expect(paneModel({ running: [{ id: null, text: 'x' }] }).running[0].id).toBe(null)
+  // its end never heard (a run stopped): let go once stale
+  await clock.advance(2 * 60 * 60000 + 65000)
+  expect(String(status.at(-1)).startsWith('⏳')).toBe(false)
+})
+
+test('after a compaction the pane shows the compaction\'s own size, though the engine still answers with the old conversation\'s breakdown', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  // the messages are installed once every hook has answered: read inside the hook, the breakdown is the old one
+  let live = 400000
+  on('session.usage', (_: unknown, e: any) => ({ value: { startedAt: 0, context: { tokens: live, window: 1000000, percent: Math.round(live / 10000), ...(e && e.breakdown ? { breakdown: { ...BREAKDOWN, totalTokens: live, percentage: Math.round(live / 10000) } } : {}) }, rateLimits: [] } }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  on('fs.read', () => ({ value: '{}' }))
+  on('session.compact', () => ({ messages: [{ role: 'assistant', text: 'the summary', toolUses: [] }], tokensBefore: 400000, tokensAfter: 23000 }))
+  const shown = async () => {
+    const ui = await $.ui.mount(PANE)
+    const used = (await ui.findAll({ type: 'Text' })).map((x: any) => String(x.text)).find((x: string) => / of 1M$/.test(x))
+    const b = await compactButton(ui)
+    await ui.unmount()
+    return [used, b ? (b.label ?? b.props?.label) : null]
+  }
+  await $.session.measure(measure(10, [], 400000))
+  await clock.settle()
+  expect(await shown()).toEqual(['400k of 1M', 'Compact'])
+  // (the first draw's own fresh breakdown is in)
+  await clock.settle()
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'all of it', toolUses: [] }] } as any)
+  // now the engine has the new conversation; the pane is read before anything asks it again
+  live = 23000
+  expect(await shown()).toEqual(['23k of 1M', null])
+  await clock.settle()
+  expect(await shown()).toEqual(['23k of 1M', null])
+})
+
+test('a terminal draws the week\'s budget line on its bar as ┃, as the per-model bar\'s', () => {
+  const j = { all: 30, line: 50, level: 'ok', weekLevel: 'ok', premium: 20, premiumLabel: 'Fable 5.2' }
+  const bars = (surface: string) => nodes(paneView(TABLE, paneModel({ j }), { surface })).filter(n => n.type === 'Text' && /[█░]/.test(String(n.props.children))).map(n => String(n.props.children))
+  expect(bars('terminal')[0]).toBe(barText([{ pct: 30, color: '#fff' }], 24, 50))
+  expect(bars('terminal')[0]).toContain('┃')
+  // the minimized form's bar too
+  const mini = nodes(paneView(TABLE, paneModel({ j }), { surface: 'terminal', placement: 'widget' })).filter(n => n.type === 'Text' && /[█░]/.test(String(n.props.children))).map(n => String(n.props.children))
+  expect(mini[0]).toContain('┃')
+})
+
+test('a precompute compacts nothing: a queued /compact still waits, and the toast that says so still comes', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  big(on)
+  const toasts: string[] = [], runs: string[] = []
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  on('fs.read', () => ({ value: '{}' }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', (_: unknown, e: any) => (toasts.push(e.text), { value: undefined }))
+  on('session.compact', (_: unknown, e: any) => {
+    if (e.trigger === 'precompute') return { messages: [{ role: 'assistant', text: 'kept for later', toolUses: [] }] }
+    throw new Error('pacing: $.session.compact: not available in a headless (-p / SDK) session yet')
+  })
+  let done = () => {}
+  const compacting = new Promise<void>(r => { done = r })
+  on('command.run', async (_: unknown, e: any) => { runs.push('/' + e.command + ' ' + e.args); await compacting; return { text: '' } })
+  on('prompt.fill', () => ({ isFilled: true }))
+  on('prompt.submit', (_: unknown, e: any) => ({ text: e.text }))
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 420000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const said = toasts.length
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'pacing-compact' })
+  await clock.advance(1)
+  await ui.unmount()
+  expect(runs).toEqual(['/compact ' + COMPACT_INSTRUCTIONS])
+  // the session is busy, and the engine computes a compaction ahead of time meanwhile
+  await $.session.compact({ trigger: 'precompute', messages: [{ role: 'user', text: 'work', toolUses: [] }] } as any)
+  await clock.advance(COMPACT_RUN_WAIT)
+  expect(toasts.slice(said)).toEqual([COMPACT_WAIT_TEXT])
+  done()
+  await clock.advance(1)
+  expect(toasts.slice(said)).toEqual([COMPACT_WAIT_TEXT, '🗜️ compacted.'])
+})
+
+test('Compact, then switch is the one compaction under way: the pane says Compacting…, and a press on its Compact meanwhile queues no second /compact', async ($, on) => {
+  engine(on)
+  const clock = mock.clock(on, { now: T0 })
+  on('process.run', () => ({ value: switchReading({ premiumHeld: true, recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }) }))
+  // the session is busy: the queued /compact runs once it is free
+  let free = () => {}
+  const busy = new Promise<void>(r => { free = r })
+  const seen = switchEngine(on, { busy })
+  on('session.usage', (_: unknown, e: any) => ({ value: { startedAt: 0, context: { tokens: 380000, window: 1000000, percent: 38, ...(e && e.breakdown ? { breakdown: { ...BREAKDOWN, totalTokens: 380000, percentage: 38 } } : {}) }, rateLimits: [] } }))
+  on('session.compact', () => { throw new Error('pacing: $.session.compact: not available in a headless (-p / SDK) session yet') })
+  await $.prompt.submit({ text: 'work on', asUser: true })
+  await $.session.measure(measure(10, [], 380000))
+  await $.turn.complete(turn('claude-fable-5-2', 1))
+  const band = await $.ui.mount(BAND)
+  await band.press({ key: 'pacing-compact-switch' })
+  await clock.advance(1)
+  await band.unmount()
+  expect(seen.runs).toEqual(['/compact ' + COMPACT_INSTRUCTIONS])
+  const pane = await $.ui.mount(PANE)
+  const b = await compactButton(pane)
+  expect(b ? (b.label ?? b.props?.label) : null).toBe('Compacting…')
+  try { await pane.press({ key: 'pacing-pane-compact' }) } catch { /* nothing to press */ }
+  await pane.unmount()
+  await clock.advance(1)
+  expect(seen.runs).toEqual(['/compact ' + COMPACT_INSTRUCTIONS])
+  // free: the compaction, then the switch, and the claim let go
+  free()
+  await clock.advance(1)
+  expect(seen.runs).toEqual(['/compact ' + COMPACT_INSTRUCTIONS, '/model claude-opus-5-5', '/effort medium'])
+  const after = await $.ui.mount(PANE)
+  const a = await compactButton(after)
+  await after.unmount()
+  expect(a ? (a.label ?? a.props?.label) : null).not.toBe('Compacting…')
+})

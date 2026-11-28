@@ -1366,13 +1366,18 @@ async function liveAgents($) {
 // background that have run implausibly long. Of those that run, what the
 // list says of them where it does: the tokens used so far (for the record
 // at its end, should the list have let it go by then) and its effort.
+// A workflow's agents (`workflow`) are in no list the engine gives ("a
+// workflow's are not", $.agent.list's own words), so the list says nothing
+// of them: taken for ended at the first look, they left the line and the
+// pane within SETTLE_EVERY and their end got no toast and no record. They
+// go at their turn's end, or after STALE_AGENT.
 async function settleAgents($, st, now) {
   const agents = st.agents;
   const live = await liveAgents($);
   let dropped = false;
   for (const [id, a] of agents) {
     if (a.kind === 'session' || a.provisional) continue;
-    if (live ? !live.has(id) : now - a.startedAt > STALE_AGENT) { agents.delete(id); dropped = true; continue; }
+    if (live && !a.workflow ? !live.has(id) : now - a.startedAt > STALE_AGENT) { agents.delete(id); dropped = true; continue; }
     const row = live && live.get(id);
     if (row && row.tokenCount > 0) a.tokens = row.tokenCount;
     if (row && !a.effort && EFFORT_ORDER.includes(row.effort)) a.effort = row.effort;
@@ -1401,7 +1406,7 @@ async function settleAgents($, st, now) {
 // which takes the list as it stands then, so the last write always holds
 // the latest list. Every caller gets the promise of the whole run, and it
 // never rejects. The session's id is asked at each write: a /clear changes it.
-const KEPT = ['id', 'type', 'description', 'model', 'effort', 'background', 'startedAt', 'step', 'part', 'tokens'];
+const KEPT = ['id', 'type', 'description', 'model', 'effort', 'background', 'workflow', 'startedAt', 'step', 'part', 'tokens'];
 async function agentsKey($) { try { const id = await $.session.id(); return id ? 'agents:' + id : null; } catch { return null; } }
 function keepUnder($, kp) {
   kp.due = true;
@@ -1430,6 +1435,7 @@ function keptAgents(st) {
 }
 function keepAgents($, st) { return keepUnder($, st.kept); }
 // the kept agents the engine still runs, into `agents`; how many came back
+// (a workflow's, which no list names: those not yet STALE_AGENT old)
 async function restoreAgents($, agents) {
   try {
     const key = await agentsKey($);
@@ -1437,11 +1443,13 @@ async function restoreAgents($, agents) {
     if (!Array.isArray(got) || !got.length) return 0;
     const live = await liveAgents($);
     if (!live) return 0;
+    let now = Date.now();
+    try { now = await $.clock.now(); } catch { /* the system's clock */ }
     let history = null;
     try { history = await $.store.get('agentRuns'); } catch { /* no history */ }
     let n = 0;
     for (const k of got) {
-      if (!k || typeof k !== 'object' || typeof k.id !== 'string' || typeof k.type !== 'string' || typeof k.startedAt !== 'number' || !live.has(k.id) || agents.has(k.id)) continue;
+      if (!k || typeof k !== 'object' || typeof k.id !== 'string' || typeof k.type !== 'string' || typeof k.startedAt !== 'number' || (k.workflow ? now - k.startedAt > STALE_AGENT : !live.has(k.id)) || agents.has(k.id)) continue;
       const runs = history && typeof history === 'object' && Array.isArray(history[k.type]) ? history[k.type] : [];
       agents.set(k.id, { ...k, background: !!k.background, step: k.step || null, runs });
       n++;
@@ -2333,18 +2341,23 @@ async function runSwitch($, pr, target) {
 // "Compact, then switch", in a large session (switchOffer): the compaction
 // as the Compact now button runs it, then the switch; a compaction that did
 // not start leaves the session as it is
+// `pr.compacting` is set by the press (one compaction at a time, as Compact
+// now: the pane's Compact pressed meanwhile queued a second /compact) and
+// cleared here once the compaction has ended, before the switch.
 async function compactThenSwitch($, pr, target) {
   try {
-    const r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS });
-    // skipped (another plugin's hook answered): said, and no switch, as
-    // Compact now does; typed instead, the switch could run on the session
-    // as it was (0.9.53)
-    if (r && r.skip) { $.ui.toast(ICON.failed + ' the compaction did not run: ' + r.skip + '. Not switched.', { timeoutMs: TOAST_LONG }); return; }
-    pr.compacted((r && r.tokensAfter) || null);
-  } catch (err) {
-    if (!(await compactTyped($, pr, err))) return;
-    pr.compacted(null);
-  }
+    try {
+      const r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS });
+      // skipped (another plugin's hook answered): said, and no switch, as
+      // Compact now does; typed instead, the switch could run on the session
+      // as it was (0.9.53)
+      if (r && r.skip) { $.ui.toast(ICON.failed + ' the compaction did not run: ' + r.skip + '. Not switched.', { timeoutMs: TOAST_LONG }); return; }
+      pr.compacted((r && r.tokensAfter) || null);
+    } catch (err) {
+      if (!(await compactTyped($, pr, err))) return;
+      pr.compacted(null);
+    }
+  } finally { pr.compacting = false; redraw($); }
   await runSwitch($, pr, target);
 }
 
@@ -2440,7 +2453,7 @@ export const register = on => {
   // what a press's work reads and writes (see "what the band's buttons do");
   // `waited` calls off the toast that a queued /compact waits, set while one
   // is queued; `compacting`: a compaction the band's or the pane's button
-  // asked for is under way (claimCompact; compactNow clears it)
+  // asked for is under way (claimCompact; compactNow and compactThenSwitch clear it)
   const pr = { ss, here, waited: null, compacting: false,
     compacted: v => { offer = null; offered = {}; if (typeof v === 'number') { contextTokens = v; ctxNow = contextAt(ctxNow, v); } } };
   // Claude Code's auto-compact window (see "Claude Code's auto-compact
@@ -2598,7 +2611,10 @@ export const register = on => {
         const early = agents.get('call:' + (e.tool_use_id || ''));
         if (early) agents.delete(early.id);
         const a = { id: r.agentId, type, description: nextTask.get(r.agentId) || e.description, model: r.model || e.model || e.parentModel,
-          effort: efforts.get(e.tool_use_id) || keptEffort.get(r.agentId), background: !!e.background, startedAt: early ? early.startedAt : now, runs: [], step: null };
+          effort: efforts.get(e.tool_use_id) || keptEffort.get(r.agentId), background: !!e.background || !!e.workflow, startedAt: early ? early.startedAt : now, runs: [], step: null };
+        // a workflow script's agent: its run goes on after the main turn (the
+        // Workflow call answers at once), and no list names it (settleAgents)
+        if (e.workflow) a.workflow = true;
         efforts.delete(e.tool_use_id);
         nextTask.delete(r.agentId);
         names.set(r.agentId, r.agentId);
@@ -2664,7 +2680,7 @@ export const register = on => {
       const switchRow = Box({ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 1, children: [
         Text(target.urgent ? { color: 'warning', children: target.icon + ' ' + target.text } : { dimColor: true, children: target.icon + ' ' + target.text }),
         ...(target.compactFirst ? [Button({ key: 'pacing-compact-switch', label: 'Compact, then switch', variant: target.urgent ? 'primary' : 'secondary',
-          onPress: () => { switchAnswered(); redraw($); later($, () => compactThenSwitch($, pr, target)); } })] : []),
+          onPress: () => { if (!claimCompact()) return; switchAnswered(); redraw($); later($, () => compactThenSwitch($, pr, target)); } })] : []),
         Button({ key: 'pacing-switch', label: 'Switch', variant: target.urgent && !target.compactFirst ? 'primary' : 'secondary',
           onPress: () => { switchAnswered(); redraw($); later($, () => runSwitch($, pr, target)); } }),
         Button({ key: 'pacing-switch-not-now', label: 'Not now', role: 'dismiss', dimColor: true, onPress: () => { switchAnswered(); redraw($); } }),
@@ -2699,10 +2715,11 @@ export const register = on => {
   // a compaction the person or the engine ran: the offers start over, and
   // the agents are counted again from the engine's list (none without it)
   on('session.compact', async ($, e, next) => {
-    // the session's compaction starts: a queued /compact waits no more
-    if (!e.agentId && pr.waited) { pr.waited(); pr.waited = null; }
     // (a precompute installs nothing: the conversation is as it was)
     const main = !e.agentId && e.trigger !== 'precompute';
+    // the session's compaction starts: a queued /compact waits no more. Not
+    // at a precompute: the queued one waits on, and its toast was called off
+    if (main && pr.waited) { pr.waited(); pr.waited = null; }
     // The pane first shows the size it compacts at, with Compacting… (the
     // user's word, 0.9.50: "update the context value first to show 400k"),
     // then the size after it.
@@ -2727,13 +2744,19 @@ export const register = on => {
       if (sw && sw.compactFirst) { switchSeen.delete(sw.key); sw = null; }
       contextTokens = r.tokensAfter || null;
       // the pane's bar at the new size at once, not at the turn's end
+      // The breakdown read here may still be the old conversation's: a hook
+      // above this one may rewrite the messages on the way up, so the engine
+      // installs them once every hook has answered. Its total is the
+      // compaction's own (tokensAfter) wherever that is known; the parts
+      // follow at the turn's end.
       try { const bd = await breakdownNow($); if (bd) ctxNow = bd; } catch { /* the next measure */ }
-      if (!ctxNow && contextTokens !== null) ctxNow = contextAt(null, contextTokens);
+      if (contextTokens !== null) ctxNow = contextAt(ctxNow, contextTokens);
       try {
         const live = await liveAgents($);
         // (side sessions are not in the engine's list: they stay, or the
         // next poll took each for a new one and said it started again)
-        for (const [id, a] of [...agents]) if (a.kind !== 'session' && (!live || !live.has(id))) agents.delete(id);
+        // (nor a workflow's agents: see settleAgents)
+        for (const [id, a] of [...agents]) if (a.kind !== 'session' && !a.workflow && (!live || !live.has(id))) agents.delete(id);
         keepAgents($, st);
         const t = await $.clock.now();
         if (idleAt(st, t)) stopTick();
@@ -2961,7 +2984,7 @@ export const register = on => {
       // (an id only where the engine has a transcript to show: a subagent it
       // spawned; the model and effort go to the row's tag, the steps or the
       // time to its bar)
-      running: [...runningAgents().map(a => ({ id: a.kind === 'session' || a.provisional ? null : a.id,
+      running: [...runningAgents().map(a => ({ id: a.kind === 'session' || a.provisional || a.workflow ? null : a.id,
         text: (a.kind === 'session' ? 'side session ' : '') + detail(a, now, { task: TASK_MAX, time: 1, est: 1, step: 1 })
           + (a.kind === 'session' && a.description ? ', ' + a.description : ''),
         // the same without the progress and the time, and those two apart

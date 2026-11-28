@@ -1908,3 +1908,49 @@ line of text), and chose the app's own. `small()` draws
 `Button({ key, label, variant: 'secondary' })` on every surface; the line
 of room above Compact stays. Nothing a plugin passes makes that button
 smaller.
+
+## What five suspicions came to (0.9.54)
+
+The review before 0.9.53 left five suspicions it could not confirm. Read
+against the module and the engine's types, four are real and the fifth is
+likely; each has a test that fails on 0.9.53.
+
+A workflow's agents stay. `$.agent.list()` does not name them ("a
+workflow's are not", its own words), and pacing let go of every agent the
+list does not name: at the next settle (`SETTLE_EVERY`, 30 seconds), at
+the main turn's end, which comes at once since the Workflow call answers
+at once, and at a compaction. So a workflow's agents left the line and
+the pane within half a minute, and their end got no toast, no done row
+and no record. An agent whose spawn carries `workflow` is now marked so
+and counted as a background agent; the list says nothing of it, it goes
+at its own turn's end, or after `STALE_AGENT` (two hours) where that end
+is never heard (a run stopped). It is kept across a reload by the same
+rule, and its row has nothing to press: the engine has no transcript of
+it to show.
+
+The size after a compaction is the compaction's own. The `session.compact`
+hook read the context's breakdown after `next(e)`; a hook above may still
+rewrite the messages on the way up, so the engine installs them once
+every hook has answered, and the breakdown read there can be the old
+conversation's. The pane then showed the old size until the next request.
+Where the result gives `tokensAfter`, the bar's total is that figure
+(`contextAt`); the parts follow at the turn's end. Whether the engine
+does answer with the old breakdown there is not seen live; the figure is
+right either way.
+
+A terminal draws the week's budget line. Only the per-model bar had its
+`┃` (since 0.9.30), and a terminal has no dial to show the week's, so the
+week's line was drawn nowhere. Every bar with a line draws it now, the
+minimized form's too.
+
+A precompute calls off nothing. The hook called off the toast of a queued
+`/compact` ("runs as soon as the session is free") at any compaction
+event of the session, a precompute included, which compacts nothing: the
+queued one still waited, unsaid.
+
+"Compact, then switch" is one compaction. Its press did not take the
+claim the two Compact buttons share (`claimCompact`), so the pane's
+Compact pressed while its `/compact` waited queued a second one. The
+press takes the claim, the pane says Compacting… from the press on, and
+`compactThenSwitch` lets it go once the compaction has ended, before the
+switch.

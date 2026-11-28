@@ -711,7 +711,9 @@ export const paneView = (t, m, o = {}) => {
   const head = (text, accent = HUD) => Text({ size: 'caption', mono: true, weight: 'semibold', color: accent, children: '▸ ' + text.toUpperCase() });
   const bar = (segments, marker, alt, loud = false) => (hasSvg
     ? t.Svg({ source: barSvg(segments, marker, 480, 34, loud), alt })
-    : Text({ color: segments[0] ? segments[0].color : undefined, children: barText(segments, 24, loud ? marker : null) }));
+    // (the week's line too: only the per-model bar had its ┃, 0.9.30 to
+    // 0.9.53, and a terminal has no dial to show the week's)
+    : Text({ color: segments[0] ? segments[0].color : undefined, children: barText(segments, 24, marker) }));
   // a section: its drawn upper edge in its accent, then its rows (no box)
   const tint = (hex, a = TINT) => { const v = parseInt(hex.slice(1), 16); return 'rgba(' + ((v >> 16) & 255) + ',' + ((v >> 8) & 255) + ',' + (v & 255) + ',' + a + ')'; };
   const panel = (kind, children, extra = {}) => {
