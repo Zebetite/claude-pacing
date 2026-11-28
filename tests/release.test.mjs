@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { notesOf, versionOf, withVersion } from '../scripts/release.mjs';
+import { notesOf, messageOf, TRAILER, versionOf, withVersion } from '../scripts/release.mjs';
 
 const previous = '## Changed\n\n- old\n\n## Changelog\n\n### 0.9.22\n- a\n\n### 0.9.21\n- b\n';
 
@@ -26,3 +26,12 @@ test('the manifest version is read and set without touching the rest', () => {
   assert.equal(versionOf(m), '0.9.22');
   assert.equal(withVersion(m, '0.9.23'), m.replace('0.9.22', '0.9.23'));
 });
+
+test('one notes file: its # subject line is not in the release body; the commit message is built from it', () => {
+  const draft = '# Shades blend from the line\n\n## Changed\n\n- **Colours**: blend from the line.\n- Smaller buttons.\n\n## Changelog\n\n### 0.9.49\n- Shades blend.\n'
+  assert.equal(notesOf(draft, '0.9.49'), '## Changed\n\n- **Colours**: blend from the line.\n- Smaller buttons.\n\n## Changelog\n\n### 0.9.49\n- Shades blend.\n')
+  assert.equal(messageOf(draft, '0.9.49'), 'Shades blend from the line; pacing 0.9.49\n\n- Colours: blend from the line.\n- Smaller buttons.\n\n' + TRAILER + '\n')
+  assert.equal(messageOf(draft.replace(/\n/g, '\r\n'), '0.9.49'), messageOf(draft, '0.9.49'))
+  assert.throws(() => messageOf('## Changed\n\n- x\n\n### 0.9.49\n- y\n', '0.9.49'), /no "# <subject>" first line/)
+  assert.match(TRAILER, /^Co-Authored-By: Claude Opus 5\.5 <noreply@anthropic\.com>$/)
+})
