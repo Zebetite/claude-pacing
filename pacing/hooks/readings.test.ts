@@ -4753,7 +4753,10 @@ test('the pane\'s Compact where the direct call is refused: /compact as if typed
   expect(toasts).toEqual(['🗜️ compacted.'])
 })
 
-test('colours by points over the line: a text keeps its colour up to 5 over, then yellow, orange, red at 30; a bar keeps its colours up to the line, and past it yellow, orange, red', () => {
+// a colour of the yellow, orange, red run (the white #f8fafc is not one)
+const RUN_HUE = /#f[4-79ab][0-9a-f]{4}/
+
+test('colours by points over the line: a text, a bar and the dial keep their colours up to 5 over, then yellow, orange, red at 30', () => {
   expect(OVER_CALM).toBe(5)
   expect(OVER_RED).toBe(30)
   expect(overText(null)).toBe(null)
@@ -4773,18 +4776,28 @@ test('colours by points over the line: a text keeps its colour up to 5 over, the
   expect(under).not.toContain(YELLOW)
   expect(under).not.toContain(ORANGE)
   expect(under).not.toContain('#f43f5e')
-  // past it: yellow next to the line, red at the far end when far over
+  // up to 5 past it the cells keep their own colours (0.9.48): the same
+  // cells as a bar with no line, none of the run
+  const lit = (s: string) => [...s.matchAll(/z" fill="(#[0-9a-f]{6})"\/>/g)].map(m => m[1])
+  const plain = lit(barSvg([{ pct: 100, color: LEVEL_COLORS.ok }], null))
+  const four = barSvg([{ pct: 64, color: LEVEL_COLORS.ok }], 60)
+  expect(four).not.toMatch(RUN_HUE)
+  expect(lit(four)).toEqual(plain.slice(0, lit(four).length))
+  // further past: from yellow at the first cell past 5, red at the far end
   const far = barSvg([{ pct: 100, color: LEVEL_COLORS.ok }], 60)
-  expect(far).toContain(YELLOW)
+  expect(lit(far).slice(0, 23)).toEqual(plain.slice(0, 23))
+  expect(lit(far)[23]).toBe(overShade((23 + 0.5) / 36 * 100 - 60))
   expect(far).toContain('#f43f5e')
   // the loud bar (the per-model meter) has a scale of its own: its tag and
   // line calm when a little over, yellow from 20 over, red from 80
   expect(barSvg([{ pct: 76, color: LEVEL_COLORS.ok }], 73.3, 480, 34, true)).toContain('fill="' + HUD + '"/><text')
   expect(barSvg([{ pct: 100, color: LEVEL_COLORS.ok }], 70, 480, 34, true)).toContain('fill="' + YELLOW + '"/><text')
   expect(barSvg([{ pct: 100, color: LEVEL_COLORS.ok }], 20, 480, 34, true)).toContain('fill="#f43f5e"/><text')
-  // the dial: none of the run in the ring under the line; past it, yellow to red
-  expect(reactorSvg(50, LEVEL_COLORS.ok, 73)).not.toContain(YELLOW)
-  expect(reactorSvg(100, LEVEL_COLORS.ok, 50)).toContain(YELLOW)
+  // the dial: none of the run in the ring under the line or up to 5 past
+  // it; further past, from yellow to red
+  expect(reactorSvg(50, LEVEL_COLORS.ok, 73)).not.toMatch(RUN_HUE)
+  expect(reactorSvg(54, LEVEL_COLORS.ok, 50)).not.toMatch(RUN_HUE)
+  expect(reactorSvg(100, LEVEL_COLORS.ok, 50)).toContain(overShade((26 + 0.5) / 48 * 100 - 50))
   expect(reactorSvg(100, LEVEL_COLORS.ok, 50)).toContain('#f43f5e')
 })
 
@@ -4858,7 +4871,25 @@ test('Fable\'s own colours: normal up to 20 over, yellow to 40, orange by 60, re
   // the weekly meter keeps its own scale: 10 over is overShade(10)
   const week = nodes(paneView(TABLE, paneModel({ j: { all: 70, line: 60, level: 'throttle', weekLevel: 'throttle' } }), { surface: 'desktop' }))
   expect(week.find(n => n.type === 'Text' && n.props.children === '70%').props.color).toBe(overShade(10))
-  expect(week.find(n => n.type === 'Svg' && String(n.props.alt).startsWith('Weekly')).props.source).toContain(YELLOW)
+  // (the bar, 480 wide; the dial's alt starts with Weekly too)
+  expect(week.find(n => n.type === 'Svg' && String(n.props.alt).startsWith('Weekly') && String(n.props.source).includes('width="480"')).props.source).toContain(overShade((23 + 0.5) / 36 * 100 - 60))
+})
+
+test('the week up to 5 over its line keeps its colours in the pane: the bar, the dial, the figure and the words; 6 over starts yellow', () => {
+  const view = (all: number, level: string, dial?: string) => nodes(paneView(TABLE, paneModel({ j: { all, line: 60, level, weekLevel: level } }), { surface: 'desktop', dial }))
+  const svgs = (v: any[]) => v.filter(n => n.type === 'Svg' && /^Weekly/.test(String(n.props.alt))).map(n => String(n.props.source))
+  const texts = (v: any[]) => v.filter(n => n.type === 'Text' && typeof n.props.color === 'string').map(n => n.props.color)
+  // 5 over: the dial (in the level 'over') and the bar draw none of the run;
+  // no text takes a run colour
+  const five = view(65, 'over')
+  expect(svgs(five).length).toBe(2)
+  for (const s of svgs(five)) expect(s).not.toMatch(RUN_HUE)
+  for (const c of texts(five)) expect(c).not.toMatch(RUN_HUE)
+  // the other dials too: the week's own colour run, not the level's yellow
+  for (const d of ['ring', 'gauge', 'level']) expect(svgs(view(65, 'over', d))[0]).not.toContain(LEVEL_COLORS.over)
+  // 6 over: the figure and the words start yellow
+  const six = view(66, 'throttle')
+  expect(texts(six)).toContain(overShade(6))
 })
 
 test('the 5-hour window: a bar under the per-model meter, with when it resets, when it fills first, and from 85% that heavy work waits', () => {

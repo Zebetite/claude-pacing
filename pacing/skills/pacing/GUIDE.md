@@ -302,10 +302,10 @@ too, until you type `/pacing-pane`. From the top:
   background, how long each has run, and for a minute after one ends,
   how it ended.
 
-The colours say how far over a budget line you are. A bar keeps its
-colours up to its line; the cells past it run yellow, orange, red the
-further over they stand. The words and figures keep their colours up to
-5 points over, then run yellow, orange, red, red by 30 points over.
+The colours say how far over a budget line you are. The weekly bar, the
+dial, the figures and the words keep their normal colours up to 5 points
+over the line; past that they run yellow, orange, red, red by 30 points
+over (on a bar, each cell by how far past the line it stands).
 Fable's meter is used more freely than the week, so it has a calmer
 scale: its bar, line, `OVER` tag, figure and words keep their normal
 colours up to 20 points over, are yellow up to 40, turn orange by 60 and

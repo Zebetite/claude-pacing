@@ -1684,3 +1684,23 @@ window set at 433k. Without it, the breakdown's window as before.
   carry invisible break points so they wrap; text copied from the pane
   carries them too. Without them a long path or URL runs past the pane,
   so they stay.
+
+## Calm up to 5 over, on the bars and the dial too (0.9.48)
+
+The user's word: keep the weekly colours for the bars and the texts while
+the week is up to 5 points over budget, then start yellow. The texts did
+so already (`overText`, OVER_CALM 5); the bar's and the dial's cells ran
+yellow from the line itself. Now:
+
+- **Cells.** `barSvg` (the week's, not the loud per-model bar, which has
+  PREM_CALM) and the reactor's ring and strip shade a cell past the line
+  with `overText`, so up to OVER_CALM points past it keeps its own
+  colour, and the run starts at yellow after that. A cell is judged by
+  where its lit part ends (the figure, for the last, partly lit cell), so
+  a week 5 over shows no yellow even where the last cell's middle stands
+  past 65 on a line at 60.
+- **The dial's colour run.** The ring, gauge and level dials took the
+  level's colour, yellow at 'over' from the first point over. They take
+  the week's own colour up to 5 points over and the level's past that
+  (`dialColor`); 'stop' stays red. The reactor, the default, kept its own
+  colour already.

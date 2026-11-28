@@ -37,8 +37,10 @@ const blend = (a, b, k) => {
 // user's word). A text keeps its normal colour up to OVER_CALM points over;
 // past that it runs yellow, orange, red (the user's word), red at OVER_RED
 // points and beyond. A bar's or the dial's cells keep their normal colours
-// up to the line; past it each cell takes the same run by how far past the
-// line it stands: yellow up to OVER_CALM, orange half way, red from OVER_RED.
+// up to OVER_CALM points past the line too (the user's word, 0.9.48: no
+// yellow for a little over); past that each cell takes the same run by how
+// far past the line it stands: yellow from OVER_CALM, orange half way, red
+// from OVER_RED.
 export const OVER_CALM = 5;
 export const OVER_RED = 30;
 export const YELLOW = '#facc15';
@@ -152,9 +154,10 @@ export const BAR_CELLS = 36;
 // the week's, a white tick with an arrow; past it, a thick line with a tag
 // saying by how much, on a band behind the cells over the line (still: the
 // user's word, a pulse drew too much), in the shade of how far over it is.
-// On every bar with a line the cells past it take overShade by how far past
-// the line each stands (a loud bar's premText: its own colours up to
-// PREM_CALM past); the cells up to it keep the bar's own colours.
+// On every bar with a line the cells past it take overText by how far past
+// the line each stands: their own colours up to OVER_CALM past, then the
+// run from yellow (a loud bar's premText: its own colours up to PREM_CALM
+// past); the cells up to it keep the bar's own colours.
 export const LINE_TAG = 18;
 export const barSvg = memo('bar', (segments, marker = null, w = 480, h = 34, loud = false) => {
   const total = clamp(segments.reduce((a, s) => a + Math.max(0, s.pct), 0), 0, 100);
@@ -172,7 +175,7 @@ export const barSvg = memo('bar', (segments, marker = null, w = 480, h = 34, lou
   const colorAt = i => {
     // (a cell's middle, in points of the bar)
     const mid = (i + 0.5) / n * 100;
-    const past = marker !== null && segments.length === 1 && mid > marker ? (loud ? premText(mid - marker) : overShade(mid - marker)) : null;
+    const past = marker !== null && segments.length === 1 && mid > marker ? (loud ? premText(mid - marker) : overText(Math.min(mid, total) - marker)) : null;
     if (past) return past;
     if (segments.length === 1) return sweepAt(segments[0].color, i / (n - 1));
     const at = (i + 0.5) / lit * total;
@@ -449,7 +452,7 @@ export const reactorSvg = memo('reactor', (pct, color, marker = null, size = 160
     const d = arc(c, c, 56, i * step + 1, (i + 1) * step - 1);
     // past the budget line, a block takes the shade of how far past it stands
     const mid = (i + 0.5) / n * 100;
-    const hue = marker !== null && mid > marker ? overShade(mid - marker) : sweepAt(color, i / span);
+    const hue = (marker !== null && mid > marker && overText(Math.min(mid, p) - marker)) || sweepAt(color, i / span);
     if (part > 0) blocks += '<path d="' + d + '" fill="none" ' + stroke(hue, 8, 0.45 + 0.55 * part) + '/>';
     else dark += '<path d="' + d + '" fill="none" ' + stroke('#808080', 8, 0.16) + '/>';
   }
@@ -485,7 +488,7 @@ export const reactorSvg = memo('reactor', (pct, color, marker = null, size = 160
   }
   const on = Math.round(p / 100 * 12);
   let strip = '';
-  for (let i = 0; i < 12; i++) strip += '<rect x="' + num(62 + i * 3) + '" y="101" width="2.2" height="3" fill="' + (i < on ? (marker !== null && (i + 0.5) / 12 * 100 > marker ? overShade((i + 0.5) / 12 * 100 - marker) : sweepAt(color, i / Math.max(1, on - 1))) : '#808080') + '" fill-opacity="' + (i < on ? 1 : 0.25) + '"/>';
+  for (let i = 0; i < 12; i++) strip += '<rect x="' + num(62 + i * 3) + '" y="101" width="2.2" height="3" fill="' + (i < on ? ((marker !== null && (i + 0.5) / 12 * 100 > marker && overText(Math.min((i + 0.5) / 12 * 100, p) - marker)) || sweepAt(color, i / Math.max(1, on - 1))) : '#808080') + '" fill-opacity="' + (i < on ? 1 : 0.25) + '"/>';
   const core = '<circle cx="' + c + '" cy="' + c + '" r="31" fill="url(#' + heart + ')"><animate attributeName="opacity" values="0.8;1;0.8" dur="4s" begin="0s" repeatCount="indefinite"/></circle>'
     + cells + ring(29, stroke(FIGURE, 0.8, 0.8));
   return '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '" viewBox="0 0 160 160">'
@@ -691,8 +694,8 @@ export const paneView = (t, m, o = {}) => {
   const legend = (c, name, value) => between(
     row([dot(c), Text({ wrap: 'truncate-end', children: name })], { flexShrink: 1 }),
     Text({ tabular: true, mono: true, color: c, children: value }));
-  // A bar keeps the normal colours up to its line (the cells past it are
-  // shaded in barSvg); one without a line turns red when full. A figure and
+  // A bar keeps the normal colours up to OVER_CALM points past its line (the
+  // cells further past are shaded in barSvg); one without a line turns red when full. A figure and
   // a meter's words keep theirs up to OVER_CALM points over the line, then
   // take overShade; the per-model meter's (loud) up to PREM_CALM, then
   // premShade; a meter used up is red.
@@ -705,6 +708,10 @@ export const paneView = (t, m, o = {}) => {
   const week = m.meters && m.meters[0];
   const tone = m.level === 'stop' ? LEVEL_COLORS.stop : overText(byOf(week)) || LEVEL_COLORS.ok;
   const toneText = m.level === 'stop' ? 'error' : overText(byOf(week)) || 'success';
+  // the dial's colour run: the week's own up to OVER_CALM points over its
+  // line (the user's word, 0.9.48: no yellow for a little over), the
+  // level's past that; at 'stop' red
+  const dialColor = m.level === 'stop' || overText(byOf(week)) ? color : LEVEL_COLORS.ok;
 
   // the minimized form: the budget and the week's bar, nothing to press
   if (o.placement === 'widget') {
@@ -729,7 +736,7 @@ export const paneView = (t, m, o = {}) => {
     sections.push(hasSvg && w
       // the dial in a box that does not give way: beside it the words wrap,
       // and a row that ran out of room took the width off both
-      ? row([Box({ flexShrink: 0, children: [t.Svg({ source: moving(dial(w.pct, dial === reactorSvg ? LEVEL_COLORS.ok : color, w.line ?? null)), alt: w.label + ' ' + Math.round(w.pct) + '% used', width: DIAL_SIZE, height: DIAL_SIZE })] }), words], { columnGap: 2, alignItems: 'center' })
+      ? row([Box({ flexShrink: 0, children: [t.Svg({ source: moving(dial(w.pct, dial === reactorSvg ? LEVEL_COLORS.ok : dialColor, w.line ?? null)), alt: w.label + ' ' + Math.round(w.pct) + '% used', width: DIAL_SIZE, height: DIAL_SIZE })] }), words], { columnGap: 2, alignItems: 'center' })
       : words);
     if (hasSvg) sections.push(t.Svg({ source: rulerSvg(), alt: 'A divider' }));
   } else if (m.empty) sections.push(Text({ children: m.empty }));
