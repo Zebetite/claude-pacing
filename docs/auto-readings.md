@@ -1653,3 +1653,18 @@ compacts at where a window was set (`autocompactSource` 'settings':
 "167k of 400k" under "Compact at 400k"), since pacing now sets the window
 a buffer above the figure; with Claude Code's own window it reads
 against the window as before.
+
+## The switch drawn again, a blank Button over it (0.9.46)
+
+Live in 0.9.45 the desktop dropped the Text's backgroundColor inside the
+Button, so the switch was a white dot. It is the drawn pill again (an Svg,
+blue with the knob right when on, grey with it left when off), with a
+Button laid over it that has no label (the desktop draws a label over its
+children) and six blank characters as its text, both clipped to the pill
+(`overflow: 'hidden'`). The text pill stays for a surface without Svg.
+
+The Context section's bar measures against the model's own window again
+(the user's word: 1M stays 1M), not the point it compacts at as 0.9.45
+had it: `breakdownNow` adds the usage's `context.window` as
+`modelWindow`, and the figure reads "198k of 1M" with the auto-compact
+window set at 433k. Without it, the breakdown's window as before.

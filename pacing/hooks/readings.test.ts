@@ -1188,11 +1188,12 @@ const PANE = {
   props: { title: 'Pacing', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
 } as const
 
-test('the context figure: against the point it compacts at where a window was set, the window else', () => {
+test('the context figure: against the model window, not the auto-compact window pacing sets', () => {
   expect(paneModel({ bd: BREAKDOWN }).context).toEqual({ used: '183k', of: '1M', pct: 18 })
-  const set = { ...BREAKDOWN, autocompactSource: 'settings', rawMaxTokens: 433000, maxTokens: 433000, autoCompactThreshold: 400000, totalTokens: 167000, percentage: 39 }
-  expect(paneModel({ bd: set }).context).toEqual({ used: '167k', of: '400k', pct: 42 })
-  expect(paneModel({ bd: { ...set, isAutoCompactEnabled: false } }).context).toEqual({ used: '167k', of: '433k', pct: 39 })
+  const set = { ...BREAKDOWN, autocompactSource: 'settings', rawMaxTokens: 433000, maxTokens: 433000, autoCompactThreshold: 400000, totalTokens: 198000, percentage: 46 }
+  expect(paneModel({ bd: { ...set, modelWindow: 1000000 } }).context).toEqual({ used: '198k', of: '1M', pct: 20 })
+  // the model window not known: the breakdown's own
+  expect(paneModel({ bd: set }).context).toEqual({ used: '198k', of: '433k', pct: 46 })
 })
 
 test('the pane: /pacing-pane opens it; it shows the budget, what to do and the context, with Refresh', async ($, on) => {
@@ -1226,7 +1227,7 @@ test('the pane: /pacing-pane opens it; it shows the budget, what to do and the c
   for (const s of ['▸ CONTEXT', '183k of 1M', '18%']) expect(texts).toContain(s)
   // drawn, on a surface with Svg: the pane's two edges, the week's dial, the ruler under it, and for the week, the models and the context an edge above, one below and their bars, and the auto-compact switch
   const svgs = await ui.findAll({ type: 'Svg' })
-  expect(svgs.length).toBe(14)
+  expect(svgs.length).toBe(15)
   for (const s of svgs) { expect(s.props.source.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')).toBe(true); expect(s.props.alt.length).toBeGreaterThan(0) }
   await ui.press({ key: 'pacing-pane-refresh' })
   await clock.advance(1)
@@ -1278,7 +1279,7 @@ test('a pane the engine does not place: /pacing-pane says why', async ($, on) =>
   expect((await $.command.run({ command: 'pacing-pane', args: '' } as any)).text).toBe('Pacing pane: not shown (no surface attached).')
   // the pane before any reading or turn
   const ui = await $.ui.mount(PANE)
-  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', '▸ CONTEXT', 'Not measured yet; it shows after the next turn.', 'Compact at 750k', 'Use Claude Auto Compact', ' ●    '])
+  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', '▸ CONTEXT', 'Not measured yet; it shows after the next turn.', 'Compact at 750k', 'Use Claude Auto Compact', '      '])
   await ui.unmount()
 })
 
@@ -5080,17 +5081,17 @@ test('the pane\'s auto-compact rows: the switch for Claude Code\'s own first, th
   const bd = { totalTokens: 100000, maxTokens: 1000000, percentage: 10, categories: [] }
   const keys = (m: any, surface: string) => nodes(paneView(TABLE, m, { surface })).filter(n => n.type === 'Button').map(n => n.props.key + ': ' + (n.props.label ?? [n.props.children].flat().map((c: any) => (c && c.props ? c.props.children : c)).join('')))
   // − and + first, the switch at the section's bottom (its row: the words left, the switch at the right end)
-  expect(keys(paneModel({ bd, autoCompact: 750000 }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-more: +', 'pacing-pane-autocompact-auto:  ●    ', 'pacing-pane-refresh: Refresh'])
+  expect(keys(paneModel({ bd, autoCompact: 750000 }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-more: +', 'pacing-pane-autocompact-auto:       ', 'pacing-pane-refresh: Refresh'])
   // on: the switch alone, the value and − and + hidden
-  expect(keys(paneModel({ bd, autoCompact: 'auto' }), 'desktop')).toEqual(['pacing-pane-autocompact-auto:     ● ', 'pacing-pane-refresh: Refresh'])
-  expect(keys(paneModel({ autoCompact: 1000000 }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-auto:  ●    ', 'pacing-pane-refresh: Refresh'])
-  // the switch: a Button with no label (a desktop draws a label over its children), a track of text, blue with the knob right when on, grey with it left when off; no Svg and no box laid over it
+  expect(keys(paneModel({ bd, autoCompact: 'auto' }), 'desktop')).toEqual(['pacing-pane-autocompact-auto:       ', 'pacing-pane-refresh: Refresh'])
+  expect(keys(paneModel({ autoCompact: 1000000 }), 'desktop')).toEqual(['pacing-pane-autocompact-less: −', 'pacing-pane-autocompact-auto:       ', 'pacing-pane-refresh: Refresh'])
+  // the switch: the drawn pill, blue with the knob right when on, grey with it left when off; over it a Button of blank text with no label (a desktop draws a label over its children), both clipped to the pill
   const knobOf = (m: any, surface: string) => nodes(paneView(TABLE, m, { surface })).find(n => n.props && n.props.key === 'pacing-pane-autocompact-auto')
-  const track = (m: any) => { const b = knobOf(m, 'desktop'); const t = [b.props.children].flat()[0]; return [b.props.plain, b.props.label, t.props.backgroundColor, t.props.children] }
-  expect(track(paneModel({ bd, autoCompact: 750000 }))).toEqual([true, undefined, '#4b5563', ' ●    '])
-  expect(track(paneModel({ bd, autoCompact: 'auto' }))).toEqual([true, undefined, '#3b82f6', '    ● '])
-  expect(nodes(paneView(TABLE, paneModel({ bd, autoCompact: 750000 }), { surface: 'desktop' })).some(n => n.type === 'Box' && n.props.position === 'absolute')).toBe(false)
-  expect(nodes(paneView(TABLE, paneModel({ bd, autoCompact: 750000 }), { surface: 'desktop' })).some(n => n.type === 'Svg' && String(n.props.alt).startsWith('Use Claude Auto Compact'))).toBe(false)
+  const pic = (m: any) => { const b = knobOf(m, 'desktop'); const svg = nodes(paneView(TABLE, m, { surface: 'desktop' })).find(n => n.type === 'Svg' && String(n.props.alt).startsWith('Use Claude Auto Compact')); return [b.props.plain, b.props.label, svg.props.alt, svg.props.source.includes(m.autoCompact.own ? '#3b82f6' : '#4b5563'), svg.props.source.includes(m.autoCompact.own ? 'cx="33"' : 'cx="13"')] }
+  expect(pic(paneModel({ bd, autoCompact: 750000 }))).toEqual([true, undefined, 'Use Claude Auto Compact: off', true, true])
+  expect(pic(paneModel({ bd, autoCompact: 'auto' }))).toEqual([true, undefined, 'Use Claude Auto Compact: on', true, true])
+  const over = nodes(paneView(TABLE, paneModel({ bd, autoCompact: 750000 }), { surface: 'desktop' })).find(n => n.type === 'Box' && n.props.position === 'absolute')
+  expect([over.props.width, over.props.height, over.props.overflow, nodes(over).some((n: any) => n.props && n.props.key === 'pacing-pane-autocompact-auto')]).toEqual([46, 26, 'hidden', true])
   // the switch's row spans the section: the words left, the switch right; the limit's row the same, on a line of its own
   const rowOf = (m: any, key: string) => nodes(paneView(TABLE, m, { surface: 'desktop' })).find(n => n.type === 'Box' && n.props.justifyContent === 'space-between' && nodes(n).some((c: any) => c && c.props && c.props.key === key))
   const sw = rowOf(paneModel({ bd, autoCompact: 750000 }), 'pacing-pane-autocompact-auto')

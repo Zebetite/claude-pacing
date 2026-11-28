@@ -802,9 +802,14 @@ export const paneView = (t, m, o = {}) => {
   const knob = ac && !ac.off && (o.surface === 'terminal'
     ? Button({ key: 'pacing-pane-autocompact-auto', label: ac.own ? '◉ on' : '○ off', plain: true, onPress: setTo(ac.own ? ac.back : 'auto') })
     // The desktop draws a Button's label where it has one, children or not
-    // (live, 0.9.44: the label ran past the pane and the Svg laid under it
-    // stretched the row), so the switch is a Button with no label: a track
-    // of text in blue or grey with its knob, one press anywhere on it.
+    // (live, 0.9.44: the label ran past the pane), and drops a Text's
+    // backgroundColor inside a Button (live, 0.9.45: the knob alone). So the
+    // switch is the drawn pill, with a Button of blank text and no label laid
+    // over it, both clipped to the pill: one press anywhere on it.
+    : hasSvg ? Box({ position: 'relative', width: SWITCH_W, height: SWITCH_H, flexShrink: 0, overflow: 'hidden', children: [
+      t.Svg({ source: switchSvg(ac.own), alt: AUTO_COMPACT_OWN_LABEL + (ac.own ? ': on' : ': off'), width: SWITCH_W, height: SWITCH_H }),
+      Box({ position: 'absolute', top: 0, left: 0, width: SWITCH_W, height: SWITCH_H, overflow: 'hidden', children: [
+        Button({ key: 'pacing-pane-autocompact-auto', plain: true, onPress: setTo(ac.own ? ac.back : 'auto'), children: [Text({ mono: true, children: '      ' })] })] })] })
     : Box({ flexShrink: 0, children: [Button({ key: 'pacing-pane-autocompact-auto', plain: true, onPress: setTo(ac.own ? ac.back : 'auto'),
       children: [Text({ mono: true, color: '#ffffff', backgroundColor: ac.own ? SWITCH_ON : SWITCH_OFF, children: ac.own ? SWITCH_KNOB.on : SWITCH_KNOB.off })] })] }));
   const autoCompact = !ac ? null
