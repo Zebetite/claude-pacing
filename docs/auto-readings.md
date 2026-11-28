@@ -1954,3 +1954,13 @@ Compact pressed while its `/compact` waited queued a second one. The
 press takes the claim, the pane says Compacting… from the press on, and
 `compactThenSwitch` lets it go once the compaction has ended, before the
 switch.
+
+## The switch row leads with its target (0.9.55)
+
+The row for a held Fable read "Fable 5.2's meter is over its budget line.
+Switch to Opus 5.5 medium; Fable stays for hard tasks.": Fable first and
+last, the target in the middle. The user took it for an offer of Fable
+medium, pressed Switch and was told the session runs on Opus. Both rows
+now lead with what the press does: "Switch to Opus 5.5 medium: Fable
+5.2's meter is over its budget line. Fable stays for hard tasks." and
+"Switch this session to Opus 5.5 high: Fable 5.2 is out until the reset."

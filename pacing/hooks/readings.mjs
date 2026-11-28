@@ -1809,9 +1809,11 @@ export const switchOffer = (j, curModel, curEffort, ctx = null) => {
       icon: kind === 'out' ? ICON.stop : kind === 'held' ? ICON.worse : ICON.switched, key: kind + ':' + t.model + ':' + t.effort };
   };
   if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumOut)
-    return make('out', rec, name + ' is out until the reset. Switch this session to ' + rec.label + ' ' + rec.effort + '.');
+    return make('out', rec, 'Switch this session to ' + rec.label + ' ' + rec.effort + ': ' + name + ' is out until the reset.');
   if (rec && onPrem && !sameModel(rec.model, prem) && j.premiumHeld && heldFar(j))
-    return make('held', rec, name + '\'s meter is over its budget line. Switch to ' + rec.label + ' ' + rec.effort + '; ' + name.split(' ')[0] + ' stays for hard tasks.');
+    // (the target leads, the user's word, 0.9.55: a row that began "Fable
+    // 5.2's meter…" and ended "Fable stays…" read as an offer of Fable)
+    return make('held', rec, 'Switch to ' + rec.label + ' ' + rec.effort + ': ' + name + '\'s meter is over its budget line. ' + name.split(' ')[0] + ' stays for hard tasks.');
   // Nothing else: the plugin changes models and effort by itself, through
   // the subagents it starts (the user's word: the user switches only
   // sometimes). A session on another model or effort than recommended is

@@ -361,8 +361,8 @@ The plugin moves work to subagents on the right models by itself, so you
 seldom switch anything. A row above the prompt offers a switch only when
 the session runs on Fable and Fable is out, or held 20 points or more
 over its budget line. It has **Switch** and **Not now**, in the warning
-colour, as in `🔴 Fable 5.2 is out until the reset. Switch this session
-to Opus 5.5 high.` (`⚠️` when Fable is held). A session on another
+colour, as in `🔴 Switch this session to Opus 5.5 high: Fable 5.2 is out
+until the reset.` (`⚠️` when Fable is held). A session on another
 model or effort than the reading recommends gets no row. The row goes by
 what the session's last request ran on, which the model menu can lag
 behind after a `/model`.

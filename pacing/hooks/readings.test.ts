@@ -2043,9 +2043,9 @@ const switchText = async ($: any) => {
 
 test('the switch: only for a session on the per-model meter\'s model while it is out, or held 20 points or more over its line', async () => {
   const base = { premiumModelId: 'claude-fable-5-2', premiumLabel: 'Fable 5.2', recommend: REC_OPUS_HIGH, line: 70 }
-  expect(switchOffer({ ...base, premiumOut: true }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'out', urgent: true, text: 'Fable 5.2 is out until the reset. Switch this session to Opus 5.5 high.' })
+  expect(switchOffer({ ...base, premiumOut: true }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'out', urgent: true, text: 'Switch this session to Opus 5.5 high: Fable 5.2 is out until the reset.' })
   expect(HELD_SWITCH_AT).toBe(20)
-  expect(switchOffer({ ...base, premiumHeld: true, premium: 90 }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'held', urgent: true, text: 'Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 high; Fable stays for hard tasks.' })
+  expect(switchOffer({ ...base, premiumHeld: true, premium: 90 }, 'claude-fable-5-2', 'high')).toMatchObject({ kind: 'held', urgent: true, text: 'Switch to Opus 5.5 high: Fable 5.2\'s meter is over its budget line. Fable stays for hard tasks.' })
   // held only 10 points over: the subagents take the work, no row
   expect(switchOffer({ ...base, premiumHeld: true, premium: 80 }, 'claude-fable-5-2', 'high')).toBe(null)
   // out or held, on another model: no row
@@ -2069,7 +2069,7 @@ test('Fable out: the row in the warning colour; Switch runs /model and /effort a
   await $.session.measure(measure(10))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
-  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔴 Fable 5.2 is out until the reset. Switch this session to Opus 5.5 high.')
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('🔴 Switch this session to Opus 5.5 high: Fable 5.2 is out until the reset.')
   await ui.press({ key: 'pacing-switch' })
   await clock.advance(1)
   await ui.unmount()
@@ -2088,7 +2088,7 @@ test('Switch goes by the model the offer saw: a session read that already names 
   await $.session.measure(measure(10))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
-  expect((await ui.find({ type: 'Text' }))?.text).toBe('⚠️ Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 high; Fable stays for hard tasks.')
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('⚠️ Switch to Opus 5.5 high: Fable 5.2\'s meter is over its budget line. Fable stays for hard tasks.')
   await ui.press({ key: 'pacing-switch' })
   await clock.advance(1)
   await ui.unmount()
@@ -2219,7 +2219,7 @@ test('Switch while the session is busy: the press is back at once, a toast says 
 
 test('a switch in a large session says what it costs and offers the compaction first; a small one and a model that is out do not', () => {
   const base = { premiumModelId: 'claude-fable-5-2', premiumLabel: 'Fable 5.2', prices: PRICES, premiumHeld: true, premium: 95, line: 73.3, recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } }
-  const plain = 'Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 medium; Fable stays for hard tasks.'
+  const plain = 'Switch to Opus 5.5 medium: Fable 5.2\'s meter is over its budget line. Fable stays for hard tasks.'
   expect(SWITCH_LARGE).toBe(200000)
   // 250 000 tokens at Opus 5.5's $5 a million to store: $1.25
   expect(switchOffer(base, 'claude-fable-5-2', 'high', 250000)).toMatchObject({ kind: 'held', urgent: true, compactFirst: true,
@@ -2244,7 +2244,7 @@ test('Compact, then switch: the compaction first, then /model and /effort; Switc
   await $.prompt.submit({ text: 'work on', asUser: true })
   await $.session.measure(measure(10, [], 250000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(await switchText($)).toBe('⚠️ Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 high; Fable stays for hard tasks. A switch stores this session\'s 250k tokens again: compact first.')
+  expect(await switchText($)).toBe('⚠️ Switch to Opus 5.5 high: Fable 5.2\'s meter is over its budget line. Fable stays for hard tasks. A switch stores this session\'s 250k tokens again: compact first.')
   expect(await bandKeys($)).toEqual(['pacing-compact-switch', 'pacing-switch', 'pacing-switch-not-now'])
   const ui = await $.ui.mount(BAND)
   await ui.press({ key: 'pacing-compact-switch' })
@@ -2300,7 +2300,7 @@ test('once per suggestion: Not now holds until the recommendation changes', asyn
   await $.session.measure(measure(10))
   await $.turn.complete(turn('claude-fable-5-2', 1))
   const ui = await $.ui.mount(BAND)
-  expect((await ui.find({ type: 'Text' }))?.text).toBe('⚠️ Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 medium; Fable stays for hard tasks.')
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('⚠️ Switch to Opus 5.5 medium: Fable 5.2\'s meter is over its budget line. Fable stays for hard tasks.')
   await ui.press({ key: 'pacing-switch-not-now' })
   await ui.unmount()
   await $.turn.complete(turn('claude-fable-5-2', 1))
@@ -2310,7 +2310,7 @@ test('once per suggestion: Not now holds until the recommendation changes', asyn
   await clock.advance(31 * 60000)
   await $.session.measure(measure(10))
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(await switchText($)).toBe('⚠️ Fable 5.2\'s meter is over its budget line. Switch to Opus 5.5 high; Fable stays for hard tasks.')
+  expect(await switchText($)).toBe('⚠️ Switch to Opus 5.5 high: Fable 5.2\'s meter is over its budget line. Fable stays for hard tasks.')
   expect(seen.runs).toEqual([])
 })
 
@@ -2340,7 +2340,7 @@ test('one row at a time: a model that is out before the offer to compact; a sess
   await $.prompt.submit({ text: 'work on', asUser: true })
   await $.session.measure(measure(10, [], 420000))
   await $.turn.complete(turn('claude-fable-5-2', 1))
-  expect(await switchText($)).toMatch(/^🔴 Fable 5\.2 is out until the reset/)
+  expect(await switchText($)).toMatch(/^🔴 Switch this session to .*: Fable 5\.2 is out until the reset\.$/)
   // another model recommended is no row: the offer to compact shows
   next = switchReading({ recommend: { model: 'claude-opus-5-5', label: 'Opus 5.5', effort: 'medium' } })
   await clock.advance(31 * 60000)
