@@ -1830,3 +1830,21 @@ has:
 `paneNow` hands the three beside the row's `text`, which the terminal
 still draws whole, as does a row given without them. A finished run's row
 is as it was: its words no longer change.
+
+## The pane waits for a surface (0.9.52)
+
+Seen at 0.9.51, twice in the transcript: "pacing ui.open: no-surface: no
+surface is attached ($.session.surfaces() is empty)". The pane is opened
+at a session's start, and the desktop app attaches its page after the
+start; an open with no surface attached answers `no-surface`, and the
+engine says so. Nothing was broken (the engine keeps such a pane and
+seats it when a surface attaches), but the line is noise.
+
+`openPane` now asks `$.session.surfaces()` first. With none attached it
+opens nothing and waits (`paneDue`); the `session.attach` hook opens the
+pane once a surface is listed, and so does the next prompt, should a
+surface have attached without that event. Closed by the person (`PANE_CLOSED`), it
+is opened neither at the start nor at an attach. An engine without
+`$.session.surfaces` opens at the start as before, and /pacing-pane opens
+it whenever asked. A run that never has a surface (`claude -p`, the SDK)
+never opens one, and says nothing.

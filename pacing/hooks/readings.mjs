@@ -1508,6 +1508,18 @@ async function learnSurfaces($, st) {
   st.max = lineMaxOf(list);
   return st.max !== was;
 }
+// The pane opened unasked: see "The pane opened unasked" at the
+// session.attach hook. `got` is handed the context's breakdown read on the way.
+async function openPane($, st, got) {
+  if (await $.store.get(PANE_CLOSED)) { st.paneDue = false; return; }
+  let list = null;
+  try { list = await $.session.surfaces(); } catch { list = null; }
+  if (Array.isArray(list) && !list.length) { st.paneDue = true; return; }
+  st.paneDue = false;
+  const bd = await breakdownNow($);
+  if (bd) got(bd);
+  await $.ui.open({ id: PANE_ID, title: PANE_TITLE });
+}
 // the line drawn again as it stands, by the engine's clock
 async function redrawLine($, st) {
   const line = st.lineNow(await $.clock.now());
@@ -2720,10 +2732,22 @@ export const register = on => {
     return next(e);
   });
 
-  // a surface attached or detached: the room for the line asked again
+  // The pane opened unasked, at a session's start: unless the person closed
+  // it (see PANE_CLOSED), and not while no surface is attached. An open
+  // then answers no-surface and the engine says so in the transcript
+  // ("pacing ui.open: no-surface: no surface is attached", seen twice at
+  // 0.9.51, where the app attached its page after the start), so it waits
+  // (paneDue) for the surface that attaches. An engine without
+  // $.session.surfaces opens as before.
+  // (openPane, at the top of the file; `st.paneDue`; the breakdown it read
+  // goes to the pane's context bar)
+  const paneContext = bd => { ctxNow = bd; };
+  // a surface attached or detached: the room for the line asked again, and
+  // the pane that waited for a surface opened
   on('session.attach', async ($, e, next) => {
     const r = await next(e);
     try { st.surfaces = null; if (await learnSurfaces($, st)) await redrawLine($, st); } catch { /* the next measure */ }
+    if (st.paneDue) await openPane($, st, paneContext).catch(() => { /* no pane here */ });
     return r;
   });
   on('session.detach', async ($, e, next) => {
@@ -2847,12 +2871,7 @@ export const register = on => {
     (async () => { st.quiet = true; await pollSessions($, st, await $.clock.now()); })().catch(() => { /* none known */ });
     // the pane, unless the person closed it (see PANE_CLOSED); where the
     // surface seats none, nothing is said
-    (async () => {
-      if (await $.store.get(PANE_CLOSED)) return;
-      const bd = await breakdownNow($);
-      if (bd) ctxNow = bd;
-      await $.ui.open({ id: PANE_ID, title: PANE_TITLE });
-    })().catch(() => { /* no pane here */ });
+    openPane($, st, paneContext).catch(() => { /* no pane here */ });
     // the model and effort last set in this session, should a reload have
     // started this memory over
     restoreSwitch($, ss).catch(() => { /* none kept */ });
@@ -3029,6 +3048,9 @@ export const register = on => {
     return { text: line + (rest.length ? '\n\n```\n' + rest.join('\n\n') + '\n```' : ''), isTextDisplayOnly: true };
   });
   on('prompt.submit', async ($, e, next) => {
+    // the pane that waited for a surface (openPane): asked again at a
+    // prompt, should a surface have attached without a session.attach
+    if (st.paneDue) openPane($, st, paneContext).catch(() => { /* no pane here */ });
     // a background task's notification: the task it names has ended
     try {
       const end = e.origin && e.origin.kind === 'task-notification' ? taskEnded(e.text) : null;

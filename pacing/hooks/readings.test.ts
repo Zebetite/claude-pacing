@@ -1381,6 +1381,63 @@ test('the pane opens by itself at a session\'s start; closed by the person it st
   expect(opened).toEqual([PANE_ID, PANE_ID, PANE_ID])
 })
 
+test('the pane waits for a surface: with none attached at the start nothing is opened, so no no-surface line; the surface that attaches opens it, once; closed by the person meanwhile, not at all', async ($, on) => {
+  engine(on)
+  offers(on)
+  const opened: any[] = []
+  const store = new Map<string, unknown>()
+  on('store.get', (_: unknown, e: any) => ({ value: store.get(e.key) }))
+  on('store.set', (_: unknown, e: any) => (store.set(e.key, e.value), { value: undefined }))
+  on('store.delete', (_: unknown, e: any) => (store.delete(e.key), { value: undefined }))
+  on('session.usage', () => ({ value: { startedAt: 0, context: { window: 1000000 } } }))
+  on('ui.open', (_: unknown, e: any) => (opened.push(e.id), { value: { isPlaced: true } }))
+  on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+  let surfaces: string[] = []
+  on('session.surfaces', () => ({ value: surfaces }))
+  on('session.attach', (_: unknown, e: any) => ({ ...e }))
+  const clock = mock.clock(on, { now: T0 })
+  // the app attaches its page after the start: none yet, and no open
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
+  await clock.advance(1)
+  expect(opened).toEqual([])
+  // a surface that attaches while there is still none listed: still waiting
+  await $.session.attach({ clientId: 'desktop:default' } as any)
+  expect(opened).toEqual([])
+  // attached: opened, and once
+  surfaces = ['desktop']
+  await $.session.attach({ clientId: 'desktop:default' } as any)
+  expect(opened).toEqual([PANE_ID])
+  await $.session.attach({ clientId: 'desktop:second' } as any)
+  expect(opened).toEqual([PANE_ID])
+  // a start with a surface there already opens at once, as before
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
+  await clock.advance(1)
+  expect(opened).toEqual([PANE_ID, PANE_ID])
+  // waiting, and closed by the person meanwhile: the surface that attaches opens nothing
+  surfaces = []
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
+  await clock.advance(1)
+  store.set(PANE_CLOSED, true)
+  surfaces = ['desktop']
+  await $.session.attach({ clientId: 'desktop:default' } as any)
+  expect(opened).toEqual([PANE_ID, PANE_ID])
+  // a surface there without an attach raised: the next prompt opens the pane that waited
+  store.delete(PANE_CLOSED)
+  surfaces = []
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true } as any)
+  await clock.advance(1)
+  await $.prompt.submit({ text: 'go on', asUser: true })
+  await clock.advance(1)
+  expect(opened).toEqual([PANE_ID, PANE_ID])
+  surfaces = ['desktop']
+  await $.prompt.submit({ text: 'go on', asUser: true })
+  await clock.advance(1)
+  expect(opened).toEqual([PANE_ID, PANE_ID, PANE_ID])
+  await $.prompt.submit({ text: 'go on', asUser: true })
+  await clock.advance(1)
+  expect(opened).toEqual([PANE_ID, PANE_ID, PANE_ID])
+})
+
 // Live, another plugin's session.compact hook ran first and skipped pacing's:
 // a typed /compact went unseen, and the old offer stood at the old size.
 test('a compaction pacing does not hear: the context falling by half between two measures ends the row, and the offers start over', async ($, on) => {
