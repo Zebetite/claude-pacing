@@ -5,7 +5,7 @@
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
 import { OUT_FILL, stepsSvg, stepsText, STEPS_MAX, STEPS_H, DIALS, FRAMES, frameSvg, barSvg, overShade, overText, OVER_CALM, OVER_RED, ORANGE, YELLOW, HUD, breakable, BREAK_AT, PREM_CALM, PREM_YELLOW, PREM_RED, premShade, premText, LEVEL_COLORS, barText, robotSvg, reactorSvg, rulerSvg, drawingId, builtCount, buildsDone, MEMO_MAX, phased, phaseOf, DIAL_SIZE, paneView, AUTO_COMPACT_OWN_LABEL } from './pane.mjs'
-import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_LAST, AUTO_COMPACT_OWN_NOTE, AUTO_COMPACT_OFF_TEXT, autoCompactLastOf, autoCompactOf, autoCompactFailedText, AUTO_COMPACT_BUFFER, autoCompactBuffer, autoCompactWindow, autoCompactHas, stepBarOf, modelArrow, modelIdOf, outLine, actionLine, commandWhat, noteOut, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN, OUT_MAIN, OUT_MAIN_CHARS, doneLine, finishedOut, changedLine, changedFile, runKind, runLine, noteMeaning, meaningOf } from './readings.mjs'
+import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_LAST, AUTO_COMPACT_OWN_NOTE, AUTO_COMPACT_OFF_TEXT, autoCompactLastOf, autoCompactOf, autoCompactFailedText, AUTO_COMPACT_BUFFER, autoCompactBuffer, autoCompactWindow, autoCompactHas, stepBarOf, modelArrow, modelIdOf, outLine, commandWhat, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN, OUT_MAIN, OUT_MAIN_CHARS, doneLine, finishedOut, changedLine, changedFile, runKind, runLine, noteMeaning, meaningOf } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -5275,36 +5275,14 @@ test('an agent\'s row: its model as a tag, ↑ or ↓ against the session\'s; a 
   expect(bar.props.dimColor).toBe(undefined)
 })
 
-test('an agent\'s output box: its steps\' text and its calls with how they came out, a line each, the last three; a report\'s first lines without their marks', () => {
+test('the output helpers: the first line of a text, a command without its cd and assignments, the first lines of a report without their marks, a finished row', () => {
   expect(outLine('\n  \nAll   tests pass.\nMore.')).toBe('All tests pass.')
   expect(outLine('')).toBe('')
   expect(outLine('x'.repeat(200))).toHaveLength(OUT_CHARS)
-  const ok = (text: string) => ({ result: {}, text })
-  expect(actionLine({ tool: 'Bash', command: 'npm test\nmore' }, ok('TAP\n# pass 448\n\n'))).toBe('Bash npm test → # pass 448')
-  // a runner's closing lines after the result: the result line is taken
-  expect(actionLine({ tool: 'Bash', command: 'npm test' }, ok('# tests 449\n# pass 448\n# fail 0\n# cancelled 0\n# duration_ms 32400'))).toBe('Bash npm test → # fail 0')
-  expect(actionLine({ tool: 'Bash', command: 'ls' }, ok('a.txt\nb.txt'))).toBe('Bash ls → b.txt')
-  expect(actionLine({ tool: 'Read', file_path: 'X:\\pacing\\pacing\\hooks\\pane.mjs' }, ok('a\nb\nc'))).toBe('Read pane.mjs → 3 lines')
-  expect(actionLine({ tool: 'Grep', pattern: 'paneLadder' }, ok(''))).toBe('Grep paneLadder → nothing')
-  expect(actionLine({ tool: 'Edit', file_path: '/a/readings.mjs' }, ok('done'))).toBe('Edit readings.mjs → saved')
-  expect(actionLine({ tool: 'Bash', command: 'npm test' }, { deny: 'no' })).toBe('Bash npm test → refused')
-  expect(actionLine({ tool: 'Bash', command: 'npm test' }, { result: {}, text: 'Error: boom\nat x', isError: true })).toBe('Bash npm test → failed: Error: boom')
-  expect(actionLine({ tool: 'mcp__github__get_file_contents', path: 'README.md' }, ok('x'))).toBe('get_file_contents README.md')
-  // the call that says a step: the bar shows it, no line
-  expect(actionLine({ tool: 'Bash', command: 'node "C:/x/scripts/config.mjs" part 1 3' }, ok('part 1 of 3'))).toBe('')
-  // a shell call: its description where it has one, else the command without the cd and the assignments it starts with
-  expect(actionLine({ tool: 'Bash', command: 'cd /x/pacing && node scripts/release.mjs test', description: 'Run all checks' }, ok('ok   node tests (455 pass), 63 s\nok   validation, 3 s'))).toBe('Bash Run all checks → ok validation, 3 s')
-  expect(actionLine({ tool: 'PowerShell', command: 'Get-ChildItem', description: 'List the files' }, ok('a.txt'))).toBe('PowerShell List the files → a.txt')
-  expect(actionLine({ tool: 'Bash', command: 'cd /x/pacing; F="C:/Users/a b/c.d.ts"; grep -n "x" "$F"' }, ok('3:x'))).toBe('Bash grep -n "x" "$F" → 3:x')
-  expect(actionLine({ tool: 'Bash', command: 'cd "/x/a b" && git status' }, null)).toBe('Bash git status')
   expect(commandWhat('cd /x/pacing/pacing; git diff')).toBe('git diff')
   expect(commandWhat('A=1; B=\'x y\'; cd /a && node t.js')).toBe('node t.js')
   expect(commandWhat('FOO=1 npm test')).toBe('FOO=1 npm test')
   expect(commandWhat('npm test')).toBe('npm test')
-  // the last three, one the same as the last not twice
-  let out: string[] = []
-  for (const l of ['a', 'b', 'b', 'c', 'd', '']) out = noteOut(out, l)
-  expect(out).toEqual(['b', 'c', 'd'])
   expect(OUT_LINES).toBe(3)
   expect(reportLines('## Report\n\n- First point\n- Second **bold** `code`\n1. Third\nFourth')).toEqual(['Report', 'First point', 'Second bold code'])
   expect(finishedText({ type: 'pacing:reader', description: 'read the logs' }, 'done', 185000)).toBe('reader: read the logs ✓ done · 3m')
@@ -5340,6 +5318,9 @@ test('the box\'s main tasks: the files it changes, a test, check, build or lint 
   expect(runLine({ tool: 'Bash', command: 'node scripts/release.mjs test', description: 'Run all checks' }, ok('ok   node tests (455 pass), 63 s\nfail kit tests (214 pass, 2 fail), 40 s'))).toBe('Checks failed: 2 fail')
   expect(runLine({ tool: 'Bash', command: 'npm run build' }, { result: {}, text: 'Error: boom\nat x', isError: true })).toBe('Build failed: Error: boom')
   expect(runLine({ tool: 'Bash', command: 'npm run lint' }, ok(''))).toBe('Lint: ok')
+  // output that says neither pass nor fail: finished, not a guessed ok
+  expect(runLine({ tool: 'Bash', command: 'npm test' }, ok(['Running 12 suites', 'See the report'].join(String.fromCharCode(10))))).toBe('Tests: finished')
+  expect(runLine({ tool: 'Bash', command: 'npm run build' }, ok('Build succeeded in 3s'))).toBe('Build: ok')
   expect(runLine({ tool: 'Bash', command: 'npm test' }, { deny: 'no' })).toBe('')
   expect(runLine({ tool: 'Bash', command: 'ls' }, ok('a'))).toBe('')
   // the box: the newest main task first, a kind once, no text twice, at most two

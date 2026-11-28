@@ -649,8 +649,7 @@ export const modelArrow = (m, session, prices) => {
 // main tasks alone (meaningOf, below; OUT_MAIN lines). The engine hands the
 // module, for a subagent's loop, each tool call with its result (tool.call,
 // `agentId`), and at its end the report it handed back (turn.complete's
-// `answer`); nothing is read from a transcript. outLine, actionLine and
-// noteOut (each call as a line, the last OUT_LINES) are no longer drawn.
+// `answer`); nothing is read from a transcript.
 // The pane cuts a line at its width too. OUT_SHOWN agents show the box at
 // once: the ones with the newest output.
 export const OUT_LINES = 3;
@@ -678,42 +677,11 @@ export const commandWhat = command => {
   for (let left = s.replace(LEAD, ''); left !== s; left = s.replace(LEAD, '')) s = left;
   return s;
 };
-// what a call read or ran, in a few words: a file's name; for a shell
-// command the short description its call carries ("Run all checks"), else
-// its first line (commandWhat)
-const callWhat = e => {
-  const file = e.file_path || e.notebook_path || e.path;
-  if (file) return String(file).split(/[\\/]/).pop();
-  if ((e.tool === 'Bash' || e.tool === 'PowerShell') && e.command) return outLine(e.description || commandWhat(e.command));
-  return outLine(e.command || e.pattern || e.url || e.query || e.description || '');
-};
-// One tool call and how it came out: "Bash Run the tests → 448 pass" (a
-// command's description, its last line of output), "Read pane.mjs → 737 lines", "Edit
-// pane.mjs → saved", "Grep stepBarOf → 3 lines"; refused or failed says so.
-// '' for the call that says a step (config.mjs part): the bar shows it.
 // a command's outcome: of its last lines, the last that says how it went
 // (a test runner ends on "# duration_ms …" after "# pass 448"), else its
 // last line
 const SAYS_RESULT = /\b(pass(ed)?|fail(ed|ures?)?|errors?|ok|tests?|done|warnings?)\b|✓|✗/i;
 const resultLine = lines => [...lines.slice(-12)].reverse().find(l => SAYS_RESULT.test(l) && !/duration/i.test(l)) || lines[lines.length - 1] || '';
-export const actionLine = (e, r) => {
-  if (!e || !e.tool || (e.tool === 'Bash' && PART_CALL.test(String(e.command || '')))) return '';
-  const tool = String(e.tool).startsWith('mcp__') ? String(e.tool).split('__').pop() : String(e.tool);
-  const what = callWhat(e);
-  const text = r && !r.deny ? textsOf(r).join('\n') : '';
-  const lines = text.split('\n').filter(l => l.trim());
-  const outcome = !r ? '' : r.deny ? 'refused' : r.isError ? 'failed' + (outLine(text) ? ': ' + outLine(text) : '')
-    : e.tool === 'Bash' || e.tool === 'PowerShell' ? outLine(resultLine(lines))
-    : e.tool === 'Read' || e.tool === 'Grep' || e.tool === 'Glob' ? (lines.length ? lines.length + (lines.length === 1 ? ' line' : ' lines') : 'nothing')
-    : e.tool === 'Edit' || e.tool === 'Write' || e.tool === 'NotebookEdit' ? 'saved' : '';
-  return cut(tool + (what ? ' ' + what : '') + (outcome ? ' → ' + outcome : ''), OUT_CHARS);
-};
-// the agent's box after a new line: the last OUT_LINES, one the same as the last not twice
-export const noteOut = (out, line) => {
-  const list = Array.isArray(out) ? out : [];
-  if (!line || list[list.length - 1] === line) return list;
-  return [...list, line].slice(-OUT_LINES);
-};
 // The box says only the agent's main tasks (the user's words: the main
 // point, not all detailed calls; not much text under agents, just main
 // tasks): the files it is changing ("Changing readings.mjs and pane.mjs")
@@ -775,8 +743,12 @@ export const runLine = (e, r) => {
     const detail = fail ? fail + ' fail' : outLine(resultLine(text.split('\n').filter(l => l.trim())));
     return cut(kind + ' failed' + (detail ? ': ' + detail : ''), OUT_CHARS);
   }
-  return cut(kind + ': ' + (pass !== null ? pass + ' pass' : 'ok'), OUT_CHARS);
+  // ok where the output says so (a pass count, "fail 0", ok, ✓) or is empty
+  // (a linter's success); output that says neither: "finished", no guessed ok
+  const fine = pass !== null ? pass + ' pass' : fail === 0 || !text.trim() || SAYS_OK.test(text) ? 'ok' : 'finished';
+  return cut(kind + ': ' + fine, OUT_CHARS);
 };
+const SAYS_OK = /\b(ok|success(ful)?|succeeded|passed|all good)\b|✓|✔/i;
 // the box after a new main task of `kind` ('files', 'run'): it first, the
 // other after it, none the same twice, at most OUT_MAIN
 export const noteMeaning = (list, kind, text) => {

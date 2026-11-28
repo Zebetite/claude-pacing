@@ -1668,3 +1668,19 @@ The Context section's bar measures against the model's own window again
 had it: `breakdownNow` adds the usage's `context.window` as
 `modelWindow`, and the figure reads "198k of 1M" with the auto-compact
 window set at 433k. Without it, the breakdown's window as before.
+
+## Tidy-ups (0.9.47)
+
+- **Old output helpers gone.** `actionLine`, `callWhat` and `noteOut`
+  (a line per call, the last three) were no longer drawn since the box
+  shows main tasks; they and their tests are removed. `outLine`,
+  `reportLines`, `commandWhat` and `resultLine` stay: the main tasks use
+  them.
+- **No guessed ok.** A test, check, build or lint run that did not fail
+  says ok only where its output says so (a pass count, "fail 0", ok,
+  success, ✓) or is empty, as a linter's success is; output that says
+  neither reads "Tests: finished".
+- **Zero-width breaks kept.** Long words in the pane's wrapping texts
+  carry invisible break points so they wrap; text copied from the pane
+  carries them too. Without them a long path or URL runs past the pane,
+  so they stay.
