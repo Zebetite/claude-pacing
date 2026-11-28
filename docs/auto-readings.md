@@ -1761,3 +1761,38 @@ yellow from the line itself. Now:
   gauge and level dials' marks, and Fable's loud line, its OVER tag and
   arrow (they took the shade of how far over before). Only the band behind
   the cells over Fable's line keeps that shade.
+
+## The row says Auto Compact at (0.9.50)
+
+The user's word: say "Auto Compact at x". The pane's auto-compact row reads
+"Auto Compact at 750k" (`autoCompactText`), not "Compact at 750k", so it
+says whose compaction the figure sets now that the switch for Claude
+Code's own is gone. The − and + and the dim lines for 'auto' and 'off'
+are as they were.
+
+Smaller buttons, room above Compact; "Close to budget" (also 0.9.50):
+
+- **Smaller still.** The user's word: Compact, − and + smaller, Refresh the
+  same, and room above Compact. 0.9.49's caption text in the − and + was
+  not small enough; `small()` puts a footnote-size Text (the smallest
+  there is) in a Button with no label, for Compact, Refresh, − and +, and
+  the Compact row has a line above it (`marginTop: 1`). A desktop draws
+  its native button round the text, so its padding is the app's.
+- **Close to budget.** The user's word: instead of saying over budget at
+  once, say close to budget for the first 5 points over. The pane's words
+  read "Close to budget · +3" up to 5 points over the line (were "Over the
+  budget line · +3"), "Far over the budget line · +6" past that; the
+  level 'over' (budget.mjs: over the line by up to 5) is "close to budget"
+  in the level toast's words too (`PHRASE`).
+
+The pane's context value follows the session (also 0.9.50). It showed 378k
+while Claude Code compacted at 400k (its record: 399 833 tokens), and kept the
+old size after a compaction that ran mid-turn: the bar was drawn from a full
+breakdown, taken only at a turn's end or on Refresh. Now every request's
+measure moves it (`contextAt`: the last breakdown at the measured total). A
+compaction, by Claude Code itself, a typed /compact or the pane's Compact,
+first shows the size it compacts at, with Compacting… on the button, and
+then the size after; a `precompute` (a summary made ahead, nothing
+installed) changes nothing. /pacing-status still waits for a real breakdown.
+`node scripts/pane-images.mjs --html <file> [--before <pane.mjs>]` draws the
+samples side by side to one page, to see a layout change.

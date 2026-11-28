@@ -5,6 +5,13 @@
 //
 //   node scripts/pane-images.mjs            writes docs/images/pane-*.png,
 //                                           and copies them to pacing/images
+//   node scripts/pane-images.mjs --html <file.html> [--before <pane.mjs>]
+//                                           writes the samples side by side to
+//                                           one page, to see a layout change;
+//                                           --before adds a row drawn by
+//                                           another copy of pane.mjs (one
+//                                           without imports, such as
+//                                           git show HEAD:pacing/hooks/pane.mjs)
 //   node scripts/pane-images.mjs --stress <file.png>
 //                                           writes a narrow pane (360 px) of
 //                                           agents with long texts, tags and
@@ -31,7 +38,7 @@ const el = html => ({ html });
 const kids = c => (Array.isArray(c) ? c : c == null ? [] : [c]).flat(Infinity).filter(x => x != null && x !== false).map(x => (x && typeof x === 'object' ? x.html : esc(x))).join('');
 const CELL = 8;
 const COLOR = { success: '#4ade80', warning: '#fbbf24', error: '#f87171' };
-const SIZE = { title: 28, caption: 12 };
+const SIZE = { title: 28, caption: 12, footnote: 11 };
 const WEIGHT = { medium: 500, semibold: 600, bold: 700 };
 // the element table the pane is drawn with
 const t = {
@@ -66,8 +73,11 @@ const t = {
     if (p.wrap === 'truncate-end') st.push('white-space:nowrap;overflow:hidden;text-overflow:ellipsis');
     return el('<div style="' + st.join(';') + '">' + kids(p.children) + '</div>');
   },
-  // a plain Button with children (the auto-compact switch): the children alone
-  Button: p => (p.plain && p.children ? el('<div style="display:flex;cursor:pointer">' + kids(p.children) + '</div>') : el('<div><span style="display:inline-block;padding:5px 14px;border:1px solid #4b5563;border-radius:6px;font-size:13px;color:#e5e7eb">' + esc(p.label) + '</span></div>')),
+  // a plain Button with children: the children alone; a small one (no
+  // label, a footnote Text in it): a smaller button round its text
+  Button: p => (p.plain && p.children ? el('<div style="display:flex;cursor:pointer">' + kids(p.children) + '</div>')
+    : p.label == null && p.children ? el('<div style="display:flex"><span style="display:inline-flex;padding:2px 9px;border:1px solid #4b5563;border-radius:6px;background:#2b2b2a">' + kids(p.children) + '</span></div>')
+    : el('<div><span style="display:inline-block;padding:5px 14px;border:1px solid #4b5563;border-radius:6px;font-size:13px;color:#e5e7eb">' + esc(p.label) + '</span></div>')),
   Svg: p => el('<div style="' + (p.width ? 'width:' + p.width + 'px;height:' + p.height + 'px;flex-shrink:0' : 'width:100%') + '">'
     + p.source.replace('<svg ', '<svg style="display:block;width:100%;height:auto" ') + '</div>'),
 };
@@ -129,17 +139,17 @@ const SHOTS = [
         { id: 'a2', text: 'verifier: running the test suite · 40s, about 2m left', model: 'claude-haiku-5-5', effort: 'medium', on: 'Haiku 5.5 medium', bar: { frac: 0.25 } },
       ]),
       context: { used: '96k', of: '1M', pct: 10 },
-      // the auto-compact switch, off, and the limit pacing sets
+      // the auto-compact row: the window pacing sets, with − and +
       autoCompact: paneModel({ autoCompact: 750000 }).autoCompact,
     },
   },
   {
-    // the week itself 4 over its line: time over, the words in their normal
-    // colours (up to 5 over)
+    // the week itself 4 over its line: close to budget, the words in their
+    // normal colours (up to 5 over); a large session: Compact
     name: 'pane-week-over',
     m: {
       ...base,
-      level: 'over', levelText: 'Over the budget line · +4',
+      level: 'over', levelText: 'Close to budget · +4',
       budget: { big: '1h 40m', sub: 'over today\'s budget' },
       meters: [
         { label: 'Weekly', pct: 77, line: 73.3, note: 'budget line 73%' },
@@ -153,6 +163,8 @@ const SHOTS = [
       ]),
       mix: [{ name: 'Fable 5.2 high', share: 48 }, { name: 'Opus 5.5 medium', share: 34 }, { name: 'Sonnet 5.5 medium', share: 18 }],
       context: { used: '312k', of: '1M', pct: 31 },
+      compact: 'offer',
+      autoCompact: paneModel({ autoCompact: 400000 }).autoCompact,
     },
   },
 ];
@@ -178,6 +190,24 @@ const STRESS = {
     tasks: [{ kind: 'shell', what: 'node ' + LONG, state: 'running', time: '12m' }],
   },
 };
+const htmlAt = process.argv.indexOf('--html');
+if (htmlAt >= 0) {
+  const file = process.argv[htmlAt + 1];
+  if (!file) { console.log('pane-images: --html needs a file to write'); process.exit(1); }
+  const beforeAt = process.argv.indexOf('--before');
+  const rows = [['Now', paneView]];
+  if (beforeAt >= 0) rows.unshift(['Before', (await import(pathToFileURL(path.resolve(process.argv[beforeAt + 1])).href)).paneView]);
+  const cell = (view, s) => '<div style="width:368px;padding:16px;background:#1f1f1e;border-radius:8px;flex:none">'
+    + view(t, s.m, { surface: 'desktop', placement: 'dock', onRefresh: () => {} }).html + '</div>';
+  const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pane preview</title></head>'
+    + '<body style="margin:0;padding:16px;background:#141413;color:#e5e7eb;font-family:system-ui,Segoe UI,sans-serif">'
+    + '<p style="margin:0 0 12px;color:#9ca3af;font-size:13px">Drawn by pane.mjs with sample figures; the app’s own buttons and spacing are close to this, not the same.</p>'
+    + rows.map(([name, view]) => '<h2 style="font-size:15px;margin:16px 0 8px">' + name + '</h2><div style="display:flex;gap:16px;overflow-x:auto;align-items:flex-start">'
+      + SHOTS.map(s => cell(view, s)).join('') + '</div>').join('') + '</body></html>';
+  fs.writeFileSync(file, html);
+  console.log('wrote ' + file);
+  process.exit(0);
+}
 const stressAt = process.argv.indexOf('--stress');
 const stress = stressAt >= 0 ? process.argv[stressAt + 1] : null;
 if (stressAt >= 0 && !stress) { console.log('pane-images: --stress needs a file to write'); process.exit(1); }

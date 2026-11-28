@@ -816,20 +816,25 @@ export const paneView = (t, m, o = {}) => {
   // worth cutting (m.compact) a button that compacts it. A second press
   // while one runs does nothing (o.onCompact sees to that); the terminal
   // gets the words, since /compact is typed there.
+  // A desktop Button has no size: a small one holds a footnote-size Text and
+  // no label (a desktop draws a label in place of its children). The
+  // smallest text there is (the user's word, 0.9.50: Compact, − and +
+  // smaller, Refresh the same; 0.9.49's caption was not small enough); the terminal keeps
+  // its labels.
+  const small = (key, words, onPress) => (o.surface === 'terminal'
+    ? Button({ key, label: words, variant: 'secondary', onPress })
+    : Button({ key, variant: 'secondary', onPress, children: [Text({ size: 'footnote', children: words })] }));
+  // a line of room above it (the user's word, 0.9.50)
   const compact = !m.compact ? null
     : o.surface === 'terminal' ? cap(m.compact === 'running' ? 'Compacting…' : '/compact cuts it.')
-    : row([Button({ key: 'pacing-pane-compact', label: m.compact === 'running' ? 'Compacting…' : 'Compact', variant: 'secondary', onPress: o.onCompact || (() => {}) })]);
+    : row([small('pacing-pane-compact', m.compact === 'running' ? 'Compacting…' : 'Compact', o.onCompact || (() => {}))], { marginTop: 1 });
   // The auto-compact window pacing sets: its words with − and + (a step
-  // each) at the row's right end, small (the user's word, 0.9.49: a
-  // Button has no size, so a caption Text in it, and no label, which the
-  // desktop would draw in its place). Claude Code's own auto-compact
+  // each) at the row's right end, small (`small`). Claude Code's own auto-compact
   // ('auto') or left alone ('off'): one dim line, no buttons (the switch
   // for Claude Code's own is gone, the user's word, 0.9.49).
   const ac = m.autoCompact;
   const setTo = v => () => (o.onAutoCompact ? o.onAutoCompact(v) : undefined);
-  const step = (key, sign, v) => (v == null ? null : o.surface === 'terminal'
-    ? Button({ key, label: sign, variant: 'secondary', onPress: setTo(v) })
-    : Button({ key, variant: 'secondary', onPress: setTo(v), children: [Text({ size: 'caption', children: sign })] }));
+  const step = (key, sign, v) => (v == null ? null : small(key, sign, setTo(v)));
   const autoCompact = !ac ? null
     : ac.off || ac.own ? cap(ac.text)
     : row([
@@ -876,7 +881,7 @@ export const paneView = (t, m, o = {}) => {
   if (m.notes && m.notes.length) sections.push(col(m.notes.map(n => cap(n)), { rowGap: 1 }));
 
   // `onRefresh: null` draws no button (a second drawing of the pane in one tree)
-  if (o.onRefresh !== null) sections.push(row([Button({ key: 'pacing-pane-refresh', label: 'Refresh', variant: 'secondary', onPress: o.onRefresh || (() => {}) })]));
+  if (o.onRefresh !== null) sections.push(row([small('pacing-pane-refresh', 'Refresh', o.onRefresh || (() => {}))]));
   // framed, where there are drawings: an edge above and one below
   if (hasSvg && o.frame !== false) { sections.unshift(t.Svg({ source: edgeSvg(false), alt: 'The upper edge of the pane' })); sections.push(t.Svg({ source: edgeSvg(true), alt: 'The lower edge of the pane' })); }
   return col(sections, { rowGap: 1 });

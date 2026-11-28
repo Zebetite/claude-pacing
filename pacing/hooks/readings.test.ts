@@ -5,7 +5,7 @@
 // node --test.
 import { expect, mock, test } from 'claude-code/testing'
 import { OUT_FILL, stepsSvg, stepsText, STEPS_MAX, STEPS_H, DIALS, FRAMES, frameSvg, barSvg, overShade, overText, OVER_CALM, OVER_RED, ORANGE, YELLOW, HUD, breakable, BREAK_AT, PREM_CALM, PREM_YELLOW, PREM_RED, premShade, premText, LEVEL_COLORS, barText, robotSvg, reactorSvg, rulerSvg, drawingId, builtCount, buildsDone, MEMO_MAX, phased, phaseOf, DIAL_SIZE, paneView, ACCENTS, CONTEXT_WARM, CONTEXT_KEEP, contextShade, contextWarmAt, contextTone, SUCCESS_HEX, DIM_HEX, BUDGET_LINE, OVER_KEEP, kept, sweepAt } from './pane.mjs'
-import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_OWN_TEXT, AUTO_COMPACT_OFF_TEXT, autoCompactOf, autoCompactFailedText, AUTO_COMPACT_BUFFER, autoCompactBuffer, autoCompactWindow, autoCompactHas, stepBarOf, modelArrow, modelIdOf, outLine, commandWhat, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN, OUT_MAIN, OUT_MAIN_CHARS, doneLine, finishedOut, changedLine, changedFile, runKind, runLine, noteMeaning, meaningOf } from './readings.mjs'
+import { pauseNote, pauseDue, unattended, statusText, fullText, HEAD_MAX, levelPhrase, offerText, nowText, COMPACT_INSTRUCTIONS, LINE_MAX, LINE_MAX_NARROW, lineMaxOf, READ_BACK_LAG, commandFailed, spentOf, recordArgv, MSG_MAX, TASK_MAX, agentPart, roleOf, startedText, doneText, progressText, backgroundText, estimateOf, median, keepRuns, RUNS_KEPT, stepOf, switchOffer, switchedText, countText, sessionRows, workingSessions, versionOf, reloadText, RELOADED, RELOAD_CHECK_EVERY, RELOAD_AFTER_TURN, usageOf, USAGE_TOOL, roleFor, shortModel, freshOf, freshNote, usageText, measureWhy, partOf, partText, ICON, TOAST_LONG, levelIcon, sessionStartedText, sessionDoneText, compactedText, compactFailedText, sharedOf, SHARED_EVERY, liveLeft, timeText, budgetWords, costText, SWITCH_LARGE, COMPACT_DROP, compactedBetween, contextLines, PANE_ID, PANE_CLOSED, closedByPerson, paneModel, PANE_TITLE, RUN_WAIT, COMPACT_WAIT_TEXT, COMPACT_RUN_WAIT, FAIL_SAY, failedText, staleLine, FAILED_NOTE, PRUNED, AGENT_GAP, switchWaitText, leftOf, leftText, usualText, budgetText, tokensText, spentUsd, CONFIG_FRESH, textsOf, taskStarted, taskEnded, taskRows, TASK_DONE_FOR, PANE_COMPACT_AT, FIVE_HOLD, levelToastText, levelStepText, levelToastDue, HELD_SWITCH_AT, viewDeniedText, SESSIONS_TOOL, AUTO_COMPACT_DEFAULT, AUTO_COMPACT_STEP, AUTO_COMPACT_OWN_TEXT, AUTO_COMPACT_OFF_TEXT, autoCompactOf, autoCompactFailedText, AUTO_COMPACT_BUFFER, autoCompactBuffer, autoCompactWindow, autoCompactHas, stepBarOf, modelArrow, modelIdOf, outLine, commandWhat, reportLines, finishedText, OUT_LINES, OUT_CHARS, OUT_SHOWN, OUT_MAIN, OUT_MAIN_CHARS, doneLine, finishedOut, changedLine, changedFile, runKind, runLine, noteMeaning, meaningOf, contextAt } from './readings.mjs'
 
 const RESET = '2026-11-19T12:00:00.000Z'
 const PRICES = {
@@ -158,7 +158,7 @@ test('a level that gets worse to stop is one toast with the level words; a littl
   expect(toasts).toEqual([])
   next = answer('stop', 96)
   await $.session.measure(measure(96))
-  expect(toasts).toEqual(['🔴 over budget -> stop. Wrap up: the week is nearly used.'])
+  expect(toasts).toEqual(['🔴 close to budget -> stop. Wrap up: the week is nearly used.'])
   expect(status.at(-1)).toBe('Budget: -76% · usage: Weekly 96% Fable 40%')
 })
 
@@ -1319,7 +1319,7 @@ test('a pane the engine does not place: /pacing-pane says why', async ($, on) =>
   expect((await $.command.run({ command: 'pacing-pane', args: '' } as any)).text).toBe('Pacing pane: not shown (no surface attached).')
   // the pane before any reading or turn
   const ui = await $.ui.mount(PANE)
-  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', '▸ CONTEXT', 'Not measured yet; it shows after the next turn.', 'Compact at 750k', '−', '+'])
+  expect((await ui.findAll({ type: 'Text' })).map((t: any) => t.text)).toEqual(['No reading yet in this session: /pacing usage takes one.', '▸ CONTEXT', 'Not measured yet; it shows after the next turn.', 'Auto Compact at 750k', '−', '+', 'Refresh'])
   await ui.unmount()
 })
 
@@ -1513,7 +1513,7 @@ test('an older engine without the band, the timers or compaction: the notice as 
 })
 
 test('each level in words that say which side of the budget line the week is', async () => {
-  expect(['ahead', 'on pace', 'over', 'throttle', 'stop'].map(levelPhrase)).toEqual(['under budget', 'on budget', 'over budget', 'far over budget', 'stop'])
+  expect(['ahead', 'on pace', 'over', 'throttle', 'stop'].map(levelPhrase)).toEqual(['under budget', 'on budget', 'close to budget', 'far over budget', 'stop'])
   // a level the module does not know yet is shown as it comes
   expect(levelPhrase('hold')).toBe('hold')
 })
@@ -3719,7 +3719,7 @@ test('in a session: each toast with its icon, the routine ones for the engine\'s
   expect(shown.length).toBe(before)
   next = answer('throttle', 26, { do: 'most work leaves the session\'s model' })
   await $.session.measure(measure(26))
-  expect(shown.at(-1)).toEqual({ text: '⚠️ over budget -> far over budget. Most work goes to Opus 5.5 medium subagents.', ms: 15000 })
+  expect(shown.at(-1)).toEqual({ text: '⚠️ close to budget -> far over budget. Most work goes to Opus 5.5 medium subagents.', ms: 15000 })
   next = answer('stop', 96, { do: 'wrap up, the week is nearly used' })
   await $.session.measure(measure(96))
   expect(shown.at(-1)).toEqual({ text: '🔴 far over budget -> stop. Wrap up: the week is nearly used.', ms: 15000 })
@@ -3810,19 +3810,19 @@ test('the pane says the budget as time left today, never in tokens or dollars; p
   // show there (weekLevel; without it, the week's figure against its line)
   expect(paneModel({ j: { ...base, all: 55, line: 73.3, level: 'over', weekLevel: 'ahead', levelBy: 'premium', premium: 80, premiumLabel: 'Fable 5.2' } }).levelText).toBe('Within budget')
   expect(paneModel({ j: { ...base, all: 55, line: 73.3, level: 'over', levelBy: 'premium', premium: 80, premiumLabel: 'Fable 5.2' } }).level).toBe('ok')
-  expect(paneModel({ j: { ...base, all: 76, line: 73.3, level: 'over', weekLevel: 'over' } }).levelText).toBe('Over the budget line · +3')
+  expect(paneModel({ j: { ...base, all: 76, line: 73.3, level: 'over', weekLevel: 'over' } }).levelText).toBe('Close to budget · +3')
   // the words follow the week's own points over its line, not a level a
   // trend or Fable raised (live: 23 against 20 at throttle read "far over")
   const raised = paneModel({ j: { ...base, all: 23, line: 20, level: 'throttle', weekLevel: 'throttle' } })
-  expect([raised.level, raised.levelText]).toEqual(['throttle', 'Over the budget line · +3'])
+  expect([raised.level, raised.levelText]).toEqual(['throttle', 'Close to budget · +3'])
   expect(paneModel({ j: { ...base, all: 28, line: 20, level: 'throttle', weekLevel: 'throttle' } }).levelText).toBe('Far over the budget line · +8')
-  expect(paneModel({ j: { ...base, all: 25.4, line: 20, level: 'throttle', weekLevel: 'throttle' } }).levelText).toBe('Over the budget line · +5')
-  expect(paneModel({ j: { ...base, all: 20.2, line: 20, level: 'over', weekLevel: 'over' } }).levelText).toBe('Over the budget line · +1')
+  expect(paneModel({ j: { ...base, all: 25.4, line: 20, level: 'throttle', weekLevel: 'throttle' } }).levelText).toBe('Close to budget · +5')
+  expect(paneModel({ j: { ...base, all: 20.2, line: 20, level: 'over', weekLevel: 'over' } }).levelText).toBe('Close to budget · +1')
   expect(paneModel({ j: { ...base, all: 20, line: 20, level: 'over', weekLevel: 'over' } }).levelText).toBe('Within budget')
   expect(paneModel({ j: { ...base, all: 18, line: 20, level: 'throttle', weekLevel: 'throttle' } }).levelText).toBe('Within budget')
   expect(paneModel({ j: { ...base, all: 96, line: 80, level: 'stop', weekLevel: 'stop' } }).levelText).toBe('The week is nearly used')
   // drawn beside the dial, on the way from green to yellow (yellow at 5 over)
-  const dot = nodes(paneView(TABLE, raised, { surface: 'desktop' })).find(n => n.type === 'Text' && n.props.children === '● Over the budget line · +3')
+  const dot = nodes(paneView(TABLE, raised, { surface: 'desktop' })).find(n => n.type === 'Text' && n.props.children === '● Close to budget · +3')
   expect(['success', YELLOW]).not.toContain(dot.props.color)
   // the model held by its own meter: the week's words stay; its meter has its
   // line, drawn loud, and says by how much it is over
@@ -4493,7 +4493,8 @@ const taskTexts = async ($: any, surface = 'desktop') => {
   const texts = (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
   await ui.unmount()
   const at = texts.indexOf('▸ BACKGROUND TASKS')
-  return at < 0 ? null : texts.slice(at + 1)
+  // (the Refresh button's text, the pane's last row, is not a task)
+  return at < 0 ? null : texts.slice(at + 1).filter((t: any) => t !== 'Refresh')
 }
 
 test('background tasks at the foot of the pane: the kind, what it is and how long it has run; a finished one its minute with how it ended, then gone; no toasts', async ($, on) => {
@@ -4869,7 +4870,7 @@ test('the pane\'s texts by points over: the week 3 over and Fable 4 over on the 
   expect(colorOf(on, 'Within budget')).toBe('success')
   // a little over: the week's words 3/5 of the way from green to yellow; Fable's 4/20 from dim, not bold
   const little = { ...base, all: 63, level: 'over', weekLevel: 'over', premium: 64 }
-  expect(colorOf(little, 'Over the budget line')).toBe(overText(3, SUCCESS_HEX))
+  expect(colorOf(little, 'Close to budget')).toBe(overText(3, SUCCESS_HEX))
   const note = find(little, 'points over its budget line')
   expect([note.props.color, note.props.weight, String(note.props.children).startsWith('▲')]).toEqual([premText(4, DIM_HEX), undefined, false])
   // over by 10: the week's words orange toward red; Fable's on its own scale, half way to yellow
@@ -4989,7 +4990,7 @@ test('a change of level is a short toast: the change and one step, never the who
   const j = { level: 'throttle', levelBy: 'premium', premiumLabel: 'Fable 5.2', premiumHeld: true, recommend: { label: 'Opus 5.5', effort: 'high' },
     do: 'Fable 5.2\'s meter is at throttle: this session belongs on Opus 5.5 high now, and Fable 5.2 is kept for judgment work; the Switch row offers it. no manual change now: the session dispatches everything to Opus 5.5 medium subagents and does itself only what they would get wrong.' }
   const text = levelToastText(was, j)
-  expect(text.endsWith('over budget -> far over budget (Fable\'s meter). Fable 5.2 is kept for hard tasks; the Switch row offers Opus 5.5 high.')).toBe(true)
+  expect(text.endsWith('close to budget -> far over budget (Fable\'s meter). Fable 5.2 is kept for hard tasks; the Switch row offers Opus 5.5 high.')).toBe(true)
   expect(text.length).toBeLessThan(130)
   expect(levelStepText({ level: 'throttle', tierNames: { 2: 'Opus 5.5 medium' } })).toBe('Most work goes to Opus 5.5 medium subagents.')
   expect(levelStepText({ level: 'stop', do: 'the week is nearly used; from 100 % the work is charged to extra usage, so go on only with the user\'s word' })).toBe('The week is nearly used; past 100% it is charged to extra usage.')
@@ -5172,11 +5173,11 @@ test('the pane\'s auto-compact row: its words with small − and + by 50k; none 
   expect(AUTO_COMPACT_OWN_TEXT).toBe('Auto-compact: Claude Code\'s own (/pacing autocompact 750k sets pacing\'s window again)')
   expect(paneModel({ autoCompact: 'off' }).autoCompact).toEqual({ text: AUTO_COMPACT_OFF_TEXT, off: true })
   expect(paneModel({ autoCompact: 'auto' }).autoCompact).toEqual({ text: AUTO_COMPACT_OWN_TEXT, own: true })
-  expect(paneModel({ autoCompact: 750000 }).autoCompact).toEqual({ text: 'Compact at 750k', own: false, less: 700000, more: 800000 })
-  expect(paneModel({ autoCompact: 100000 }).autoCompact).toEqual({ text: 'Compact at 100k', own: false, less: null, more: 150000 })
-  expect(paneModel({ autoCompact: 1000000 }).autoCompact).toEqual({ text: 'Compact at 1M', own: false, less: 950000, more: null })
+  expect(paneModel({ autoCompact: 750000 }).autoCompact).toEqual({ text: 'Auto Compact at 750k', own: false, less: 700000, more: 800000 })
+  expect(paneModel({ autoCompact: 100000 }).autoCompact).toEqual({ text: 'Auto Compact at 100k', own: false, less: null, more: 150000 })
+  expect(paneModel({ autoCompact: 1000000 }).autoCompact).toEqual({ text: 'Auto Compact at 1M', own: false, less: 950000, more: null })
   // off the 50k grid: the next step on it
-  expect(paneModel({ autoCompact: 120000 }).autoCompact).toEqual({ text: 'Compact at 120k', own: false, less: 100000, more: 150000 })
+  expect(paneModel({ autoCompact: 120000 }).autoCompact).toEqual({ text: 'Auto Compact at 120k', own: false, less: 100000, more: 150000 })
   const bd = { totalTokens: 100000, maxTokens: 1000000, percentage: 10, categories: [] }
   const view = (m: any, surface: string, extra: any = {}) => nodes(paneView(TABLE, m, { surface, ...extra }))
   const keys = (m: any, surface: string) => view(m, surface).filter(n => n.type === 'Button').map(n => n.props.key + ': ' + (n.props.label ?? [n.props.children].flat().map((c: any) => (c && c.props ? c.props.children : c)).join('')))
@@ -5194,13 +5195,23 @@ test('the pane\'s auto-compact row: its words with small − and + by 50k; none 
       expect(view(paneModel({ bd, autoCompact: ac }), surface).filter(n => n.type === 'Text' && String(n.props.children).includes('Auto-compact')).map(n => [n.props.children, n.props.dimColor, n.props.size])).toEqual([[text, true, 'caption']])
     }
   }
-  // small on the desktop: no label (a desktop draws a label in place of its children), a caption Text in it; the terminal keeps its label
+  // small on the desktop: no label (a desktop draws a label in place of its children), a footnote Text in it (the smallest); the terminal keeps its label
   const sign = (surface: string) => view(paneModel({ bd, autoCompact: 750000 }), surface).find(n => n.props && n.props.key === 'pacing-pane-autocompact-less')
   const d = sign('desktop')
-  expect([d.props.label, d.props.variant, d.props.children[0].props.size, d.props.children[0].props.children]).toEqual([undefined, 'secondary', 'caption', '−'])
+  expect([d.props.label, d.props.variant, d.props.children[0].props.size, d.props.children[0].props.children]).toEqual([undefined, 'secondary', 'footnote', '−'])
   expect(sign('terminal').props.label).toBe('−')
+  // Compact and Refresh the same small size (0.9.50), Compact with a line of room above it
+  const big = { totalTokens: 400000, maxTokens: 1000000, rawMaxTokens: 1000000, percentage: 40, categories: [], modelWindow: 1000000 }
+  const desk = view(paneModel({ bd: big, tokens: 400000, autoCompact: 750000 }), 'desktop', { onRefresh: () => {} })
+  for (const key of ['pacing-pane-compact', 'pacing-pane-refresh']) {
+    const b = desk.find(n => n.props && n.props.key === key)
+    expect([key, b.props.label, b.props.children[0].props.size]).toEqual([key, undefined, 'footnote'])
+  }
+  expect(desk.find(n => n.type === 'Box' && [n.props.children].flat().some((c: any) => c && c.props && c.props.key === 'pacing-pane-compact')).props.marginTop).toBe(1)
+  const term = view(paneModel({ bd: big, tokens: 400000, autoCompact: 750000 }), 'terminal', { onRefresh: () => {} })
+  expect(term.find(n => n.props && n.props.key === 'pacing-pane-refresh').props.label).toBe('Refresh')
   // one row: the words left, − and + at its right end
-  const rowOf = view(paneModel({ bd, autoCompact: 750000 }), 'desktop').find(n => n.type === 'Box' && n.props.justifyContent === 'space-between' && [n.props.children].flat().some((c: any) => c && c.props && c.props.children === 'Compact at 750k'))
+  const rowOf = view(paneModel({ bd, autoCompact: 750000 }), 'desktop').find(n => n.type === 'Box' && n.props.justifyContent === 'space-between' && [n.props.children].flat().some((c: any) => c && c.props && c.props.children === 'Auto Compact at 750k'))
   expect(nodes(rowOf).filter((n: any) => n.type === 'Button').length).toBe(2)
   // a press gives the step's value
   const pressOf = (key: string, surface = 'desktop') => { const got: any[] = []; view(paneModel({ bd, autoCompact: 750000 }), surface, { onAutoCompact: (v: any) => got.push(v) }).find(n => n.props && n.props.key === key).props.onPress(); return got }
@@ -5224,7 +5235,7 @@ test('a press on − or + in the pane: config.mjs stores it, then /autocompact r
   expect(seen.runs).toEqual([])
   const texts = async (ui: any) => (await ui.findAll({ type: 'Text' })).map((t: any) => t.text)
   let ui = await $.ui.mount(PANE)
-  expect(await texts(ui)).toContain('Compact at 750k')
+  expect(await texts(ui)).toContain('Auto Compact at 750k')
   await ui.press({ key: 'pacing-pane-autocompact-less' })
   await clock.settle()
   await ui.unmount()
@@ -5233,7 +5244,7 @@ test('a press on − or + in the pane: config.mjs stores it, then /autocompact r
   expect(stored[0][1].endsWith('/skills/pacing/scripts/config.mjs')).toBe(true)
   expect(seen.runs).toEqual(['/autocompact 733000'])
   ui = await $.ui.mount(PANE)
-  expect(await texts(ui)).toContain('Compact at 700k')
+  expect(await texts(ui)).toContain('Auto Compact at 700k')
   await ui.press({ key: 'pacing-pane-autocompact-more' })
   await clock.settle()
   await ui.unmount()
@@ -5584,4 +5595,107 @@ test('an agent\'s box in the pane from what the engine hands the module: the fil
   texts = await paneTexts()
   expect(texts.some((s: string) => s.startsWith('reader: read the logs'))).toBe(false)
   expect(texts).not.toContain('Done: Logs read')
+})
+
+// ---- the context bar between turns (0.9.50) ----
+
+test('contextAt: a breakdown moved to a measure\'s size, its categories kept; with none yet, one of the total alone', () => {
+  const bd = { ...BREAKDOWN, rawMaxTokens: 433000, maxTokens: 433000, modelWindow: 1000000 }
+  const at = contextAt(bd, 400000, 1000000)
+  expect([at.totalTokens, at.percentage, at.rawMaxTokens, at.categories]).toEqual([400000, 92, 433000, bd.categories])
+  expect(paneModel({ bd: at }).context).toEqual({ used: '400k', of: '1M', tokens: 400000, max: 1000000, pct: 40 })
+  expect(paneModel({ bd: contextAt(null, 23000, 1000000) }).context).toEqual({ used: '23k', of: '1M', tokens: 23000, max: 1000000, pct: 2 })
+  // no size: what was there
+  expect(contextAt(bd, undefined as any)).toBe(bd)
+  expect(contextAt(null, null as any)).toBe(null)
+})
+
+test('the pane\'s context bar follows each request, not only a turn\'s end; an auto-compact shows the size it compacts at with Compacting…, then the size after; a precompute changes nothing', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  let live = 378000
+  const bdOf = (n: number) => ({ ...BREAKDOWN, totalTokens: n, rawMaxTokens: 433000, maxTokens: 433000, autocompactSource: 'settings', percentage: Math.round(n / 4330) })
+  on('session.usage', (_: unknown, e: any) => ({ value: { startedAt: 0, context: { tokens: live, window: 1000000, percent: Math.round(live / 10000), ...(e && e.breakdown ? { breakdown: bdOf(live) } : {}) }, rateLimits: [] } }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  on('fs.read', () => ({ value: '{}' }))
+  let release = () => {}
+  const held = new Promise<void>(r => { release = r })
+  const triggers: string[] = []
+  on('session.compact', async (_: unknown, e: any) => {
+    triggers.push(e.trigger)
+    if (e.trigger === 'precompute') return { messages: [{ role: 'assistant', text: 'kept for later', toolUses: [] }] }
+    await held
+    live = 23000
+    return { messages: [{ role: 'assistant', text: 'the summary', toolUses: [] }], tokensBefore: 400000, tokensAfter: 23000 }
+  })
+  const shown = async () => {
+    const ui = await $.ui.mount(PANE)
+    const used = (await ui.findAll({ type: 'Text' })).map((x: any) => String(x.text)).find((x: string) => / of 1M$/.test(x))
+    const b = await compactButton(ui)
+    await ui.unmount()
+    return [used, b ? (b.label ?? b.props?.label) : null]
+  }
+  await $.session.measure(measure(10, [], 378000))
+  await clock.settle()
+  expect(await shown()).toEqual(['378k of 1M', 'Compact'])
+  // a request later in the same turn: the bar moves with it
+  live = 395000
+  await $.session.measure(measure(10, [], 395000))
+  expect(await shown()).toEqual(['395k of 1M', 'Compact'])
+  // a precompute installs nothing
+  await $.session.compact({ trigger: 'precompute', messages: [{ role: 'user', text: 'work', toolUses: [] }] } as any)
+  expect(await shown()).toEqual(['395k of 1M', 'Compact'])
+  // Claude Code compacts at 400k: that size first, Compacting… while it runs
+  live = 400000
+  const run = $.session.compact({ trigger: 'auto', messages: [{ role: 'user', text: 'work', toolUses: [] }] } as any)
+  await clock.advance(1)
+  expect(await shown()).toEqual(['400k of 1M', 'Compacting…'])
+  release()
+  await run
+  await clock.settle()
+  // then the size after it, no Compact offer
+  expect(await shown()).toEqual(['23k of 1M', null])
+  expect(triggers).toEqual(['precompute', 'auto'])
+})
+
+test('a press on the pane\'s Compact: the size it compacts at with Compacting…, then the size after, never a blank bar', async ($, on) => {
+  engine(on)
+  big(on)
+  const clock = mock.clock(on, { now: T0 })
+  let live = 380000
+  on('session.usage', (_: unknown, e: any) => ({ value: { startedAt: 0, context: { tokens: live, window: 1000000, percent: Math.round(live / 10000), ...(e && e.breakdown ? { breakdown: { ...BREAKDOWN, totalTokens: live, percentage: Math.round(live / 10000) } } : {}) }, rateLimits: [] } }))
+  on('ui.invalidate', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('env.get', (_: unknown, e: any) => ({ value: e.name === 'USERPROFILE' ? '/home/test' : undefined }))
+  on('fs.read', () => ({ value: '{}' }))
+  let release = () => {}
+  const held = new Promise<void>(r => { release = r })
+  on('session.compact', async () => {
+    await held
+    live = 41000
+    return { messages: [{ role: 'assistant', text: 'the summary', toolUses: [] }], tokensBefore: 386000, tokensAfter: 41000 }
+  })
+  const shown = async () => {
+    const ui = await $.ui.mount(PANE)
+    const used = (await ui.findAll({ type: 'Text' })).map((x: any) => String(x.text)).find((x: string) => / of 1M$/.test(x))
+    const b = await compactButton(ui)
+    await ui.unmount()
+    return [used, b ? (b.label ?? b.props?.label) : null]
+  }
+  await $.session.measure(measure(10, [], 380000))
+  await clock.settle()
+  expect(await shown()).toEqual(['380k of 1M', 'Compact'])
+  // grown a little since the last measure: the press shows where it compacts
+  live = 386000
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'pacing-pane-compact' })
+  await ui.unmount()
+  await clock.advance(1)
+  expect(await shown()).toEqual(['386k of 1M', 'Compacting…'])
+  release()
+  await clock.advance(1)
+  await clock.settle()
+  expect(await shown()).toEqual(['41k of 1M', null])
 })

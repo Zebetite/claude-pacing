@@ -450,6 +450,22 @@ async function breakdownNow($) {
     return bd && u.context.window > 0 ? { ...bd, modelWindow: u.context.window } : bd;
   } catch { return null; }
 }
+// The breakdown `bd` moved to a measure's size (`tokens`, `window`: the
+// session.measure's context), so the pane's bar follows every request, not
+// only a turn's end (the user's word, 0.9.50: it showed 378k while Claude
+// Code compacted at 400k, and the old size after a compaction mid-turn).
+// The categories stay the last breakdown's; the bar reads the total alone.
+// No breakdown yet: one of the total alone (`measured`: /pacing-status
+// waits for a real breakdown). Null where nothing is known.
+export const contextAt = (bd, tokens, window = 0) => {
+  if (!(typeof tokens === 'number' && tokens >= 0)) return bd || null;
+  const base = bd || { categories: [], measured: true };
+  const modelWindow = window > 0 ? window : base.modelWindow || 0;
+  const max = base.rawMaxTokens || base.maxTokens || modelWindow;
+  return { ...base, totalTokens: tokens, ...(modelWindow ? { modelWindow } : {}),
+    ...(max ? { percentage: Math.round(tokens / max * 100) } : {}),
+    ...(!bd && modelWindow ? { rawMaxTokens: modelWindow, maxTokens: modelWindow } : {}) };
+};
 
 // ---- Claude Code's auto-compact window ----
 // Claude Code compacts a session by itself as it nears its auto-compact
@@ -500,7 +516,7 @@ export const autoCompactHas = (bd, want, window = null) => {
   return source === 'settings' && bd.rawMaxTokens === (window > 0 ? Math.min(set, window) : set);
 };
 // the pane's words for the setting
-export const autoCompactText = v => (v === 'auto' ? 'Auto-compact: Claude Code\'s default' : 'Compact at ' + kText(v));
+export const autoCompactText = v => (v === 'auto' ? 'Auto-compact: Claude Code\'s default' : 'Auto Compact at ' + kText(v));
 // `arg`: what /autocompact was given (the window, a buffer above `want`)
 export const autoCompactFailedText = (want, why, arg = want) => {
   const w = String(why || '').replace(/\s+/g, ' ').trim();
@@ -805,8 +821,8 @@ export const paneModel = ({ j = null, mix = [], running = [], bd = null, now = D
     const over = typeof j.all === 'number' && typeof j.line === 'number' ? j.all - j.line : null;
     const by = over !== null && over > 0 ? Math.max(1, Math.round(over)) : 0;
     m.levelText = m.level === 'stop' ? 'The week is nearly used'
-      : over === null ? { ok: 'Within budget', over: 'Over the budget line', throttle: 'Far over the budget line' }[m.level]
-      : !by ? 'Within budget' : (by > 5 ? 'Far over the budget line' : 'Over the budget line') + ' · +' + by;
+      : over === null ? { ok: 'Within budget', over: 'Close to budget', throttle: 'Far over the budget line' }[m.level]
+      : !by ? 'Within budget' : (by > 5 ? 'Far over the budget line' : 'Close to budget') + ' · +' + by;
     const h = hoursLeft(j);
     const points = j.left && typeof j.left.points === 'number' ? j.left.points : typeof j.line === 'number' && typeof j.all === 'number' ? j.line - j.all : null;
     if (h !== null) {
@@ -1016,7 +1032,7 @@ export const fullReadingAsk = j => (j && j.needFull
 export const HEAD_MAX = 33;
 // The levels in words that say which side of the budget line the week is:
 // "ahead" read as spending ahead of the budget, the opposite of its meaning.
-const PHRASE = { 'ahead': 'under budget', 'on pace': 'on budget', 'over': 'over budget', 'throttle': 'far over budget', 'stop': 'stop' };
+const PHRASE = { 'ahead': 'under budget', 'on pace': 'on budget', 'over': 'close to budget', 'throttle': 'far over budget', 'stop': 'stop' };
 export const levelPhrase = level => PHRASE[level] || level || '';
 // What is left under today's budget line, wherever it shows: in tokens, by
 // the tokens per point of the weekly meter budget.mjs learned from what the
@@ -2158,8 +2174,11 @@ async function openAgent($, id) {
 // each button a one-line closure over its own `$` that calls one of these.
 // `pr` is what a press reads and writes of the copy's memory (see
 // register): the model and effort last set and run on (ss, here), what
-// calls off the toast of a queued /compact (waited), forget() and
-// setContext(tokens) after a compaction.
+// calls off the toast of a queued /compact (waited), and compacted(tokens)
+// after a compaction: the offers start over, and the pane's context keeps
+// the size the session.compact hook set (the user's word, 0.9.50: the value
+// before and after a compaction, by the engine or by a press), at
+// `tokens` where known.
 
 // A toast when a queued command has not run after `wait`: the session is
 // busy, and the command runs when it is free. Answers what calls it off.
@@ -2204,13 +2223,12 @@ async function compactNow($, pr, shown) {
   try {
     let r;
     try { r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS }); } catch (err) {
-      if (await compactTyped($, pr, err)) { $.ui.toast(ICON.compacted + ' compacted.'); pr.forget(); }
+      if (await compactTyped($, pr, err)) { $.ui.toast(ICON.compacted + ' compacted.'); pr.compacted(null); }
       return;
     }
     if (r && r.skip) { $.ui.toast(ICON.failed + ' the compaction did not run: ' + r.skip, { timeoutMs: TOAST_LONG }); return; }
     $.ui.toast(compactedText((r && r.tokensBefore) || shown.tokens, r && r.tokensAfter));
-    pr.forget();
-    pr.setContext((r && r.tokensAfter) || null);
+    pr.compacted((r && r.tokensAfter) || null);
   } finally { pr.compacting = false; redraw($); }
 }
 // Switch, to the offer `target`: /model, then /effort, and the toast
@@ -2274,11 +2292,11 @@ async function compactThenSwitch($, pr, target) {
   try {
     const r = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS });
     if (r && r.skip) throw new Error(r.skip);
-    pr.setContext((r && r.tokensAfter) || null);
+    pr.compacted((r && r.tokensAfter) || null);
   } catch (err) {
     if (!(await compactTyped($, pr, err))) return;
+    pr.compacted(null);
   }
-  pr.forget();
   await runSwitch($, pr, target);
 }
 
@@ -2303,7 +2321,7 @@ export const register = on => {
   // where the engine gave one, else the last
   const ctxText = bd => {
     if (bd) ctxNow = bd;
-    const l = contextLines(bd || ctxNow);
+    const l = contextLines(bd || (ctxNow && !ctxNow.measured ? ctxNow : null));
     return l.length ? '\n' + l.join('\n') : '';
   };
   // (the session's dollars priced again at the reading's prices first: turns
@@ -2368,11 +2386,15 @@ export const register = on => {
   // the last breakdown of the context (see "what fills the session's context")
   let ctxNow = null;
   const forget = () => { offer = null; offered = {}; ctxNow = null; };
+  // a compaction (the engine's, a typed /compact or the pane's) under way:
+  // the pane's Compact reads Compacting…
+  let compactingNow = false;
   // what a press's work reads and writes (see "what the band's buttons do");
   // `waited` calls off the toast that a queued /compact waits, set while one
   // is queued; `compacting`: a compaction the band's or the pane's button
   // asked for is under way (claimCompact; compactNow clears it)
-  const pr = { ss, here, waited: null, compacting: false, forget, setContext: v => { contextTokens = v; } };
+  const pr = { ss, here, waited: null, compacting: false,
+    compacted: v => { offer = null; offered = {}; if (typeof v === 'number') { contextTokens = v; ctxNow = contextAt(ctxNow, v); } } };
   // Claude Code's auto-compact window (see "Claude Code's auto-compact
   // window"): what its check and the pane's presses read and write
   const ac = { on: false, due: false, model: null, want: null, told: false, busy: false, pressing: false };
@@ -2628,10 +2650,28 @@ export const register = on => {
   on('session.compact', async ($, e, next) => {
     // the session's compaction starts: a queued /compact waits no more
     if (!e.agentId && pr.waited) { pr.waited(); pr.waited = null; }
-    const r = await next(e);
-    if (!e.agentId && r && r.messages) {
+    // (a precompute installs nothing: the conversation is as it was)
+    const main = !e.agentId && e.trigger !== 'precompute';
+    // The pane first shows the size it compacts at, with Compacting… (the
+    // user's word, 0.9.50: "update the context value first to show 400k"),
+    // then the size after it.
+    if (main) {
+      compactingNow = true;
+      try {
+        const u = await $.session.usage();
+        const c = u && u.context;
+        if (c && typeof c.tokens === 'number') ctxNow = contextAt(ctxNow, c.tokens, c.window);
+      } catch { /* the last figure */ }
+      redraw($);
+    }
+    let r;
+    try { r = await next(e); } finally { if (main) { compactingNow = false; redraw($); } }
+    if (main && r && r.messages) {
       forget();
       contextTokens = r.tokensAfter || null;
+      // the pane's bar at the new size at once, not at the turn's end
+      try { const bd = await breakdownNow($); if (bd) ctxNow = bd; } catch { /* the next measure */ }
+      if (!ctxNow && contextTokens !== null) ctxNow = contextAt(null, contextTokens);
       try {
         const live = await liveAgents($);
         // (side sessions are not in the engine's list: they stay, or the
@@ -2865,7 +2905,7 @@ export const register = on => {
         text: finishedText(f.a, f.state, f.endedAt - f.a.startedAt),
         model: f.a.model || null, effort: f.a.effort || null, on: runOn(f.a), bar: null, out: f.out, outAt: f.endedAt }))],
       bd: ctxNow, now, busy: rd.running || loading, failing: readingsFail(rd.health),
-      tasks: taskRows(tasks.values(), now), tokens: contextTokens, compacting: pr.compacting, autoCompact, session,
+      tasks: taskRows(tasks.values(), now), tokens: contextTokens, compacting: pr.compacting || compactingNow, autoCompact, session,
     });
   };
   // a person's close keeps it closed in later sessions; a plugin's own, or an
@@ -3219,16 +3259,22 @@ export const register = on => {
     if (e.context && typeof e.context.tokens === 'number') {
       const before = contextTokens;
       contextTokens = e.context.tokens;
+      // the pane's bar follows each request (contextAt); a redraw where its
+      // figure (whole thousands) moved. (After forget() below, ctxNow is
+      // this measure's total alone until the turn's end takes a breakdown.)
+      const shown = ctxNow ? Math.round(ctxNow.totalTokens / 1000) : null;
       // the offers start over, as at a compaction pacing heard (a measure
       // is the session's own: its input names no agent)
-      if (compactedBetween(before, contextTokens)) {
+      const compacted = compactedBetween(before, contextTokens);
+      if (compacted) {
         forget();
         clearTimers();
         // a switch that said "compact first" is offered again at the turn's
         // end, at the new size
         if (sw && sw.compactFirst) { switchSeen.delete(sw.key); sw = null; }
-        redraw($);
       }
+      ctxNow = contextAt(ctxNow, contextTokens, e.context.window);
+      if (compacted || shown !== Math.round(contextTokens / 1000)) redraw($);
     }
     const limits = e.rateLimits || [];
     const week = limits.find(r => r.kind === 'seven_day');
